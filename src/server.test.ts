@@ -2,11 +2,11 @@ import { captureWithFingerprint } from '@fohte/service-kit/observability'
 import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createApp, WebhookDispatchError } from '@/server'
-import { requestJson, requestText } from '@/server-test-support'
-import type { SlackNotifier } from '@/slack'
-import { SlackApiError } from '@/slack'
-import type { DispatchOutcome, WebhookSource } from '@/webhook-source'
+import { createApp, WebhookDispatchError } from '#server'
+import { requestJson, requestText } from '#server-test-support'
+import type { SlackNotifier } from '#slack'
+import { SlackApiError } from '#slack'
+import type { DispatchOutcome, WebhookSource } from '#webhook-source'
 
 vi.mock('@fohte/service-kit/observability', () => ({
   captureWithFingerprint: vi.fn(),

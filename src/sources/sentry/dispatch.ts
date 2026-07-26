@@ -1,13 +1,13 @@
 import { okAsync, type ResultAsync } from 'neverthrow'
 
-import { logger } from '@/logger'
-import type { SlackApiError, SlackNotifier } from '@/slack'
-import type { SentryIssueAlertEvent } from '@/sources/sentry/handlers/issue-alert'
+import { logger } from '#logger'
+import type { SlackApiError, SlackNotifier } from '#slack'
+import type { SentryIssueAlertEvent } from '#sources/sentry/handlers/issue-alert'
 import {
   buildIssueAlertNotification,
   extractIssueAlertInput,
-} from '@/sources/sentry/handlers/issue-alert'
-import type { DispatchOutcome } from '@/webhook-source'
+} from '#sources/sentry/handlers/issue-alert'
+import type { DispatchOutcome } from '#webhook-source'
 
 export interface DispatchContext {
   deliveryId: string

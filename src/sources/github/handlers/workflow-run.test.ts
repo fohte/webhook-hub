@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { WorkflowRunInput } from '@/sources/github/handlers/workflow-run'
-import { buildWorkflowRunNotification } from '@/sources/github/handlers/workflow-run'
+import type { WorkflowRunInput } from '#sources/github/handlers/workflow-run'
+import { buildWorkflowRunNotification } from '#sources/github/handlers/workflow-run'
 
 const baseInput = (
   overrides: Partial<WorkflowRunInput> = {},

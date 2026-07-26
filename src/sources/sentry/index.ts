@@ -1,9 +1,9 @@
-import { dispatch } from '@/sources/sentry/dispatch'
+import { dispatch } from '#sources/sentry/dispatch'
 import {
   extractSentryContext,
   verifySentrySignature,
-} from '@/sources/sentry/verify'
-import type { WebhookSource } from '@/webhook-source'
+} from '#sources/sentry/verify'
+import type { WebhookSource } from '#webhook-source'
 
 export const createSentrySource = (webhookSecret: string): WebhookSource => ({
   name: 'sentry',

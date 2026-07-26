@@ -1,9 +1,9 @@
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { SlackApiError } from '@/slack'
-import { dispatch } from '@/sources/github/dispatch'
-import type { DispatchOutcome } from '@/webhook-source'
+import { SlackApiError } from '#slack'
+import { dispatch } from '#sources/github/dispatch'
+import type { DispatchOutcome } from '#webhook-source'
 
 const createNotifier = () => ({
   postMessage: vi.fn().mockReturnValue(okAsync({ channel: 'C1', ts: '1' })),

@@ -2,9 +2,9 @@ import { captureWithFingerprint } from '@fohte/service-kit/observability'
 import { Hono } from 'hono'
 import { Result } from 'neverthrow'
 
-import { logger } from '@/logger'
-import type { SlackNotifier } from '@/slack'
-import type { WebhookHeaders, WebhookSourceRegistry } from '@/webhook-source'
+import { logger } from '#logger'
+import type { SlackNotifier } from '#slack'
+import type { WebhookHeaders, WebhookSourceRegistry } from '#webhook-source'
 
 export interface CreateAppDeps {
   sources: WebhookSourceRegistry

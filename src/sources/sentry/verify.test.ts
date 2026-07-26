@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest'
 import {
   extractSentryContext,
   verifySentrySignature,
-} from '@/sources/sentry/verify'
-import type { WebhookHeaders } from '@/webhook-source'
+} from '#sources/sentry/verify'
+import type { WebhookHeaders } from '#webhook-source'
 
 const SECRET = 'test-secret'
 const BODY = '{"action":"triggered"}'
