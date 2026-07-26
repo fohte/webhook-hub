@@ -1,14 +1,14 @@
 import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { SlackNotifier } from '@/slack'
-import { SlackApiError } from '@/slack'
+import type { SlackNotifier } from '#slack'
+import { SlackApiError } from '#slack'
 import type {
   DispatchOutcome,
   WebhookHeaders,
   WebhookSource,
-} from '@/webhook-source'
-import { runWebhookSource } from '@/webhook-source'
+} from '#webhook-source'
+import { runWebhookSource } from '#webhook-source'
 
 const headersFrom = (values: Record<string, string>): WebhookHeaders => ({
   get: (name) => values[name] ?? null,

@@ -1,7 +1,7 @@
 import { Webhooks } from '@octokit/webhooks'
 
-import { dispatch } from '@/sources/github/dispatch'
-import type { WebhookSource } from '@/webhook-source'
+import { dispatch } from '#sources/github/dispatch'
+import type { WebhookSource } from '#webhook-source'
 
 export const createGithubSource = (webhookSecret: string): WebhookSource => {
   const webhooks = new Webhooks({ secret: webhookSecret })

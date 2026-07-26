@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
-import type { SourceContext, WebhookHeaders } from '@/webhook-source'
+import type { SourceContext, WebhookHeaders } from '#webhook-source'
 
 export const extractSentryContext = (
   headers: WebhookHeaders,

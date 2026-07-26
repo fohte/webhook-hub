@@ -5,12 +5,12 @@ import type { Hono } from 'hono'
 import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createApp } from '@/server'
-import { requestJson, requestText } from '@/server-test-support'
-import type { SlackMessageRef, SlackNotifier } from '@/slack'
-import { SlackApiError } from '@/slack'
-import { createGithubSource } from '@/sources/github'
-import { createSentrySource } from '@/sources/sentry'
+import { createApp } from '#server'
+import { requestJson, requestText } from '#server-test-support'
+import type { SlackMessageRef, SlackNotifier } from '#slack'
+import { SlackApiError } from '#slack'
+import { createGithubSource } from '#sources/github/index'
+import { createSentrySource } from '#sources/sentry/index'
 
 vi.mock('@fohte/service-kit/observability', () => ({
   captureWithFingerprint: vi.fn(),

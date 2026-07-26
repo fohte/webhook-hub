@@ -5,17 +5,17 @@ import type {
 } from '@octokit/webhooks-types'
 import { okAsync, type ResultAsync } from 'neverthrow'
 
-import { logger } from '@/logger'
-import type { SlackApiError, SlackMessageContent, SlackNotifier } from '@/slack'
+import { logger } from '#logger'
+import type { SlackApiError, SlackMessageContent, SlackNotifier } from '#slack'
 import {
   buildPullRequestNotification,
   extractPullRequestInput,
-} from '@/sources/github/handlers/pull-request'
+} from '#sources/github/handlers/pull-request'
 import {
   buildWorkflowRunNotification,
   extractWorkflowRunInput,
-} from '@/sources/github/handlers/workflow-run'
-import type { DispatchOutcome } from '@/webhook-source'
+} from '#sources/github/handlers/workflow-run'
+import type { DispatchOutcome } from '#webhook-source'
 
 export interface DispatchContext {
   deliveryId: string

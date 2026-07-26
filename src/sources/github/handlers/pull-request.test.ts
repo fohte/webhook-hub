@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import type { PullRequestInput } from '@/sources/github/handlers/pull-request'
+import type { PullRequestInput } from '#sources/github/handlers/pull-request'
 import {
   buildPullRequestNotification,
   isSecurityPullRequest,
-} from '@/sources/github/handlers/pull-request'
+} from '#sources/github/handlers/pull-request'
 
 const baseInput = (
   overrides: Partial<PullRequestInput> = {},

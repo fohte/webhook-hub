@@ -1,6 +1,6 @@
 import type { ResultAsync } from 'neverthrow'
 
-import type { SlackApiError, SlackNotifier } from '@/slack'
+import type { SlackApiError, SlackNotifier } from '#slack'
 
 export type DispatchOutcome = 'notified' | 'filtered' | 'ignored'
 

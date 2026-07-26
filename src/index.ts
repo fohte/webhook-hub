@@ -1,13 +1,13 @@
-import '@/bootstrap'
+import '#bootstrap'
 
 import { serve } from '@hono/node-server'
 
-import { loadConfig } from '@/config'
-import { logger } from '@/logger'
-import { createApp } from '@/server'
-import { createSlackNotifier } from '@/slack'
-import { createGithubSource } from '@/sources/github'
-import { createSentrySource } from '@/sources/sentry'
+import { loadConfig } from '#config'
+import { logger } from '#logger'
+import { createApp } from '#server'
+import { createSlackNotifier } from '#slack'
+import { createGithubSource } from '#sources/github/index'
+import { createSentrySource } from '#sources/sentry/index'
 
 const main = (): void => {
   const config = loadConfig()
