@@ -1,7 +1,7 @@
 {
   "name": "webhook-hub",
   "private": true,
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@11.15.0",
   "type": "module",
   "imports": {
     "#*": "./src/*.ts"
@@ -16,10 +16,13 @@
     "format": "conc -m 1 pnpm:format:eslint pnpm:format:prettier",
     "test": "conc pnpm:test:type pnpm:test:unit",
     "test:type": "tsc --noEmit",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "build": "tsup",
+    "start": "node --import ./otel-register.mjs dist/index.js",
+    "dev": "tsx watch --import ./otel-register.mjs src/index.ts"
   },
   "devDependencies": {
-    "@commitlint/cli": "21.2.0",
+    "@commitlint/cli": "21.2.1",
     "@eslint/eslintrc": "3.3.5",
     "@fohte/eslint-config": "0.4.0",
     "@ninoseki/eslint-plugin-neverthrow": "0.2.0",
@@ -31,9 +34,9 @@
     "eslint-plugin-simple-import-sort": "13.0.0",
     "prettier": "3.9.4",
     "tsup": "8.5.1",
-    "tsx": "4.22.4",
+    "tsx": "4.23.1",
     "typescript": "6.0.3",
-    "vitest": "4.1.9"
+    "vitest": "4.1.10"
   },
   "dependencies": {
     "@fohte/service-kit": "0.1.4",
