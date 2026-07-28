@@ -36,7 +36,7 @@
     "vitest": "4.1.10"
   },
   "dependencies": {
-    "@fohte/service-kit": "0.1.4",
+    "@fohte/service-kit": "0.1.5",
     "@hono/node-server": "2.0.10",
     "@octokit/webhooks": "14.2.0",
     "@octokit/webhooks-types": "7.6.1",
