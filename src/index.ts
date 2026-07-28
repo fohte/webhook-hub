@@ -1,6 +1,5 @@
 import '#bootstrap'
 
-<<<<<<< before updating
 import { serve } from '@hono/node-server'
 
 import { loadConfig } from '#config'
@@ -26,13 +25,6 @@ const main = (): void => {
   serve({ fetch: app.fetch, port: config.port }, (info) => {
     logger.info('server_listening', { port: info.port })
   })
-||||||| last update
-export const greet = (name: string): string => {
-  return `Hello, ${name}!`
-=======
-export const greet = (name: string): string => {
-  return `Hello, ${name}!`
->>>>>>> after updating
 }
 
 main()

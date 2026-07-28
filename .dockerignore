@@ -10,11 +10,6 @@ dist
 .prettierignore
 .prettierrc.yaml
 .pinact.yaml
-<<<<<<< before updating
-.marksman.toml
-||||||| last update
-=======
->>>>>>> after updating
 .gitignore
 CLAUDE.md
 README.md
@@ -25,10 +20,6 @@ eslint.config.js
 vitest.config.ts
 renovate.json5
 scripts
-<<<<<<< before updating
-||||||| last update
-=======
 .storybook
 storybook-static
->>>>>>> after updating
 **/*.test.ts

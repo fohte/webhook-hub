@@ -16,10 +16,7 @@
     "format": "conc -m 1 pnpm:format:eslint pnpm:format:prettier",
     "test": "conc pnpm:test:type pnpm:test:unit",
     "test:type": "tsc --noEmit",
-    "test:unit": "vitest run",
-    "build": "tsup",
-    "start": "node --import ./otel-register.mjs dist/index.js",
-    "dev": "tsx watch --import ./otel-register.mjs src/index.ts"
+    "test:unit": "vitest run"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.1",
