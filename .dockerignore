@@ -10,7 +10,6 @@ dist
 .prettierignore
 .prettierrc.yaml
 .pinact.yaml
-.marksman.toml
 .gitignore
 CLAUDE.md
 README.md
@@ -21,4 +20,6 @@ eslint.config.js
 vitest.config.ts
 renovate.json5
 scripts
+.storybook
+storybook-static
 **/*.test.ts
