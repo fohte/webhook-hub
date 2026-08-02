@@ -51,7 +51,7 @@
     "@sentry/node": "10.63.0",
     "@sentry/opentelemetry": "10.63.0",
     "@slack/web-api": "7.16.0",
-    "hono": "4.12.27",
+    "hono": "4.12.32",
     "neverthrow": "8.2.0"
   }
 }
