@@ -43,12 +43,21 @@ const main = (): void => {
   const steps: ShutdownStep[] = [
     {
       name: 'close-server',
+      // server.close() waits indefinitely for in-flight requests to finish;
+      // force-close remaining connections after a bound so one hung request
+      // (e.g. Slack API) can't stall shutdown forever.
       run: () =>
-        new Promise<void>((resolve) =>
+        new Promise<void>((resolve) => {
+          const forceCloseTimer = setTimeout(() => {
+            if ('closeAllConnections' in server) {
+              server.closeAllConnections()
+            }
+          }, 5_000)
           server.close(() => {
+            clearTimeout(forceCloseTimer)
             resolve()
-          }),
-        ),
+          })
+        }),
     },
   ]
   const observabilityHandle = observability
