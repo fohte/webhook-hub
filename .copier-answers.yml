@@ -1,9 +1,9 @@
 # Changes here will be overwritten by Copier
-_commit: v0.9.0
+_commit: v0.9.3
 _src_path: https://github.com/fohte/generic-boilerplate
-description:
-  "@fohte's personal hub for receiving GitHub webhooks and dispatching
-  to handlers"
+description: '@fohte''s personal hub for receiving GitHub webhooks and dispatching
+    to handlers'
+error_tracking: false
 is_public: true
 is_web_app: true
 project_name: webhook-hub

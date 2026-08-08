@@ -34,7 +34,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/dist ./dist
-COPY otel-register.mjs ./
 USER node
 EXPOSE 8080
-CMD ["node", "--import", "./otel-register.mjs", "dist/index.js"]
+CMD ["node", "--import", "@fohte/service-kit/otel-register", "dist/index.js"]

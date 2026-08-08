@@ -1,7 +1,7 @@
 {
   "name": "webhook-hub",
   "private": true,
-  "packageManager": "pnpm@11.15.1",
+  "packageManager": "pnpm@11.16.0",
   "type": "module",
   "imports": {
     "#*": "./src/*.ts"
@@ -16,11 +16,42 @@
     "format": "conc -m 1 pnpm:format:eslint pnpm:format:prettier",
     "test": "conc pnpm:test:type pnpm:test:unit",
     "test:type": "tsc --noEmit",
+<<<<<<< before updating
     "test:unit": "vitest run"
+||||||| last update
+    "test:unit": "vitest run",
+    "build": "tsup",
+    "start": "node --import ./otel-register.mjs dist/index.js",
+    "dev": "tsx watch --import ./otel-register.mjs src/index.ts"
+  },
+  "dependencies": {
+    "@fohte/service-kit": "0.1.4",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/auto-instrumentations-node": "0.77.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.219.0",
+    "@opentelemetry/instrumentation": "0.219.0",
+    "@opentelemetry/resources": "2.8.0",
+    "@opentelemetry/sdk-node": "0.219.0",
+    "@opentelemetry/sdk-trace-base": "2.8.0",
+    "@opentelemetry/semantic-conventions": "1.41.1",
+    "@sentry/node": "10.63.0",
+    "@sentry/opentelemetry": "10.63.0",
+    "neverthrow": "8.2.0"
+=======
+    "test:unit": "vitest run",
+    "build": "tsup",
+    "start": "node --import @fohte/service-kit/otel-register dist/index.js",
+    "dev": "tsx watch --import @fohte/service-kit/otel-register src/index.ts"
+  },
+  "dependencies": {
+    "@fohte/service-kit": "0.1.7",
+    "@opentelemetry/api": "1.9.1",
+    "neverthrow": "8.2.0"
+>>>>>>> after updating
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.1",
-    "@eslint/eslintrc": "3.3.5",
+    "@eslint/eslintrc": "3.3.6",
     "@fohte/eslint-config": "0.4.0",
     "@ninoseki/eslint-plugin-neverthrow": "0.2.0",
     "@tsconfig/node-lts": "24.0.0",
@@ -28,7 +59,12 @@
     "@types/node": "24.13.3",
     "concurrently": "10.0.4",
     "eslint": "10.6.0",
+<<<<<<< before updating
     "eslint-plugin-simple-import-sort": "13.0.0",
+||||||| last update
+    "prettier": "3.9.4",
+=======
+>>>>>>> after updating
     "prettier": "3.9.6",
     "tsup": "8.5.1",
     "tsx": "4.23.1",
