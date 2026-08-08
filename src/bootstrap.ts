@@ -7,4 +7,9 @@
 // `http.Server` is never patched.
 import { initObservabilityIfConfigured } from '@fohte/service-kit/observability'
 
-initObservabilityIfConfigured(process.env)
+// registerSignalHandlers is disabled here because `#shutdown` (wired up in
+// index.ts) is the single SIGTERM/SIGINT owner for the process; this handle's
+// `shutdown()` runs as one of its ordered steps instead.
+export const observability = initObservabilityIfConfigured(process.env, {
+  registerSignalHandlers: false,
+})

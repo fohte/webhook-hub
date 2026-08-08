@@ -1,5 +1,13 @@
-import '#bootstrap'
+// Must stay the first import statement in this file: #bootstrap needs to run
+// before any instrumented module is imported, or @opentelemetry/auto-instrumentations-node
+// cannot patch them.
+// eslint-disable-next-line simple-import-sort/imports -- must stay first, see comment above
+import { observability } from '#bootstrap'
 
+import {
+  createShutdownHandler,
+  type ShutdownStep,
+} from '@fohte/service-kit/shutdown'
 import { serve } from '@hono/node-server'
 
 import { loadConfig } from '#config'
@@ -10,7 +18,13 @@ import { createGithubSource } from '#sources/github/index'
 import { createSentrySource } from '#sources/sentry/index'
 
 const main = (): void => {
-  const config = loadConfig()
+  const configResult = loadConfig()
+  if (configResult.isErr()) {
+    logger.error({ err: configResult.error }, 'invalid_config')
+    process.exit(1)
+  }
+  const config = configResult.value
+
   const notifier = createSlackNotifier(
     config.slackBotToken,
     config.slackChannel,
@@ -22,9 +36,29 @@ const main = (): void => {
     ],
     notifier,
   })
-  serve({ fetch: app.fetch, port: config.port }, (info) => {
-    logger.info('server_listening', { port: info.port })
+  const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
+    logger.info({ port: info.port }, 'server_listening')
   })
+
+  const steps: ShutdownStep[] = [
+    {
+      name: 'close-server',
+      run: () =>
+        new Promise<void>((resolve) =>
+          server.close(() => {
+            resolve()
+          }),
+        ),
+    },
+  ]
+  const observabilityHandle = observability
+  if (observabilityHandle) {
+    steps.push({
+      name: 'observability',
+      run: () => observabilityHandle.shutdown(),
+    })
+  }
+  createShutdownHandler(steps, { logger })
 }
 
 main()
