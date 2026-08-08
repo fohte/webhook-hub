@@ -72,10 +72,10 @@ Prerequisites: Node.js 24 (managed via [mise](https://mise.jdx.dev/)), pnpm 11.
 
 ```bash
 pnpm install
-pnpm dev    # tsx watch --import @fohte/service-kit/otel-register src/index.ts
+pnpm dev
 pnpm test   # type-check + vitest
 pnpm build  # emit dist/
-pnpm start  # node --import @fohte/service-kit/otel-register dist/index.js
+pnpm start
 ```
 
 ## Architecture
