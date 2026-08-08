@@ -8,46 +8,25 @@
   },
   "scripts": {
     "build": "tsup",
-    "start": "node --import ./otel-register.mjs dist/index.js",
-    "dev": "tsx watch --import ./otel-register.mjs src/index.ts",
+    "start": "node --import @fohte/service-kit/otel-register dist/index.js",
+    "dev": "tsx watch --import @fohte/service-kit/otel-register src/index.ts",
     "lint": "eslint .",
     "format:eslint": "eslint --fix .",
     "format:prettier": "prettier --write .",
     "format": "conc -m 1 pnpm:format:eslint pnpm:format:prettier",
     "test": "conc pnpm:test:type pnpm:test:unit",
     "test:type": "tsc --noEmit",
-<<<<<<< before updating
     "test:unit": "vitest run"
-||||||| last update
-    "test:unit": "vitest run",
-    "build": "tsup",
-    "start": "node --import ./otel-register.mjs dist/index.js",
-    "dev": "tsx watch --import ./otel-register.mjs src/index.ts"
-  },
-  "dependencies": {
-    "@fohte/service-kit": "0.1.4",
-    "@opentelemetry/api": "1.9.1",
-    "@opentelemetry/auto-instrumentations-node": "0.77.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "0.219.0",
-    "@opentelemetry/instrumentation": "0.219.0",
-    "@opentelemetry/resources": "2.8.0",
-    "@opentelemetry/sdk-node": "0.219.0",
-    "@opentelemetry/sdk-trace-base": "2.8.0",
-    "@opentelemetry/semantic-conventions": "1.41.1",
-    "@sentry/node": "10.63.0",
-    "@sentry/opentelemetry": "10.63.0",
-    "neverthrow": "8.2.0"
-=======
-    "test:unit": "vitest run",
-    "build": "tsup",
-    "start": "node --import @fohte/service-kit/otel-register dist/index.js",
-    "dev": "tsx watch --import @fohte/service-kit/otel-register src/index.ts"
   },
   "dependencies": {
     "@fohte/service-kit": "0.1.7",
+    "@hono/node-server": "2.0.12",
+    "@octokit/webhooks": "14.2.0",
+    "@octokit/webhooks-types": "7.6.1",
     "@opentelemetry/api": "1.9.1",
+    "@slack/web-api": "7.16.0",
+    "hono": "4.12.34",
     "neverthrow": "8.2.0"
->>>>>>> after updating
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.1",
@@ -59,35 +38,11 @@
     "@types/node": "24.13.3",
     "concurrently": "10.0.4",
     "eslint": "10.6.0",
-<<<<<<< before updating
     "eslint-plugin-simple-import-sort": "13.0.0",
-||||||| last update
-    "prettier": "3.9.4",
-=======
->>>>>>> after updating
     "prettier": "3.9.6",
     "tsup": "8.5.1",
     "tsx": "4.23.1",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
-  },
-  "dependencies": {
-    "@fohte/service-kit": "0.1.6",
-    "@hono/node-server": "2.0.12",
-    "@octokit/webhooks": "14.2.0",
-    "@octokit/webhooks-types": "7.6.1",
-    "@opentelemetry/api": "1.9.1",
-    "@opentelemetry/auto-instrumentations-node": "0.77.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "0.219.0",
-    "@opentelemetry/instrumentation": "0.219.0",
-    "@opentelemetry/resources": "2.8.0",
-    "@opentelemetry/sdk-node": "0.219.0",
-    "@opentelemetry/sdk-trace-base": "2.8.0",
-    "@opentelemetry/semantic-conventions": "1.41.1",
-    "@sentry/node": "10.63.0",
-    "@sentry/opentelemetry": "10.63.0",
-    "@slack/web-api": "7.16.0",
-    "hono": "4.12.34",
-    "neverthrow": "8.2.0"
   }
 }
