@@ -53,13 +53,16 @@ export const dispatch = (
       return ctx.notifier
         .postMessage({ text: note.text })
         .map((): DispatchOutcome => {
-          logger.info('slack_notified', {
-            delivery_id: ctx.deliveryId,
-            event: 'workflow_run',
-            repo: note.repo,
-            workflow: note.workflow,
-            url: note.url,
-          })
+          logger.info(
+            {
+              delivery_id: ctx.deliveryId,
+              event: 'workflow_run',
+              repo: note.repo,
+              workflow: note.workflow,
+              url: note.url,
+            },
+            'slack_notified',
+          )
           return 'notified'
         })
     }
@@ -90,23 +93,29 @@ export const dispatch = (
                 if (existing !== null) {
                   return ctx.notifier.updateMessage(existing, content)
                 }
-                logger.info('slack_original_not_found', {
-                  delivery_id: ctx.deliveryId,
-                  event: 'pull_request',
-                  state: note.state,
-                  url: note.url,
-                })
+                logger.info(
+                  {
+                    delivery_id: ctx.deliveryId,
+                    event: 'pull_request',
+                    state: note.state,
+                    url: note.url,
+                  },
+                  'slack_original_not_found',
+                )
                 return ctx.notifier.postMessage(content).map(() => undefined)
               })
 
       return posted.map((): DispatchOutcome => {
-        logger.info('slack_notified', {
-          delivery_id: ctx.deliveryId,
-          event: 'pull_request',
-          state: note.state,
-          repo: note.repo,
-          url: note.url,
-        })
+        logger.info(
+          {
+            delivery_id: ctx.deliveryId,
+            event: 'pull_request',
+            state: note.state,
+            repo: note.repo,
+            url: note.url,
+          },
+          'slack_notified',
+        )
         return 'notified'
       })
     }

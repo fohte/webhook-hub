@@ -46,13 +46,16 @@ export const dispatch = (
   return ctx.notifier
     .postMessage({ text: note.text })
     .map((): DispatchOutcome => {
-      logger.info('slack_notified', {
-        delivery_id: ctx.deliveryId,
-        event: 'sentry_issue_alert',
-        title: note.title,
-        level: note.level,
-        url: note.webUrl,
-      })
+      logger.info(
+        {
+          delivery_id: ctx.deliveryId,
+          event: 'sentry_issue_alert',
+          title: note.title,
+          level: note.level,
+          url: note.webUrl,
+        },
+        'slack_notified',
+      )
       return 'notified'
     })
 }
