@@ -31,7 +31,7 @@ export const createApp = (deps: CreateAppDeps): Hono => {
 
   app.onError((err, c) => {
     captureWithFingerprint(err, UNEXPECTED_ERROR_FINGERPRINT)
-    logger.error('webhook_unexpected_error', { error: err })
+    logger.error({ err }, 'webhook_unexpected_error')
     return c.json({ error: 'internal error' }, 500)
   })
 
@@ -45,10 +45,13 @@ export const createApp = (deps: CreateAppDeps): Hono => {
 
       const context = source.extractContext(headers)
       if (context === null) {
-        logger.warn('webhook_bad_request', {
-          source: source.name,
-          reason: 'missing_headers',
-        })
+        logger.warn(
+          {
+            source: source.name,
+            reason: 'missing_headers',
+          },
+          'webhook_bad_request',
+        )
         return c.json({ error: 'missing required headers' }, 400)
       }
 
@@ -62,33 +65,42 @@ export const createApp = (deps: CreateAppDeps): Hono => {
       const verified = await (async () =>
         source.verify(rawBody, headers, context))().catch(() => false)
       if (!verified) {
-        logger.warn('webhook_invalid_signature', {
-          source: source.name,
-          delivery_id: context.deliveryId,
-          event: context.eventName,
-        })
+        logger.warn(
+          {
+            source: source.name,
+            delivery_id: context.deliveryId,
+            event: context.eventName,
+          },
+          'webhook_invalid_signature',
+        )
         return c.json({ error: 'invalid signature' }, 401)
       }
 
       const parsed = parseJson(rawBody)
       if (parsed.isErr()) {
-        logger.warn('webhook_invalid_json', {
-          source: source.name,
-          delivery_id: context.deliveryId,
-          event: context.eventName,
-          error: parsed.error,
-        })
+        logger.warn(
+          {
+            source: source.name,
+            delivery_id: context.deliveryId,
+            event: context.eventName,
+            err: parsed.error,
+          },
+          'webhook_invalid_json',
+        )
         return c.json({ error: 'invalid json' }, 400)
       }
 
       return source.dispatch(context, parsed.value, deps.notifier).match(
         (outcome) => {
-          logger.info('webhook_processed', {
-            source: source.name,
-            delivery_id: context.deliveryId,
-            event: context.eventName,
-            outcome,
-          })
+          logger.info(
+            {
+              source: source.name,
+              delivery_id: context.deliveryId,
+              event: context.eventName,
+              outcome,
+            },
+            'webhook_processed',
+          )
           return c.json({ ok: true, outcome })
         },
         (dispatchErr) => {
@@ -103,12 +115,15 @@ export const createApp = (deps: CreateAppDeps): Hono => {
               event: context.eventName,
             },
           })
-          logger.error('webhook_handler_error', {
-            source: source.name,
-            delivery_id: context.deliveryId,
-            event: context.eventName,
-            error: wrapped,
-          })
+          logger.error(
+            {
+              source: source.name,
+              delivery_id: context.deliveryId,
+              event: context.eventName,
+              err: wrapped,
+            },
+            'webhook_handler_error',
+          )
           // Return 200 to suppress the source's redelivery; handler failures are not retried.
           return c.json({ ok: false, outcome: 'error' }, 200)
         },

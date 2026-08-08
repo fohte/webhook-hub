@@ -19,14 +19,15 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
-    "@fohte/service-kit": "0.1.7",
+    "@fohte/service-kit": "0.1.8",
     "@hono/node-server": "2.0.12",
     "@octokit/webhooks": "14.2.0",
     "@octokit/webhooks-types": "7.6.1",
     "@opentelemetry/api": "1.9.1",
     "@slack/web-api": "7.16.0",
     "hono": "4.12.34",
-    "neverthrow": "8.2.0"
+    "neverthrow": "8.2.0",
+    "pino": "10.3.1"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.1",
