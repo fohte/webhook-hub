@@ -42,7 +42,7 @@
     "eslint-plugin-simple-import-sort": "13.0.0",
     "prettier": "3.9.6",
     "tsup": "8.5.1",
-    "tsx": "4.23.8",
+    "tsx": "4.23.9",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }
