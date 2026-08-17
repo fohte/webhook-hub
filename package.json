@@ -32,7 +32,7 @@
   "devDependencies": {
     "@commitlint/cli": "21.2.1",
     "@eslint/eslintrc": "3.3.6",
-    "@fohte/eslint-config": "0.4.0",
+    "@fohte/eslint-config": "0.4.1",
     "@ninoseki/eslint-plugin-neverthrow": "0.2.0",
     "@tsconfig/node-lts": "24.0.0",
     "@tsconfig/strictest": "2.0.8",
@@ -42,7 +42,7 @@
     "eslint-plugin-simple-import-sort": "13.0.0",
     "prettier": "3.9.6",
     "tsup": "8.5.1",
-    "tsx": "4.23.9",
+    "tsx": "4.23.11",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }
