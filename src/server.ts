@@ -30,7 +30,10 @@ export const createApp = (deps: CreateAppDeps): Hono => {
   const app = new Hono()
 
   app.onError((err, c) => {
-    captureWithFingerprint(err, UNEXPECTED_ERROR_FINGERPRINT)
+    // catch-all handler: any error from any route can land here, so keep
+    // Sentry's default grouping (exception type/value/stacktrace) alongside
+    // the shared key, or unrelated errors collapse into one issue.
+    captureWithFingerprint(err, [UNEXPECTED_ERROR_FINGERPRINT, '{{ default }}'])
     logger.error({ err }, 'webhook_unexpected_error')
     return c.json({ error: 'internal error' }, 500)
   })

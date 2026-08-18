@@ -289,7 +289,7 @@ describe('createApp', () => {
     })
 
     expect(vi.mocked(captureWithFingerprint).mock.calls).toEqual([
-      [thrown, 'webhook-hub.unexpected-error'],
+      [thrown, ['webhook-hub.unexpected-error', '{{ default }}']],
     ])
   })
 })
