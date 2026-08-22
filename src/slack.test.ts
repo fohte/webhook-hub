@@ -137,8 +137,14 @@ describe('buildPayload', () => {
   it('wraps text in a coloured attachment when color is set', () => {
     const content: SlackMessageContent = { text: 'hello', color: '#36a64f' }
     expect(buildPayload(content)).toEqual({
-      attachments: [{ color: '#36a64f', text: 'hello', mrkdwn_in: ['text'] }],
-      text: 'hello',
+      attachments: [
+        {
+          color: '#36a64f',
+          text: 'hello',
+          mrkdwn_in: ['text'],
+          fallback: 'hello',
+        },
+      ],
     })
   })
 
@@ -152,8 +158,7 @@ describe('buildPayload', () => {
       blocks,
     }
     expect(buildPayload(content)).toEqual({
-      attachments: [{ color: '#d73a49', blocks }],
-      text: 'fallback',
+      attachments: [{ color: '#d73a49', blocks, fallback: 'fallback' }],
     })
   })
 
