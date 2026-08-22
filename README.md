@@ -29,7 +29,7 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 | `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
 | `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                                             |
 | `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
-| `SLACK_ACTIVITY_CHANNEL` | No       | `#github_activity`                       | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
+| `SLACK_ACTIVITY_CHANNEL` | No       | `#activity`                              | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
 | `PORT`                   | No       | `8080`                                   | HTTP listen port.                                                                                             |
 | `OCTO_STS_URL`           | Yes      | —                                        | octo-sts endpoint used to exchange an OIDC token for a short-lived GitHub App token.                          |
 | `OCTO_STS_SCOPE`         | Yes      | —                                        | GitHub org octo-sts issues the token for (owner-only, not `owner/repo`).                                      |

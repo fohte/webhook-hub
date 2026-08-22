@@ -31,7 +31,7 @@ export const loadConfig = (
     slackActivityChannel: optionalString(
       env,
       'SLACK_ACTIVITY_CHANNEL',
-      '#github_activity',
+      '#activity',
     ),
     port: optionalInt(env, 'PORT', 8080, { min: 1, max: 65_535 }),
     octoStsUrl: requireString(env, 'OCTO_STS_URL'),
