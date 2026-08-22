@@ -37,7 +37,7 @@ describe('createOctoStsTokenCache', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
-        jsonResponse({ token: 'ghs_abc', expires_at: '2026-01-01T01:00:00Z' }),
+        jsonResponse({ token: 'ghs_abc', expiry: '2026-01-01T01:00:00Z' }),
       )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -59,7 +59,7 @@ describe('createOctoStsTokenCache', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
-        jsonResponse({ token: 'ghs_abc', expires_at: '2026-01-01T01:00:00Z' }),
+        jsonResponse({ token: 'ghs_abc', expiry: '2026-01-01T01:00:00Z' }),
       )
     vi.stubGlobal('fetch', fetchMock)
     const cache = createOctoStsTokenCache(config)
@@ -77,13 +77,13 @@ describe('createOctoStsTokenCache', () => {
       .mockResolvedValueOnce(
         jsonResponse({
           token: 'ghs_first',
-          expires_at: '2026-01-01T00:10:00Z',
+          expiry: '2026-01-01T00:10:00Z',
         }),
       )
       .mockResolvedValueOnce(
         jsonResponse({
           token: 'ghs_second',
-          expires_at: '2026-01-01T02:00:00Z',
+          expiry: '2026-01-01T02:00:00Z',
         }),
       )
     vi.stubGlobal('fetch', fetchMock)
@@ -126,9 +126,7 @@ describe('createOctoStsTokenCache', () => {
       'fetch',
       vi
         .fn()
-        .mockResolvedValue(
-          jsonResponse({ expires_at: '2026-01-01T01:00:00Z' }),
-        ),
+        .mockResolvedValue(jsonResponse({ expiry: '2026-01-01T01:00:00Z' })),
     )
 
     const result = await createOctoStsTokenCache(config).getToken()
@@ -138,13 +136,32 @@ describe('createOctoStsTokenCache', () => {
     )
   })
 
-  it('returns an error when the exchange response has an invalid expires_at', async () => {
+  it('falls back to the token JWT exp claim when expiry is null, and caches using it', async () => {
+    // header: {"alg":"none"}, payload: {"iat":1767225600,"exp":1767229200}
+    // (1767229200000 ms == 2026-01-01T01:00:00Z, i.e. one hour after the
+    // system time set in beforeEach, well past the 5-minute safety margin)
+    const jwt =
+      'eyJhbGciOiJub25lIn0.eyJpYXQiOjE3NjcyMjU2MDAsImV4cCI6MTc2NzIyOTIwMH0.sig'
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ token: jwt, expiry: null }))
+    vi.stubGlobal('fetch', fetchMock)
+    const cache = createOctoStsTokenCache(config)
+    await cache.getToken()
+
+    const result = await cache.getToken()
+
+    expect(result._unsafeUnwrap()).toBe(jwt)
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('returns an error when expiry is invalid and the token is not a decodable JWT', async () => {
     vi.stubGlobal(
       'fetch',
       vi
         .fn()
         .mockResolvedValue(
-          jsonResponse({ token: 'ghs_abc', expires_at: 'not-a-date' }),
+          jsonResponse({ token: 'ghs_abc', expiry: 'not-a-date' }),
         ),
     )
 
@@ -152,7 +169,43 @@ describe('createOctoStsTokenCache', () => {
 
     expect(result._unsafeUnwrapErr()).toEqual(
       new OctoStsError(
-        'octo-sts exchange returned invalid expires_at: not-a-date',
+        'octo-sts exchange returned no usable expiry (expiry: not-a-date, token segments: 1)',
+        undefined,
+      ),
+    )
+  })
+
+  it('returns an error when expiry is null and the token has JWT shape but an undecodable payload', async () => {
+    // 2nd segment "not-json" is valid base64url but not valid JSON once decoded
+    const jwt = 'eyJhbGciOiJub25lIn0.bm90LWpzb24.sig'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ token: jwt, expiry: null })),
+    )
+
+    const result = await createOctoStsTokenCache(config).getToken()
+
+    expect(result._unsafeUnwrapErr()).toEqual(
+      new OctoStsError(
+        'octo-sts exchange returned no usable expiry (expiry: null, token segments: 3)',
+        undefined,
+      ),
+    )
+  })
+
+  it('returns an error when expiry is null and the token JWT payload has no numeric exp claim', async () => {
+    // header: {"alg":"none"}, payload: {"iat":1767225600} (no exp claim)
+    const jwt = 'eyJhbGciOiJub25lIn0.eyJpYXQiOjE3NjcyMjU2MDB9.sig'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ token: jwt, expiry: null })),
+    )
+
+    const result = await createOctoStsTokenCache(config).getToken()
+
+    expect(result._unsafeUnwrapErr()).toEqual(
+      new OctoStsError(
+        'octo-sts exchange returned no usable expiry (expiry: null, token segments: 3)',
         undefined,
       ),
     )
