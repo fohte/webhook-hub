@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { PullRequestInput } from '#sources/github/handlers/pull-request'
 import {
   buildPullRequestNotification,
+  buildThirdPartyPullRequestNotification,
   isSecurityPullRequest,
 } from '#sources/github/handlers/pull-request'
 
@@ -126,5 +127,26 @@ describe('buildPullRequestNotification', () => {
 
   it('returns null for non-security PRs', () => {
     expect(buildPullRequestNotification(baseInput())).toBeNull()
+  })
+})
+
+describe('buildThirdPartyPullRequestNotification', () => {
+  it('formats a notification for a third-party pull request', () => {
+    expect(
+      buildThirdPartyPullRequestNotification({
+        repo: 'fohte/example',
+        title: 'fix: support <T> generics',
+        url: 'https://github.com/fohte/example/pull/2',
+        author: 'octocat',
+      }),
+    ).toEqual({
+      text: [
+        ':speech_balloon: *New pull request opened on `fohte/example` by `octocat`*',
+        '*fix: support &lt;T&gt; generics*',
+        '<https://github.com/fohte/example/pull/2|View pull request>',
+      ].join('\n'),
+      repo: 'fohte/example',
+      url: 'https://github.com/fohte/example/pull/2',
+    })
   })
 })
