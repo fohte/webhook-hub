@@ -96,6 +96,14 @@ A Slack message is posted to `SLACK_ACTIVITY_CHANNEL` (default `#github_activity
 
 The message links to the issue/PR and names its author; it carries no color or metadata, since there's no follow-up state to track. `pull_request` evaluates the security-PR check first — a third-party security PR is reported through that flow, not this one.
 
+```
+:speech_balloon: *New pull request opened on `fohte/example` by `octocat`*
+*fix: support <T> generics*
+<https://github.com/fohte/example/pull/2|View pull request>
+```
+
+(`issues` uses the same format with "issue" in place of "pull request".)
+
 All other events and actions short-circuit to `ignored` or `filtered`.
 
 ### Sentry issue alerts
