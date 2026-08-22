@@ -348,6 +348,21 @@ describe('dispatch (pull_request)', () => {
     expect(notifier.postMessage).not.toHaveBeenCalled()
   })
 
+  it('returns filtered without posting when a third-party pull request is closed', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(
+      createContext('pull_request', notifier),
+      {
+        name: 'pull_request',
+        payload: pullRequestPayload({ action: 'closed' }),
+      },
+    )
+
+    expect(outcome).toBe('filtered')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+
   it('propagates a findMessageByMetadata failure without posting or updating', async () => {
     const notifier = createNotifier()
     notifier.findMessageByMetadata.mockReturnValue(
