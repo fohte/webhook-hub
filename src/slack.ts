@@ -2,6 +2,8 @@ import type { ContextBlock, HeaderBlock, SectionBlock } from '@slack/types'
 import { WebClient } from '@slack/web-api'
 import { err, ok, type Result, ResultAsync } from 'neverthrow'
 
+import { toSlackFallbackText } from '#slack-mrkdwn'
+
 export class SlackApiError extends Error {
   constructor(message: string, cause?: unknown) {
     super(message, cause === undefined ? undefined : { cause })
@@ -80,13 +82,13 @@ export const buildPayload = (content: SlackMessageContent): MessagePayload => {
               ? {
                   color: content.color,
                   blocks: content.blocks,
-                  fallback: content.text,
+                  fallback: toSlackFallbackText(content.text),
                 }
               : {
                   color: content.color,
                   text: content.text,
                   mrkdwn_in: ['text'],
-                  fallback: content.text,
+                  fallback: toSlackFallbackText(content.text),
                 },
           ],
         }

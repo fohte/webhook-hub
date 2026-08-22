@@ -162,6 +162,23 @@ describe('buildPayload', () => {
     })
   })
 
+  it('strips mrkdwn markup from the attachment fallback', () => {
+    const content: SlackMessageContent = {
+      text: '*bold* `code` <https://example.com|label>',
+      color: '#36a64f',
+    }
+    expect(buildPayload(content)).toEqual({
+      attachments: [
+        {
+          color: '#36a64f',
+          text: '*bold* `code` <https://example.com|label>',
+          mrkdwn_in: ['text'],
+          fallback: 'bold code label',
+        },
+      ],
+    })
+  })
+
   it('includes metadata when set', () => {
     const content: SlackMessageContent = {
       text: 'hello',
