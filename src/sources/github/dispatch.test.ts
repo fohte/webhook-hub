@@ -2,6 +2,7 @@ import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
 import { SlackApiError } from '#slack'
+import type { DispatchContext } from '#sources/github/dispatch'
 import { dispatch } from '#sources/github/dispatch'
 import type { DispatchOutcome } from '#webhook-source'
 
@@ -14,6 +15,17 @@ const createNotifier = () => ({
 const createGithubClient = () => ({
   findPullRequestForCommit: vi.fn().mockReturnValue(okAsync(null)),
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
+})
+
+const createContext = (
+  event: string,
+  notifier: DispatchContext['notifier'],
+): DispatchContext => ({
+  deliveryId: 'delivery-1',
+  event,
+  notifier,
+  activityChannel: '#github_activity',
+  githubClient: createGithubClient(),
 })
 
 const dispatchOutcome = async (
@@ -70,12 +82,7 @@ describe('dispatch (workflow_run)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'workflow_run',
-        notifier,
-        githubClient: createGithubClient(),
-      },
+      createContext('workflow_run', notifier),
       { name: 'workflow_run', payload: workflowRunPayload({}) },
     )
 
@@ -108,12 +115,7 @@ describe('dispatch (workflow_run)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'workflow_run',
-        notifier,
-        githubClient: createGithubClient(),
-      },
+      createContext('workflow_run', notifier),
       {
         name: 'workflow_run',
         payload: workflowRunPayload({ action: 'requested' }),
@@ -128,12 +130,7 @@ describe('dispatch (workflow_run)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'workflow_run',
-        notifier,
-        githubClient: createGithubClient(),
-      },
+      createContext('workflow_run', notifier),
       {
         name: 'workflow_run',
         payload: workflowRunPayload({ conclusion: 'success' }),
@@ -150,12 +147,7 @@ describe('dispatch (pull_request)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'pull_request',
-        notifier,
-        githubClient: createGithubClient(),
-      },
+      createContext('pull_request', notifier),
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({ action: 'opened' }),
@@ -185,12 +177,7 @@ describe('dispatch (pull_request)', () => {
     )
 
     const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'pull_request',
-        notifier,
-        githubClient: createGithubClient(),
-      },
+      createContext('pull_request', notifier),
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({
@@ -226,12 +213,7 @@ describe('dispatch (pull_request)', () => {
     notifier.findMessageByMetadata.mockReturnValue(okAsync(null))
 
     const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'pull_request',
-        notifier,
-        githubClient: createGithubClient(),
-      },
+      createContext('pull_request', notifier),
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({
@@ -261,12 +243,7 @@ describe('dispatch (pull_request)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'pull_request',
-        notifier,
-        githubClient: createGithubClient(),
-      },
+      createContext('pull_request', notifier),
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({ action: 'synchronize' }),
@@ -283,21 +260,13 @@ describe('dispatch (pull_request)', () => {
       errAsync(new SlackApiError('boom')),
     )
 
-    const result = await dispatch(
-      {
-        deliveryId: 'delivery-1',
-        event: 'pull_request',
-        notifier,
-        githubClient: createGithubClient(),
-      },
-      {
-        name: 'pull_request',
-        payload: securityPullRequestPayload({
-          action: 'closed',
-          merged: true,
-        }),
-      },
-    )
+    const result = await dispatch(createContext('pull_request', notifier), {
+      name: 'pull_request',
+      payload: securityPullRequestPayload({
+        action: 'closed',
+        merged: true,
+      }),
+    })
 
     expect(result._unsafeUnwrapErr()).toEqual(new SlackApiError('boom'))
     expect(notifier.updateMessage).not.toHaveBeenCalled()
@@ -309,15 +278,10 @@ describe('dispatch (unrecognized event)', () => {
   it('returns ignored without posting', async () => {
     const notifier = createNotifier()
 
-    const outcome = await dispatchOutcome(
-      {
-        deliveryId: 'delivery-1',
-        event: 'issues',
-        notifier,
-        githubClient: createGithubClient(),
-      },
-      { name: 'issues', payload: {} },
-    )
+    const outcome = await dispatchOutcome(createContext('issues', notifier), {
+      name: 'issues',
+      payload: {},
+    })
 
     expect(outcome).toBe('ignored')
     expect(notifier.postMessage).not.toHaveBeenCalled()

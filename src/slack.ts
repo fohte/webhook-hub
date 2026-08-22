@@ -20,6 +20,8 @@ export interface SlackMessageContent {
   text: string
   color?: string
   metadata?: SlackMessageMetadata
+  /** Channel to post to. Falls back to the notifier's default channel when omitted. */
+  channel?: string
   blocks?: SlackBlock[]
   /** Only honoured by postMessage — chat.update cannot change a message's authorship. */
   username?: string
@@ -89,12 +91,14 @@ export const buildPayload = (content: SlackMessageContent): MessagePayload => {
 
 export const createSlackNotifier = (
   token: string,
-  channel: string,
+  defaultChannel: string,
 ): SlackNotifier => {
   const client = new WebClient(token)
-  let cachedChannelId: ResultAsync<string, SlackApiError> | null = null
+  const channelIdCache = new Map<string, ResultAsync<string, SlackApiError>>()
 
-  const resolveChannelIdUncached = (): ResultAsync<string, SlackApiError> =>
+  const resolveChannelIdUncached = (
+    channel: string,
+  ): ResultAsync<string, SlackApiError> =>
     wrapSlackApi(
       (async (): Promise<Result<string, SlackApiError>> => {
         if (!channel.startsWith('#')) return ok(channel)
@@ -118,40 +122,44 @@ export const createSlackNotifier = (
       'failed to resolve Slack channel id',
     ).andThen((result) => result)
 
-  const resolveChannelId = (): ResultAsync<string, SlackApiError> => {
-    if (cachedChannelId !== null) return cachedChannelId
-    const resolved = resolveChannelIdUncached().mapErr((caughtErr) => {
-      cachedChannelId = null
+  const resolveChannelId = (
+    channel: string,
+  ): ResultAsync<string, SlackApiError> => {
+    const cached = channelIdCache.get(channel)
+    if (cached !== undefined) return cached
+    const resolved = resolveChannelIdUncached(channel).mapErr((caughtErr) => {
+      channelIdCache.delete(channel)
       return caughtErr
     })
-    cachedChannelId = resolved
+    channelIdCache.set(channel, resolved)
     return resolved
   }
 
   return {
     postMessage(content) {
-      return resolveChannelId().andThen((channelId) =>
-        wrapSlackApi(
-          client.chat.postMessage({
-            channel: channelId,
-            ...buildPayload(content),
-            ...(content.username !== undefined
-              ? { username: content.username }
-              : {}),
-            ...(content.iconUrl !== undefined
-              ? { icon_url: content.iconUrl }
-              : {}),
-          }),
-          'failed to post Slack message',
-        ).andThen((res) =>
-          res.ts === undefined || res.channel === undefined
-            ? err(
-                new SlackApiError(
-                  'Slack postMessage did not return ts/channel',
-                ),
-              )
-            : ok({ ts: res.ts, channel: res.channel }),
-        ),
+      return resolveChannelId(content.channel ?? defaultChannel).andThen(
+        (channelId) =>
+          wrapSlackApi(
+            client.chat.postMessage({
+              channel: channelId,
+              ...buildPayload(content),
+              ...(content.username !== undefined
+                ? { username: content.username }
+                : {}),
+              ...(content.iconUrl !== undefined
+                ? { icon_url: content.iconUrl }
+                : {}),
+            }),
+            'failed to post Slack message',
+          ).andThen((res) =>
+            res.ts === undefined || res.channel === undefined
+              ? err(
+                  new SlackApiError(
+                    'Slack postMessage did not return ts/channel',
+                  ),
+                )
+              : ok({ ts: res.ts, channel: res.channel }),
+          ),
       )
     },
     updateMessage(ref, content) {
@@ -165,7 +173,7 @@ export const createSlackNotifier = (
       ).map(() => undefined)
     },
     findMessageByMetadata(eventType, payloadMatcher) {
-      return resolveChannelId().andThen((channelId) =>
+      return resolveChannelId(defaultChannel).andThen((channelId) =>
         wrapSlackApi(
           client.conversations.history({
             channel: channelId,

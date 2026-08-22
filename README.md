@@ -23,17 +23,18 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 
 ## Configuration
 
-| Variable                 | Required | Default                                  | Description                                                                          |
-| ------------------------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                       |
-| `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                              |
-| `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                    |
-| `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                 |
-| `PORT`                   | No       | `8080`                                   | HTTP listen port.                                                                    |
-| `OCTO_STS_URL`           | Yes      | —                                        | octo-sts endpoint used to exchange an OIDC token for a short-lived GitHub App token. |
-| `OCTO_STS_SCOPE`         | Yes      | —                                        | GitHub org octo-sts issues the token for (owner-only, not `owner/repo`).             |
-| `OCTO_STS_IDENTITY`      | Yes      | —                                        | octo-sts trust policy identity to assume.                                            |
-| `OCTO_STS_SA_TOKEN_PATH` | No       | `/var/run/secrets/tokens/octo-sts-token` | Path to the projected Kubernetes ServiceAccount token used as the OIDC token.        |
+| Variable                 | Required | Default                                  | Description                                                                                                   |
+| ------------------------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                                                |
+| `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
+| `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                                             |
+| `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
+| `SLACK_ACTIVITY_CHANNEL` | No       | `#github_activity`                       | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
+| `PORT`                   | No       | `8080`                                   | HTTP listen port.                                                                                             |
+| `OCTO_STS_URL`           | Yes      | —                                        | octo-sts endpoint used to exchange an OIDC token for a short-lived GitHub App token.                          |
+| `OCTO_STS_SCOPE`         | Yes      | —                                        | GitHub org octo-sts issues the token for (owner-only, not `owner/repo`).                                      |
+| `OCTO_STS_IDENTITY`      | Yes      | —                                        | octo-sts trust policy identity to assume.                                                                     |
+| `OCTO_STS_SA_TOKEN_PATH` | No       | `/var/run/secrets/tokens/octo-sts-token` | Path to the projected Kubernetes ServiceAccount token used as the OIDC token.                                 |
 
 ## Setup
 

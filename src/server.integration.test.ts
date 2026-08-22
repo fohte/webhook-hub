@@ -18,6 +18,7 @@ vi.mock('@fohte/service-kit/observability', () => ({
 
 const GITHUB_SECRET = 'github-test-secret'
 const SENTRY_SECRET = 'sentry-test-secret'
+const ACTIVITY_CHANNEL = '#github_activity'
 
 const createNotifier = () => {
   const postMessage = vi.fn((): ResultAsync<SlackMessageRef, SlackApiError> =>
@@ -39,7 +40,7 @@ const createGithubClient = () => ({
 const createTestApp = (notifier: SlackNotifier): Hono =>
   createApp({
     sources: [
-      createGithubSource(GITHUB_SECRET, createGithubClient()),
+      createGithubSource(GITHUB_SECRET, ACTIVITY_CHANNEL, createGithubClient()),
       createSentrySource(SENTRY_SECRET),
     ],
     notifier,

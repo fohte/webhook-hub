@@ -15,6 +15,7 @@ export interface Config {
   sentryWebhookSecret: string
   slackBotToken: string
   slackChannel: string
+  slackActivityChannel: string
   port: number
   octoSts: OctoStsConfig
 }
@@ -27,6 +28,11 @@ export const loadConfig = (
     sentryWebhookSecret: requireString(env, 'SENTRY_WEBHOOK_SECRET'),
     slackBotToken: requireString(env, 'SLACK_BOT_TOKEN'),
     slackChannel: optionalString(env, 'SLACK_CHANNEL', '#infra_alert'),
+    slackActivityChannel: optionalString(
+      env,
+      'SLACK_ACTIVITY_CHANNEL',
+      '#github_activity',
+    ),
     port: optionalInt(env, 'PORT', 8080, { min: 1, max: 65_535 }),
     octoStsUrl: requireString(env, 'OCTO_STS_URL'),
     octoStsScope: requireString(env, 'OCTO_STS_SCOPE'),
@@ -41,6 +47,7 @@ export const loadConfig = (
     sentryWebhookSecret: f.sentryWebhookSecret,
     slackBotToken: f.slackBotToken,
     slackChannel: f.slackChannel,
+    slackActivityChannel: f.slackActivityChannel,
     port: f.port,
     octoSts: {
       url: f.octoStsUrl,

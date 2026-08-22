@@ -35,7 +35,11 @@ const main = (): void => {
   const githubClient = createGitHubClient(octoStsTokenCache)
   const app = createApp({
     sources: [
-      createGithubSource(config.githubWebhookSecret, githubClient),
+      createGithubSource(
+        config.githubWebhookSecret,
+        config.slackActivityChannel,
+        githubClient,
+      ),
       createSentrySource(config.sentryWebhookSecret),
     ],
     notifier,

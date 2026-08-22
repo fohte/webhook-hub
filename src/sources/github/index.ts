@@ -6,6 +6,7 @@ import type { WebhookSource } from '#webhook-source'
 
 export const createGithubSource = (
   webhookSecret: string,
+  activityChannel: string,
   githubClient: GitHubClient,
 ): WebhookSource => {
   const webhooks = new Webhooks({ secret: webhookSecret })
@@ -32,6 +33,7 @@ export const createGithubSource = (
           deliveryId: context.deliveryId,
           event: context.eventName,
           notifier,
+          activityChannel,
           githubClient,
         },
         { name: context.eventName, payload },
