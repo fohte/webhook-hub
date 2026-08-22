@@ -85,7 +85,18 @@ The message tags the PR as a security PR, includes the title, and links to the P
 
 The link back to the original message uses Slack message metadata (`event_type: "security_pr"`, `event_payload: { pr_url }`). On a `closed` event the handler scans recent `conversations.history` of `SLACK_CHANNEL` for a matching metadata payload and edits that message in place. If no matching message is found (e.g. the original is past the history window, or the bot was offline when the PR was opened), the close notification is posted as a new message instead.
 
-All other events and actions short-circuit to `ignored`.
+For `action === "opened"` PRs that aren't security PRs, a third-party check runs instead (see below). All other events and actions short-circuit to `ignored`.
+
+### Third-party `issues` / `pull_request`
+
+A Slack message is posted to `SLACK_ACTIVITY_CHANNEL` (default `#github_activity`) when `action === "opened"` and the sender is neither a bot nor the repository owner:
+
+- `sender.type !== "Bot"` — excludes GitHub Apps such as Renovate and Dependabot without needing a bot-name allowlist.
+- `sender.login !== repository.owner.login` — excludes issues/PRs opened by the repository owner themselves.
+
+The message links to the issue/PR and names its author; it carries no color or metadata, since there's no follow-up state to track. `pull_request` evaluates the security-PR check first — a third-party security PR is reported through that flow, not this one.
+
+All other events and actions short-circuit to `ignored` or `filtered`.
 
 ### Sentry issue alerts
 

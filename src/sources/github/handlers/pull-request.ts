@@ -80,3 +80,37 @@ export const buildPullRequestNotification = (
     state: input.state,
   }
 }
+
+export interface ThirdPartyPullRequestInput {
+  repo: string
+  title: string
+  url: string
+  author: string
+}
+
+export interface ThirdPartyPullRequestNotification {
+  text: string
+  repo: string
+  url: string
+}
+
+export const extractThirdPartyPullRequestInput = (
+  payload: PullRequestOpenedEvent,
+): ThirdPartyPullRequestInput => ({
+  repo: payload.repository.full_name,
+  title: payload.pull_request.title,
+  url: payload.pull_request.html_url,
+  author: payload.sender.login,
+})
+
+export const buildThirdPartyPullRequestNotification = (
+  input: ThirdPartyPullRequestInput,
+): ThirdPartyPullRequestNotification => ({
+  text: [
+    `:speech_balloon: *New pull request opened on \`${escapeSlackMrkdwn(input.repo)}\` by \`${escapeSlackMrkdwn(input.author)}\`*`,
+    `*${escapeSlackMrkdwn(input.title)}*`,
+    `<${input.url}|View pull request>`,
+  ].join('\n'),
+  repo: input.repo,
+  url: input.url,
+})
