@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 
-import { errAsync, okAsync, ResultAsync } from 'neverthrow'
+import { errAsync, okAsync, Result, ResultAsync } from 'neverthrow'
 
 import { BoundaryError } from '#errors'
 
@@ -22,9 +22,11 @@ interface CachedToken {
   expiresAtMs: number
 }
 
+// octo-sts's actual response shape (confirmed by hitting the live endpoint):
+// `expiry`, not `expires_at`, and it comes back `null` in practice.
 interface ExchangeResponse {
   token: string
-  expires_at: string
+  expiry: string | null
 }
 
 // Refresh this far ahead of the reported expiry so a token handed to a
@@ -36,8 +38,46 @@ const isExchangeResponse = (value: unknown): value is ExchangeResponse =>
   value !== null &&
   'token' in value &&
   typeof value.token === 'string' &&
-  'expires_at' in value &&
-  typeof value.expires_at === 'string'
+  'expiry' in value &&
+  (value.expiry === null || typeof value.expiry === 'string')
+
+// octo-sts's `expiry` field can come back null (observed in practice) or an
+// unparseable string, in which case fall back to the `exp` claim on the
+// token itself, which is a JWT.
+const expiryFromJwt = (token: string): number | null => {
+  const payloadSegment = token.split('.')[1]
+  if (payloadSegment === undefined) {
+    return null
+  }
+  const parsed = Result.fromThrowable(
+    (segment: string): unknown =>
+      JSON.parse(Buffer.from(segment, 'base64url').toString('utf-8')),
+    () => undefined,
+  )(payloadSegment)
+  if (parsed.isErr()) {
+    return null
+  }
+  const payload = parsed.value
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('exp' in payload) ||
+    typeof payload.exp !== 'number'
+  ) {
+    return null
+  }
+  return payload.exp * 1000
+}
+
+const resolveExpiryMs = (res: ExchangeResponse): number | null => {
+  if (res.expiry !== null) {
+    const parsed = Date.parse(res.expiry)
+    if (!Number.isNaN(parsed)) {
+      return parsed
+    }
+  }
+  return expiryFromJwt(res.token)
+}
 
 export const createOctoStsTokenCache = (
   config: OctoStsConfig,
@@ -103,11 +143,13 @@ export const createOctoStsTokenCache = (
             ),
           )
         }
-        const expiresAtMs = Date.parse(json.expires_at)
-        if (Number.isNaN(expiresAtMs)) {
+        const expiresAtMs = resolveExpiryMs(json)
+        if (expiresAtMs === null) {
           return errAsync(
             new OctoStsError(
-              `octo-sts exchange returned invalid expires_at: ${json.expires_at}`,
+              // The token itself isn't included: it's still a live credential at
+              // this point, and this error path is expected to reach Sentry.
+              `octo-sts exchange returned no usable expiry (expiry: ${String(json.expiry)}, token segments: ${String(json.token.split('.').length)})`,
               undefined,
             ),
           )
