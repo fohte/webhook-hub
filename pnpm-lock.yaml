@@ -48,6 +48,9 @@ importers:
       '@ninoseki/eslint-plugin-neverthrow':
         specifier: 0.2.0
         version: 0.2.0(eslint@10.6.0(jiti@2.6.1)(supports-color@10.2.2))(typescript@6.0.3)
+      '@slack/types':
+        specifier: 2.21.1
+        version: 2.21.1
       '@tsconfig/node-lts':
         specifier: 24.0.0
         version: 24.0.0

@@ -1,3 +1,4 @@
+import type { ContextBlock, HeaderBlock, SectionBlock } from '@slack/types'
 import { WebClient } from '@slack/web-api'
 import { err, ok, type Result, ResultAsync } from 'neverthrow'
 
@@ -13,10 +14,17 @@ export interface SlackMessageMetadata {
   event_payload: Record<string, string | number | boolean>
 }
 
+export type SlackBlock = HeaderBlock | SectionBlock | ContextBlock
+
 export interface SlackMessageContent {
   text: string
   color?: string
   metadata?: SlackMessageMetadata
+  blocks?: SlackBlock[]
+  /** Only honoured by postMessage — chat.update cannot change a message's authorship. */
+  username?: string
+  /** Only honoured by postMessage — chat.update cannot change a message's authorship. */
+  iconUrl?: string
 }
 
 export interface SlackMessageRef {
@@ -38,12 +46,13 @@ export interface SlackNotifier {
   ): ResultAsync<SlackMessageRef | null, SlackApiError>
 }
 
+type SlackAttachment =
+  | { color: string; text: string; mrkdwn_in: ['text'] }
+  | { color: string; blocks: SlackBlock[] }
+
 type MessagePayload = { metadata?: SlackMessageMetadata } & (
   | { text: string; attachments?: never }
-  | {
-      attachments: Array<{ color: string; text: string; mrkdwn_in: ['text'] }>
-      text?: never
-    }
+  | { attachments: SlackAttachment[]; text?: string }
 )
 
 const wrapSlackApi = <T>(
@@ -55,14 +64,22 @@ const wrapSlackApi = <T>(
     (caughtErr) => new SlackApiError(message, caughtErr),
   )
 
-const buildPayload = (content: SlackMessageContent): MessagePayload => {
+export const buildPayload = (content: SlackMessageContent): MessagePayload => {
   // Slack renders the coloured border only when the body lives inside the attachment.
+  // `text` is still carried at the top level as fallback for notifications/screen readers.
   const base: MessagePayload =
     content.color !== undefined
       ? {
           attachments: [
-            { color: content.color, text: content.text, mrkdwn_in: ['text'] },
+            content.blocks !== undefined
+              ? { color: content.color, blocks: content.blocks }
+              : {
+                  color: content.color,
+                  text: content.text,
+                  mrkdwn_in: ['text'],
+                },
           ],
+          text: content.text,
         }
       : { text: content.text }
   return content.metadata !== undefined
@@ -118,6 +135,12 @@ export const createSlackNotifier = (
           client.chat.postMessage({
             channel: channelId,
             ...buildPayload(content),
+            ...(content.username !== undefined
+              ? { username: content.username }
+              : {}),
+            ...(content.iconUrl !== undefined
+              ? { icon_url: content.iconUrl }
+              : {}),
           }),
           'failed to post Slack message',
         ).andThen((res) =>

@@ -10,7 +10,9 @@ import {
 } from '@fohte/service-kit/shutdown'
 import { serve } from '@hono/node-server'
 
+import { createOctoStsTokenCache } from '#auth/octo-sts'
 import { loadConfig } from '#config'
+import { createGitHubClient } from '#github-client'
 import { logger } from '#logger'
 import { createApp } from '#server'
 import { createSlackNotifier } from '#slack'
@@ -29,9 +31,11 @@ const main = (): void => {
     config.slackBotToken,
     config.slackChannel,
   )
+  const octoStsTokenCache = createOctoStsTokenCache(config.octoSts)
+  const githubClient = createGitHubClient(octoStsTokenCache)
   const app = createApp({
     sources: [
-      createGithubSource(config.githubWebhookSecret),
+      createGithubSource(config.githubWebhookSecret, githubClient),
       createSentrySource(config.sentryWebhookSecret),
     ],
     notifier,
