@@ -1,19 +1,13 @@
 import type { IssuesOpenedEvent } from '@octokit/webhooks-types'
 
-import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import type {
+  ThirdPartyActivityInput,
+  ThirdPartyActivityNotification,
+} from '#sources/github/third-party'
+import { buildThirdPartyActivityNotification } from '#sources/github/third-party'
 
-export interface IssueInput {
-  repo: string
-  title: string
-  url: string
-  author: string
-}
-
-export interface IssueNotification {
-  text: string
-  repo: string
-  url: string
-}
+export type IssueInput = ThirdPartyActivityInput
+export type IssueNotification = ThirdPartyActivityNotification
 
 export const extractIssueInput = (payload: IssuesOpenedEvent): IssueInput => ({
   repo: payload.repository.full_name,
@@ -22,14 +16,5 @@ export const extractIssueInput = (payload: IssuesOpenedEvent): IssueInput => ({
   author: payload.sender.login,
 })
 
-export const buildIssueNotification = (
-  input: IssueInput,
-): IssueNotification => ({
-  text: [
-    `:speech_balloon: *New issue opened on \`${escapeSlackMrkdwn(input.repo)}\` by \`${escapeSlackMrkdwn(input.author)}\`*`,
-    `*${escapeSlackMrkdwn(input.title)}*`,
-    `<${input.url}|View issue>`,
-  ].join('\n'),
-  repo: input.repo,
-  url: input.url,
-})
+export const buildIssueNotification = (input: IssueInput): IssueNotification =>
+  buildThirdPartyActivityNotification('issue', input)

@@ -4,6 +4,11 @@ import type {
 } from '@octokit/webhooks-types'
 
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import type {
+  ThirdPartyActivityInput,
+  ThirdPartyActivityNotification,
+} from '#sources/github/third-party'
+import { buildThirdPartyActivityNotification } from '#sources/github/third-party'
 
 export type PullRequestState = 'opened' | 'closed' | 'merged'
 
@@ -81,18 +86,8 @@ export const buildPullRequestNotification = (
   }
 }
 
-export interface ThirdPartyPullRequestInput {
-  repo: string
-  title: string
-  url: string
-  author: string
-}
-
-export interface ThirdPartyPullRequestNotification {
-  text: string
-  repo: string
-  url: string
-}
+export type ThirdPartyPullRequestInput = ThirdPartyActivityInput
+export type ThirdPartyPullRequestNotification = ThirdPartyActivityNotification
 
 export const extractThirdPartyPullRequestInput = (
   payload: PullRequestOpenedEvent,
@@ -105,12 +100,5 @@ export const extractThirdPartyPullRequestInput = (
 
 export const buildThirdPartyPullRequestNotification = (
   input: ThirdPartyPullRequestInput,
-): ThirdPartyPullRequestNotification => ({
-  text: [
-    `:speech_balloon: *New pull request opened on \`${escapeSlackMrkdwn(input.repo)}\` by \`${escapeSlackMrkdwn(input.author)}\`*`,
-    `*${escapeSlackMrkdwn(input.title)}*`,
-    `<${input.url}|View pull request>`,
-  ].join('\n'),
-  repo: input.repo,
-  url: input.url,
-})
+): ThirdPartyPullRequestNotification =>
+  buildThirdPartyActivityNotification('pull request', input)
