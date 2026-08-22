@@ -106,6 +106,12 @@ The message links to the issue/PR and names its author; it carries no color or m
 
 All other events and actions short-circuit to `ignored` or `filtered`.
 
+### `star`
+
+Handled for `action === "created"` only; `action === "deleted"` (unstar) short-circuits to `ignored`. GitHub's webhook subscription is per-event rather than per-action, so `deleted` payloads still arrive and must be filtered in the handler.
+
+The message is posted to `SLACK_ACTIVITY_CHANNEL` (default `#github_activity`) rather than `SLACK_CHANNEL`, since a star is not an alert.
+
 ### Sentry issue alerts
 
 A Slack message is posted only when **both** of the following are true:
