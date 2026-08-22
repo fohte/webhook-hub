@@ -8,12 +8,7 @@ import {
 } from '@fohte/service-kit/env'
 import type { Result } from 'neverthrow'
 
-export interface OctoStsConfig {
-  url: string
-  scope: string
-  identity: string
-  saTokenPath: string
-}
+import type { OctoStsConfig } from '#auth/octo-sts'
 
 export interface Config {
   githubWebhookSecret: string
