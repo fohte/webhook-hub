@@ -31,10 +31,15 @@ const createNotifier = () => {
   return { notifier, postMessage }
 }
 
+const createGithubClient = () => ({
+  findPullRequestForCommit: vi.fn().mockReturnValue(okAsync(null)),
+  findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
+})
+
 const createTestApp = (notifier: SlackNotifier): Hono =>
   createApp({
     sources: [
-      createGithubSource(GITHUB_SECRET),
+      createGithubSource(GITHUB_SECRET, createGithubClient()),
       createSentrySource(SENTRY_SECRET),
     ],
     notifier,
@@ -50,12 +55,19 @@ const githubWorkflowRunFailureBody = JSON.stringify({
   action: 'completed',
   repository: {
     full_name: 'fohte/example',
+    owner: { login: 'fohte' },
+    name: 'example',
     default_branch: 'main',
   },
   workflow_run: {
+    id: 1,
     name: 'CI',
+    event: 'push',
     head_branch: 'main',
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
+    head_commit: { message: 'fix: something' },
+    display_title: 'fix: something',
+    triggering_actor: { login: 'octocat' },
     html_url: 'https://github.com/fohte/example/actions/runs/1',
     conclusion: 'failure',
     head_repository: {
@@ -64,11 +76,25 @@ const githubWorkflowRunFailureBody = JSON.stringify({
   },
 })
 
-const githubWorkflowRunFailureText = [
-  ':rotating_light: *CI failure on `fohte/example`*',
-  'Workflow: *CI* (branch `main`, commit `abcdef1`)',
-  '<https://github.com/fohte/example/actions/runs/1|View run>',
-].join('\n')
+const githubWorkflowRunFailureContent = {
+  text: '🚨 CI failed',
+  color: '#d73a49',
+  blocks: [
+    { type: 'header', text: { type: 'plain_text', text: '🚨 CI failed' } },
+    { type: 'section', text: { type: 'mrkdwn', text: 'fix: something' } },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: 'fohte/example · <https://github.com/fohte/example/actions/runs/1|View run>',
+        },
+      ],
+    },
+  ],
+  username: 'GitHub CI',
+  iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+}
 
 const sentryIssueAlertTriggeredBody = JSON.stringify({
   action: 'triggered',
@@ -108,9 +134,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
       status: 200,
       body: { ok: true, outcome: 'notified' },
     })
-    expect(postMessage.mock.calls).toEqual([
-      [{ text: githubWorkflowRunFailureText }],
-    ])
+    expect(postMessage.mock.calls).toEqual([[githubWorkflowRunFailureContent]])
   })
 
   it('notifies Slack for POST /sentry with a valid signature and a triggered event_alert', async () => {
@@ -283,7 +307,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
     })
 
     expect(postMessage.mock.calls).toEqual([
-      [{ text: githubWorkflowRunFailureText }],
+      [githubWorkflowRunFailureContent],
       [{ text: sentryIssueAlertTriggeredText }],
     ])
   })

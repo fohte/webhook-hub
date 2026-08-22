@@ -11,6 +11,11 @@ const createNotifier = () => ({
   findMessageByMetadata: vi.fn().mockReturnValue(okAsync(null)),
 })
 
+const createGithubClient = () => ({
+  findPullRequestForCommit: vi.fn().mockReturnValue(okAsync(null)),
+  findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
+})
+
 const dispatchOutcome = async (
   ...args: Parameters<typeof dispatch>
 ): Promise<DispatchOutcome> => (await dispatch(...args))._unsafeUnwrap()
@@ -25,12 +30,19 @@ const workflowRunPayload = (overrides: {
   action: overrides.action ?? 'completed',
   repository: {
     full_name: 'fohte/example',
+    owner: { login: 'fohte' },
+    name: 'example',
     default_branch: overrides.defaultBranch ?? 'main',
   },
   workflow_run: {
+    id: 1,
     name: 'CI',
+    event: 'push',
     head_branch: overrides.branch ?? 'main',
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
+    head_commit: { message: 'fix: something' },
+    display_title: 'fix: something',
+    triggering_actor: { login: 'octocat' },
     html_url: 'https://github.com/fohte/example/actions/runs/1',
     conclusion: overrides.conclusion ?? 'failure',
     head_repository: {
@@ -58,17 +70,37 @@ describe('dispatch (workflow_run)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'workflow_run', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'workflow_run',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       { name: 'workflow_run', payload: workflowRunPayload({}) },
     )
 
     expect(outcome).toBe('notified')
     expect(notifier.postMessage).toHaveBeenCalledExactlyOnceWith({
-      text: [
-        ':rotating_light: *CI failure on `fohte/example`*',
-        'Workflow: *CI* (branch `main`, commit `abcdef1`)',
-        '<https://github.com/fohte/example/actions/runs/1|View run>',
-      ].join('\n'),
+      text: '🚨 CI failed',
+      color: '#d73a49',
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: '🚨 CI failed' } },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: 'fix: something' },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: 'fohte/example · <https://github.com/fohte/example/actions/runs/1|View run>',
+            },
+          ],
+        },
+      ],
+      username: 'GitHub CI',
+      iconUrl: 'https://avatars.githubusercontent.com/in/15368',
     })
   })
 
@@ -76,7 +108,12 @@ describe('dispatch (workflow_run)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'workflow_run', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'workflow_run',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       {
         name: 'workflow_run',
         payload: workflowRunPayload({ action: 'requested' }),
@@ -91,7 +128,12 @@ describe('dispatch (workflow_run)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'workflow_run', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'workflow_run',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       {
         name: 'workflow_run',
         payload: workflowRunPayload({ conclusion: 'success' }),
@@ -108,7 +150,12 @@ describe('dispatch (pull_request)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'pull_request', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'pull_request',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({ action: 'opened' }),
@@ -138,7 +185,12 @@ describe('dispatch (pull_request)', () => {
     )
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'pull_request', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'pull_request',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({
@@ -174,7 +226,12 @@ describe('dispatch (pull_request)', () => {
     notifier.findMessageByMetadata.mockReturnValue(okAsync(null))
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'pull_request', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'pull_request',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({
@@ -204,7 +261,12 @@ describe('dispatch (pull_request)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'pull_request', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'pull_request',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({ action: 'synchronize' }),
@@ -222,7 +284,12 @@ describe('dispatch (pull_request)', () => {
     )
 
     const result = await dispatch(
-      { deliveryId: 'delivery-1', event: 'pull_request', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'pull_request',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       {
         name: 'pull_request',
         payload: securityPullRequestPayload({
@@ -243,7 +310,12 @@ describe('dispatch (unrecognized event)', () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(
-      { deliveryId: 'delivery-1', event: 'issues', notifier },
+      {
+        deliveryId: 'delivery-1',
+        event: 'issues',
+        notifier,
+        githubClient: createGithubClient(),
+      },
       { name: 'issues', payload: {} },
     )
 
