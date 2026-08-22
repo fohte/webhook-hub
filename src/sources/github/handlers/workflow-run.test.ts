@@ -100,6 +100,13 @@ describe('buildWorkflowRunNotification', () => {
       workflow: 'CI',
       url: 'https://github.com/fohte/example/actions/runs/1',
     })
+  })
+
+  it('calls the GitHub API with the commit sha and run id on a push run', async () => {
+    const deps = createDeps()
+
+    await buildWorkflowRunNotification(baseInput(), deps)
+
     expect(
       deps.githubClient.findPullRequestForCommit,
     ).toHaveBeenCalledExactlyOnceWith(
