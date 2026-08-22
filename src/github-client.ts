@@ -77,7 +77,7 @@ export const createGitHubClient = (
           )
         }
         return ResultAsync.fromPromise(
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- response shape is validated by callers against the endpoint's documented schema
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- trusts GitHub's documented REST response shape without runtime validation
           res.json() as Promise<T>,
           (cause) =>
             new GitHubApiError(
