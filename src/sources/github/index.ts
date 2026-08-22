@@ -1,11 +1,13 @@
 import { Webhooks } from '@octokit/webhooks'
 
+import type { GitHubClient } from '#github-client'
 import { dispatch } from '#sources/github/dispatch'
 import type { WebhookSource } from '#webhook-source'
 
 export const createGithubSource = (
   webhookSecret: string,
   activityChannel: string,
+  githubClient: GitHubClient,
 ): WebhookSource => {
   const webhooks = new Webhooks({ secret: webhookSecret })
   return {
@@ -32,6 +34,7 @@ export const createGithubSource = (
           event: context.eventName,
           notifier,
           activityChannel,
+          githubClient,
         },
         { name: context.eventName, payload },
       ),

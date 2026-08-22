@@ -5,6 +5,7 @@ import type {
 } from '@octokit/webhooks-types'
 import { okAsync, type ResultAsync } from 'neverthrow'
 
+import type { GitHubClient } from '#github-client'
 import { logger } from '#logger'
 import type { SlackApiError, SlackMessageContent, SlackNotifier } from '#slack'
 import {
@@ -22,6 +23,7 @@ export interface DispatchContext {
   event: string
   notifier: SlackNotifier
   activityChannel: string
+  githubClient: GitHubClient
 }
 
 interface ParsedEvent {
@@ -49,23 +51,27 @@ export const dispatch = (
         return okAsync('ignored')
       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- payload union refinement
       const typed = parsed.payload as WorkflowRunCompletedEvent
-      const note = buildWorkflowRunNotification(extractWorkflowRunInput(typed))
-      if (note === null) return okAsync('filtered')
-      return ctx.notifier
-        .postMessage({ text: note.text })
-        .map((): DispatchOutcome => {
-          logger.info(
-            {
-              delivery_id: ctx.deliveryId,
-              event: 'workflow_run',
-              repo: note.repo,
-              workflow: note.workflow,
-              url: note.url,
-            },
-            'slack_notified',
-          )
-          return 'notified'
-        })
+      const input = extractWorkflowRunInput(typed)
+      return buildWorkflowRunNotification(input, {
+        githubClient: ctx.githubClient,
+      }).andThen((note) => {
+        if (note === null) return okAsync<DispatchOutcome>('filtered')
+        return ctx.notifier
+          .postMessage(note.content)
+          .map((): DispatchOutcome => {
+            logger.info(
+              {
+                delivery_id: ctx.deliveryId,
+                event: 'workflow_run',
+                repo: note.repo,
+                workflow: note.workflow,
+                url: note.url,
+              },
+              'slack_notified',
+            )
+            return 'notified'
+          })
+      })
     }
     case 'pull_request': {
       if (!hasAnyAction(parsed.payload, ['opened', 'closed']))

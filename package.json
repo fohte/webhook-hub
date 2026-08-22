@@ -34,6 +34,7 @@
     "@eslint/eslintrc": "3.3.6",
     "@fohte/eslint-config": "0.4.0",
     "@ninoseki/eslint-plugin-neverthrow": "0.2.0",
+    "@slack/types": "2.21.1",
     "@tsconfig/node-lts": "24.0.0",
     "@tsconfig/strictest": "2.0.8",
     "@types/node": "24.13.3",

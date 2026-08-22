@@ -49,7 +49,24 @@ A Slack message is posted only when **all** of the following are true:
 - `workflow_run.head_branch === repository.default_branch`
 - `workflow_run.head_repository.full_name === repository.full_name` — excludes runs originating from forks, whose `head_branch` can collide with the upstream default branch name.
 
-The message names the repo, workflow, branch, and short SHA, and links to the run page.
+The message is posted as a Slack attachment with a red border, containing Block Kit blocks:
+
+1. **header** — `🚨 {workflow name} failed`
+2. **section** (omitted for `schedule`/`workflow_dispatch`) — what changed, depending on the triggering event:
+
+   | Trigger                      | Content                                                                                                                 |
+   | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+   | `push`                       | `#{PR number} {PR title}` linked to the merged PR for that commit, or the commit message's first line if no PR is found |
+   | `schedule`                   | omitted                                                                                                                 |
+   | `workflow_dispatch`          | omitted                                                                                                                 |
+   | other (e.g. `issue_comment`) | the run's `display_title`                                                                                               |
+
+3. **section** (omitted if unavailable) — `失敗: \`{job name}\` › \`{step name}\`` for the first failed job/step
+4. **context** — `{repo} · {trigger label} · <run url|View run>`, where the trigger label is omitted for `push`, `定期実行` for `schedule`, `` `@{actor}` が手動実行 `` for `workflow_dispatch`, and `` `{event}` 起因 `` for other triggers
+
+The message is posted with a custom bot identity (username `GitHub CI`, GitHub Actions' avatar), requiring the `chat:write.customize` Slack scope.
+
+The PR and failed-step lookups use the GitHub REST API via octo-sts; a lookup failure degrades gracefully — the notification still posts, just without that line.
 
 ### `pull_request`
 

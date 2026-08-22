@@ -12,6 +12,11 @@ const createNotifier = () => ({
   findMessageByMetadata: vi.fn().mockReturnValue(okAsync(null)),
 })
 
+const createGithubClient = () => ({
+  findPullRequestForCommit: vi.fn().mockReturnValue(okAsync(null)),
+  findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
+})
+
 const createContext = (
   event: string,
   notifier: DispatchContext['notifier'],
@@ -20,6 +25,7 @@ const createContext = (
   event,
   notifier,
   activityChannel: '#github_activity',
+  githubClient: createGithubClient(),
 })
 
 const dispatchOutcome = async (
@@ -36,12 +42,19 @@ const workflowRunPayload = (overrides: {
   action: overrides.action ?? 'completed',
   repository: {
     full_name: 'fohte/example',
+    owner: { login: 'fohte' },
+    name: 'example',
     default_branch: overrides.defaultBranch ?? 'main',
   },
   workflow_run: {
+    id: 1,
     name: 'CI',
+    event: 'push',
     head_branch: overrides.branch ?? 'main',
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
+    head_commit: { message: 'fix: something' },
+    display_title: 'fix: something',
+    triggering_actor: { login: 'octocat' },
     html_url: 'https://github.com/fohte/example/actions/runs/1',
     conclusion: overrides.conclusion ?? 'failure',
     head_repository: {
@@ -75,11 +88,26 @@ describe('dispatch (workflow_run)', () => {
 
     expect(outcome).toBe('notified')
     expect(notifier.postMessage).toHaveBeenCalledExactlyOnceWith({
-      text: [
-        ':rotating_light: *CI failure on `fohte/example`*',
-        'Workflow: *CI* (branch `main`, commit `abcdef1`)',
-        '<https://github.com/fohte/example/actions/runs/1|View run>',
-      ].join('\n'),
+      text: '🚨 CI failed',
+      color: '#d73a49',
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: '🚨 CI failed' } },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: 'fix: something' },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: 'fohte/example · <https://github.com/fohte/example/actions/runs/1|View run>',
+            },
+          ],
+        },
+      ],
+      username: 'GitHub CI',
+      iconUrl: 'https://avatars.githubusercontent.com/in/15368',
     })
   })
 

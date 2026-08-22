@@ -9,7 +9,7 @@
 
 Only the following events are forwarded to Slack; everything else is acknowledged with `200` and dropped.
 
-- **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded.
+- **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change.
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
 - **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`.
 
@@ -23,14 +23,18 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 
 ## Configuration
 
-| Variable                 | Required | Default            | Description                                                                                                   |
-| ------------------------ | -------- | ------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_WEBHOOK_SECRET`  | Yes      | —                  | Shared secret for HMAC signature verification.                                                                |
-| `SENTRY_WEBHOOK_SECRET`  | Yes      | —                  | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
-| `SLACK_BOT_TOKEN`        | Yes      | —                  | Slack bot token. Required scopes are listed in the Setup section.                                             |
-| `SLACK_CHANNEL`          | No       | `#infra_alert`     | Slack channel ID or name to post to.                                                                          |
-| `SLACK_ACTIVITY_CHANNEL` | No       | `#github_activity` | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
-| `PORT`                   | No       | `8080`             | HTTP listen port.                                                                                             |
+| Variable                 | Required | Default                                  | Description                                                                                                   |
+| ------------------------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                                                |
+| `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
+| `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                                             |
+| `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
+| `SLACK_ACTIVITY_CHANNEL` | No       | `#github_activity`                       | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
+| `PORT`                   | No       | `8080`                                   | HTTP listen port.                                                                                             |
+| `OCTO_STS_URL`           | Yes      | —                                        | octo-sts endpoint used to exchange an OIDC token for a short-lived GitHub App token.                          |
+| `OCTO_STS_SCOPE`         | Yes      | —                                        | GitHub org octo-sts issues the token for (owner-only, not `owner/repo`).                                      |
+| `OCTO_STS_IDENTITY`      | Yes      | —                                        | octo-sts trust policy identity to assume.                                                                     |
+| `OCTO_STS_SA_TOKEN_PATH` | No       | `/var/run/secrets/tokens/octo-sts-token` | Path to the projected Kubernetes ServiceAccount token used as the OIDC token.                                 |
 
 ## Setup
 
@@ -61,11 +65,16 @@ To run the service against real deliveries, these things need to be wired up.
 
    Creating the integration alone does not send anything — add an action to each project's Alert Rules that notifies this integration.
 
-4. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
+4. **Provision octo-sts.** The CI-failure notification calls the GitHub REST API (PR lookup, failed job/step) via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. This requires an octo-sts trust policy that grants the deploying identity read-only `pull_requests` and `actions` permissions, and a Kubernetes ServiceAccount token projected into the container at the path configured by `OCTO_STS_SA_TOKEN_PATH`. The `OCTO_STS_*` variables above point the service at the octo-sts endpoint and the trust policy identity/scope to assume.
+
+5. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
    - `chat:write` — post and edit messages
+   - `chat:write.customize` — post CI-failure notifications under a custom username/icon
    - `channels:history` (public channel) or `groups:history` (private channel) — look up the original PR message to edit on close
    - `metadata.message:read` — read the embedded PR identifier on history items
    - `channels:read` and/or `groups:read` — resolve `SLACK_CHANNEL` name (`#foo`) to a channel ID
+
+   Adding a scope to an existing app requires reinstalling it to the workspace.
 
 ## Development
 
