@@ -2,6 +2,8 @@ import type { ContextBlock, HeaderBlock, SectionBlock } from '@slack/types'
 import { WebClient } from '@slack/web-api'
 import { err, ok, type Result, ResultAsync } from 'neverthrow'
 
+import { toSlackFallbackText } from '#slack-mrkdwn'
+
 export class SlackApiError extends Error {
   constructor(message: string, cause?: unknown) {
     super(message, cause === undefined ? undefined : { cause })
@@ -49,12 +51,12 @@ export interface SlackNotifier {
 }
 
 type SlackAttachment =
-  | { color: string; text: string; mrkdwn_in: ['text'] }
-  | { color: string; blocks: SlackBlock[] }
+  | { color: string; text: string; mrkdwn_in: ['text']; fallback: string }
+  | { color: string; blocks: SlackBlock[]; fallback: string }
 
 type MessagePayload = { metadata?: SlackMessageMetadata } & (
   | { text: string; attachments?: never }
-  | { attachments: SlackAttachment[]; text?: string }
+  | { attachments: SlackAttachment[]; text?: never }
 )
 
 const wrapSlackApi = <T>(
@@ -68,20 +70,27 @@ const wrapSlackApi = <T>(
 
 export const buildPayload = (content: SlackMessageContent): MessagePayload => {
   // Slack renders the coloured border only when the body lives inside the attachment.
-  // `text` is still carried at the top level as fallback for notifications/screen readers.
+  // Top-level `text` must stay unset here: when the body lives in an attachment,
+  // Slack still renders top-level `text` as a second, separate message body above
+  // it, duplicating the content. `fallback` is the attachment-scoped equivalent
+  // for clients that can't render attachments/blocks (push notifications, IRC).
   const base: MessagePayload =
     content.color !== undefined
       ? {
           attachments: [
             content.blocks !== undefined
-              ? { color: content.color, blocks: content.blocks }
+              ? {
+                  color: content.color,
+                  blocks: content.blocks,
+                  fallback: toSlackFallbackText(content.text),
+                }
               : {
                   color: content.color,
                   text: content.text,
                   mrkdwn_in: ['text'],
+                  fallback: toSlackFallbackText(content.text),
                 },
           ],
-          text: content.text,
         }
       : { text: content.text }
   return content.metadata !== undefined

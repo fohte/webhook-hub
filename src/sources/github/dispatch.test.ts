@@ -77,6 +77,48 @@ const securityPullRequestPayload = (overrides: {
   },
 })
 
+const pullRequestPayload = (overrides: {
+  action?: string
+  senderLogin?: string
+  senderType?: string
+}): unknown => ({
+  action: overrides.action ?? 'opened',
+  repository: {
+    full_name: 'fohte/example',
+    owner: { login: 'fohte' },
+  },
+  pull_request: {
+    title: 'feat: add a thing',
+    head: { ref: 'feature/x' },
+    html_url: 'https://github.com/fohte/example/pull/2',
+    merged: false,
+  },
+  sender: {
+    login: overrides.senderLogin ?? 'octocat',
+    type: overrides.senderType ?? 'User',
+  },
+})
+
+const issuesPayload = (overrides: {
+  action?: string
+  senderLogin?: string
+  senderType?: string
+}): unknown => ({
+  action: overrides.action ?? 'opened',
+  repository: {
+    full_name: 'fohte/example',
+    owner: { login: 'fohte' },
+  },
+  issue: {
+    title: 'bug: something broke',
+    html_url: 'https://github.com/fohte/example/issues/3',
+  },
+  sender: {
+    login: overrides.senderLogin ?? 'octocat',
+    type: overrides.senderType ?? 'User',
+  },
+})
+
 describe('dispatch (workflow_run)', () => {
   it('posts to Slack and returns notified for a failed run on the default branch', async () => {
     const notifier = createNotifier()
@@ -254,6 +296,73 @@ describe('dispatch (pull_request)', () => {
     expect(notifier.postMessage).not.toHaveBeenCalled()
   })
 
+  it('posts to the activity channel and returns notified when a third-party pull request is opened', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(
+      createContext('pull_request', notifier),
+      { name: 'pull_request', payload: pullRequestPayload({}) },
+    )
+
+    expect(outcome).toBe('notified')
+    expect(notifier.postMessage).toHaveBeenCalledExactlyOnceWith({
+      text: [
+        ':speech_balloon: *New pull request opened on `fohte/example` by `octocat`*',
+        '*feat: add a thing*',
+        '<https://github.com/fohte/example/pull/2|View pull request>',
+      ].join('\n'),
+      channel: '#github_activity',
+    })
+  })
+
+  it('returns filtered without posting when a pull request is opened by a bot', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(
+      createContext('pull_request', notifier),
+      {
+        name: 'pull_request',
+        payload: pullRequestPayload({
+          senderLogin: 'renovate[bot]',
+          senderType: 'Bot',
+        }),
+      },
+    )
+
+    expect(outcome).toBe('filtered')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('returns filtered without posting when a pull request is opened by the repository owner', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(
+      createContext('pull_request', notifier),
+      {
+        name: 'pull_request',
+        payload: pullRequestPayload({ senderLogin: 'fohte' }),
+      },
+    )
+
+    expect(outcome).toBe('filtered')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('returns filtered without posting when a third-party pull request is closed', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(
+      createContext('pull_request', notifier),
+      {
+        name: 'pull_request',
+        payload: pullRequestPayload({ action: 'closed' }),
+      },
+    )
+
+    expect(outcome).toBe('filtered')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+
   it('propagates a findMessageByMetadata failure without posting or updating', async () => {
     const notifier = createNotifier()
     notifier.findMessageByMetadata.mockReturnValue(
@@ -315,12 +424,72 @@ describe('dispatch (star)', () => {
   })
 })
 
-describe('dispatch (unrecognized event)', () => {
-  it('returns ignored without posting', async () => {
+describe('dispatch (issues)', () => {
+  it('posts to the activity channel and returns notified when a third-party issue is opened', async () => {
     const notifier = createNotifier()
 
     const outcome = await dispatchOutcome(createContext('issues', notifier), {
       name: 'issues',
+      payload: issuesPayload({}),
+    })
+
+    expect(outcome).toBe('notified')
+    expect(notifier.postMessage).toHaveBeenCalledExactlyOnceWith({
+      text: [
+        ':speech_balloon: *New issue opened on `fohte/example` by `octocat`*',
+        '*bug: something broke*',
+        '<https://github.com/fohte/example/issues/3|View issue>',
+      ].join('\n'),
+      channel: '#github_activity',
+    })
+  })
+
+  it('returns filtered without posting when an issue is opened by a bot', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext('issues', notifier), {
+      name: 'issues',
+      payload: issuesPayload({
+        senderLogin: 'dependabot[bot]',
+        senderType: 'Bot',
+      }),
+    })
+
+    expect(outcome).toBe('filtered')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('returns filtered without posting when an issue is opened by the repository owner', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext('issues', notifier), {
+      name: 'issues',
+      payload: issuesPayload({ senderLogin: 'fohte' }),
+    })
+
+    expect(outcome).toBe('filtered')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('returns ignored without posting for an unrelated action', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext('issues', notifier), {
+      name: 'issues',
+      payload: issuesPayload({ action: 'closed' }),
+    })
+
+    expect(outcome).toBe('ignored')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+})
+
+describe('dispatch (unrecognized event)', () => {
+  it('returns ignored without posting', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext('ping', notifier), {
+      name: 'ping',
       payload: {},
     })
 

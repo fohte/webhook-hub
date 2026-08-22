@@ -1,4 +1,5 @@
 import type {
+  IssuesOpenedEvent,
   PullRequestClosedEvent,
   PullRequestOpenedEvent,
   StarCreatedEvent,
@@ -10,8 +11,14 @@ import type { GitHubClient } from '#github-client'
 import { logger } from '#logger'
 import type { SlackApiError, SlackMessageContent, SlackNotifier } from '#slack'
 import {
+  buildIssueNotification,
+  extractIssueInput,
+} from '#sources/github/handlers/issue'
+import {
   buildPullRequestNotification,
+  buildThirdPartyPullRequestNotification,
   extractPullRequestInput,
+  extractThirdPartyPullRequestInput,
 } from '#sources/github/handlers/pull-request'
 import {
   buildStarNotification,
@@ -21,6 +28,7 @@ import {
   buildWorkflowRunNotification,
   extractWorkflowRunInput,
 } from '#sources/github/handlers/workflow-run'
+import { isThirdParty } from '#sources/github/third-party'
 import type { DispatchOutcome } from '#webhook-source'
 
 export interface DispatchContext {
@@ -85,7 +93,31 @@ export const dispatch = (
       const typed = parsed.payload as
         PullRequestOpenedEvent | PullRequestClosedEvent
       const note = buildPullRequestNotification(extractPullRequestInput(typed))
-      if (note === null) return okAsync('filtered')
+      if (note === null) {
+        if (typed.action !== 'opened' || !isThirdParty(typed))
+          return okAsync('filtered')
+
+        const activityNote = buildThirdPartyPullRequestNotification(
+          extractThirdPartyPullRequestInput(typed),
+        )
+        return ctx.notifier
+          .postMessage({
+            text: activityNote.text,
+            channel: ctx.activityChannel,
+          })
+          .map((): DispatchOutcome => {
+            logger.info(
+              {
+                delivery_id: ctx.deliveryId,
+                event: 'pull_request',
+                repo: activityNote.repo,
+                url: activityNote.url,
+              },
+              'slack_notified',
+            )
+            return 'notified'
+          })
+      }
 
       const content: SlackMessageContent = {
         text: note.text,
@@ -154,6 +186,28 @@ export const dispatch = (
         )
         return 'notified'
       })
+    }
+    case 'issues': {
+      if (!hasAnyAction(parsed.payload, ['opened'])) return okAsync('ignored')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- payload union refinement
+      const typed = parsed.payload as IssuesOpenedEvent
+      if (!isThirdParty(typed)) return okAsync('filtered')
+
+      const note = buildIssueNotification(extractIssueInput(typed))
+      return ctx.notifier
+        .postMessage({ text: note.text, channel: ctx.activityChannel })
+        .map((): DispatchOutcome => {
+          logger.info(
+            {
+              delivery_id: ctx.deliveryId,
+              event: 'issues',
+              repo: note.repo,
+              url: note.url,
+            },
+            'slack_notified',
+          )
+          return 'notified'
+        })
     }
     default:
       return okAsync('ignored')

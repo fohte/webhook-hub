@@ -4,6 +4,11 @@ import type {
 } from '@octokit/webhooks-types'
 
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import type {
+  ThirdPartyActivityInput,
+  ThirdPartyActivityNotification,
+} from '#sources/github/third-party'
+import { buildThirdPartyActivityNotification } from '#sources/github/third-party'
 
 export type PullRequestState = 'opened' | 'closed' | 'merged'
 
@@ -80,3 +85,20 @@ export const buildPullRequestNotification = (
     state: input.state,
   }
 }
+
+export type ThirdPartyPullRequestInput = ThirdPartyActivityInput
+export type ThirdPartyPullRequestNotification = ThirdPartyActivityNotification
+
+export const extractThirdPartyPullRequestInput = (
+  payload: PullRequestOpenedEvent,
+): ThirdPartyPullRequestInput => ({
+  repo: payload.repository.full_name,
+  title: payload.pull_request.title,
+  url: payload.pull_request.html_url,
+  author: payload.sender.login,
+})
+
+export const buildThirdPartyPullRequestNotification = (
+  input: ThirdPartyPullRequestInput,
+): ThirdPartyPullRequestNotification =>
+  buildThirdPartyActivityNotification('pull request', input)
