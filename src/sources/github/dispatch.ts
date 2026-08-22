@@ -1,6 +1,7 @@
 import type {
   PullRequestClosedEvent,
   PullRequestOpenedEvent,
+  StarCreatedEvent,
   WorkflowRunCompletedEvent,
 } from '@octokit/webhooks-types'
 import { okAsync, type ResultAsync } from 'neverthrow'
@@ -12,6 +13,10 @@ import {
   buildPullRequestNotification,
   extractPullRequestInput,
 } from '#sources/github/handlers/pull-request'
+import {
+  buildStarNotification,
+  extractStarInput,
+} from '#sources/github/handlers/star'
 import {
   buildWorkflowRunNotification,
   extractWorkflowRunInput,
@@ -120,6 +125,30 @@ export const dispatch = (
             state: note.state,
             repo: note.repo,
             url: note.url,
+          },
+          'slack_notified',
+        )
+        return 'notified'
+      })
+    }
+    case 'star': {
+      if (!hasAnyAction(parsed.payload, ['created'])) return okAsync('ignored')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- payload union refinement
+      const typed = parsed.payload as StarCreatedEvent
+      const note = buildStarNotification(extractStarInput(typed))
+
+      const content: SlackMessageContent = {
+        text: note.text,
+        channel: ctx.activityChannel,
+      }
+
+      return ctx.notifier.postMessage(content).map((): DispatchOutcome => {
+        logger.info(
+          {
+            delivery_id: ctx.deliveryId,
+            event: 'star',
+            repo: note.repo,
+            sender: note.sender,
           },
           'slack_notified',
         )

@@ -87,6 +87,12 @@ The link back to the original message uses Slack message metadata (`event_type: 
 
 All other events and actions short-circuit to `ignored`.
 
+### `star`
+
+Handled for `action === "created"` only; `action === "deleted"` (unstar) short-circuits to `ignored`. GitHub's webhook subscription is per-event rather than per-action, so `deleted` payloads still arrive and must be filtered in the handler.
+
+The message is posted to `SLACK_ACTIVITY_CHANNEL` (default `#github_activity`) rather than `SLACK_CHANNEL`, since a star is not an alert.
+
 ### Sentry issue alerts
 
 A Slack message is posted only when **both** of the following are true:

@@ -274,6 +274,47 @@ describe('dispatch (pull_request)', () => {
   })
 })
 
+const starPayload = (overrides: { action?: string }): unknown => ({
+  action: overrides.action ?? 'created',
+  repository: {
+    full_name: 'fohte/example',
+    html_url: 'https://github.com/fohte/example',
+  },
+  sender: { login: 'octocat' },
+})
+
+describe('dispatch (star)', () => {
+  it('posts to the activity channel and returns notified when a repository is starred', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext('star', notifier), {
+      name: 'star',
+      payload: starPayload({}),
+    })
+
+    expect(outcome).toBe('notified')
+    expect(notifier.postMessage).toHaveBeenCalledExactlyOnceWith({
+      text: [
+        ':star: *`fohte/example` was starred by `octocat`*',
+        '<https://github.com/fohte/example|View repository>',
+      ].join('\n'),
+      channel: '#github_activity',
+    })
+  })
+
+  it('returns ignored without posting when the star is removed', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext('star', notifier), {
+      name: 'star',
+      payload: starPayload({ action: 'deleted' }),
+    })
+
+    expect(outcome).toBe('ignored')
+    expect(notifier.postMessage).not.toHaveBeenCalled()
+  })
+})
+
 describe('dispatch (unrecognized event)', () => {
   it('returns ignored without posting', async () => {
     const notifier = createNotifier()
