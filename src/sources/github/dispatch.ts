@@ -21,6 +21,7 @@ export interface DispatchContext {
   deliveryId: string
   event: string
   notifier: SlackNotifier
+  activityChannel: string
 }
 
 interface ParsedEvent {

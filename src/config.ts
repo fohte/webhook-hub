@@ -13,6 +13,7 @@ export interface Config {
   sentryWebhookSecret: string
   slackBotToken: string
   slackChannel: string
+  slackActivityChannel: string
   port: number
 }
 
@@ -24,5 +25,10 @@ export const loadConfig = (
     sentryWebhookSecret: requireString(env, 'SENTRY_WEBHOOK_SECRET'),
     slackBotToken: requireString(env, 'SLACK_BOT_TOKEN'),
     slackChannel: optionalString(env, 'SLACK_CHANNEL', '#infra_alert'),
+    slackActivityChannel: optionalString(
+      env,
+      'SLACK_ACTIVITY_CHANNEL',
+      '#github_activity',
+    ),
     port: optionalInt(env, 'PORT', 8080, { min: 1, max: 65_535 }),
   })

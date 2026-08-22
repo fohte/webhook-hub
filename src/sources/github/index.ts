@@ -3,7 +3,10 @@ import { Webhooks } from '@octokit/webhooks'
 import { dispatch } from '#sources/github/dispatch'
 import type { WebhookSource } from '#webhook-source'
 
-export const createGithubSource = (webhookSecret: string): WebhookSource => {
+export const createGithubSource = (
+  webhookSecret: string,
+  activityChannel: string,
+): WebhookSource => {
   const webhooks = new Webhooks({ secret: webhookSecret })
   return {
     name: 'github',
@@ -24,7 +27,12 @@ export const createGithubSource = (webhookSecret: string): WebhookSource => {
       webhooks.verify(rawBody, headers.get('x-hub-signature-256') ?? ''),
     dispatch: (context, payload, notifier) =>
       dispatch(
-        { deliveryId: context.deliveryId, event: context.eventName, notifier },
+        {
+          deliveryId: context.deliveryId,
+          event: context.eventName,
+          notifier,
+          activityChannel,
+        },
         { name: context.eventName, payload },
       ),
   }

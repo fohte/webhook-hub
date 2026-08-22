@@ -31,7 +31,10 @@ const main = (): void => {
   )
   const app = createApp({
     sources: [
-      createGithubSource(config.githubWebhookSecret),
+      createGithubSource(
+        config.githubWebhookSecret,
+        config.slackActivityChannel,
+      ),
       createSentrySource(config.sentryWebhookSecret),
     ],
     notifier,
