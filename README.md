@@ -64,7 +64,7 @@ To run the service against real deliveries, these things need to be wired up.
 
    Creating the integration alone does not send anything — add an action to each project's Alert Rules that notifies this integration.
 
-4. **Provision octo-sts.** The CI-failure notification calls the GitHub REST API (PR lookup, failed job/step) via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. The issued token only needs read-only `pull_requests` and `actions` permissions. The `OCTO_STS_*` variables above configure this; the trust policy and the ServiceAccount token volume are provisioned separately in `fohte/infra` and `fohte/.github` — out of scope for this PR.
+4. **Provision octo-sts.** The CI-failure notification calls the GitHub REST API (PR lookup, failed job/step) via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. This requires an octo-sts trust policy that grants the deploying identity read-only `pull_requests` and `actions` permissions, and a Kubernetes ServiceAccount token projected into the container at the path configured by `OCTO_STS_SA_TOKEN_PATH`. The `OCTO_STS_*` variables above point the service at the octo-sts endpoint and the trust policy identity/scope to assume.
 
 5. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
    - `chat:write` — post and edit messages
