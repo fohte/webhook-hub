@@ -167,14 +167,16 @@ export const buildWorkflowRunNotification = (
     .findFailedStep(input.repoOwner, input.repoName, input.runId)
     .orElse((error) => {
       logger.warn(
-        { err: error, repo: input.repo, runId: input.runId },
+        { err: error, repo: input.repo, run_id: input.runId },
         'github_api_failed_step_lookup_failed',
       )
       return okAsync(null)
     })
 
-  // schedule/workflow_dispatch runs don't originate from a specific commit's
-  // PR, so skip the lookup entirely rather than call the API for nothing.
+  // PR lookup only applies to `push` runs, where the PR must be inferred
+  // from the commit sha; every other event either has no PR (schedule,
+  // workflow_dispatch) or already reports its own context via
+  // displayTitle, so skip the lookup rather than call the API for nothing.
   const pullRequest =
     input.event === 'push'
       ? deps.githubClient
