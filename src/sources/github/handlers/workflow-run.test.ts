@@ -1,13 +1,22 @@
+import { captureWithFingerprint } from '@fohte/service-kit/observability'
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { GitHubApiError, type GitHubClient } from '#github-client'
+import {
+  GitHubApiError,
+  GitHubAuthError,
+  type GitHubClient,
+} from '#github-client'
 import type { SlackBlock } from '#slack'
 import type {
   WorkflowRunInput,
   WorkflowRunNotificationDeps,
 } from '#sources/github/handlers/workflow-run'
 import { buildWorkflowRunNotification } from '#sources/github/handlers/workflow-run'
+
+vi.mock('@fohte/service-kit/observability', () => ({
+  captureWithFingerprint: vi.fn(),
+}))
 
 const baseInput = (
   overrides: Partial<WorkflowRunInput> = {},
@@ -159,6 +168,78 @@ describe('buildWorkflowRunNotification', () => {
       contextBlock(
         'fohte/example · <https://github.com/fohte/example/actions/runs/1|View run>',
       ),
+    ])
+  })
+
+  it('reports the github-api-lookup-failed fingerprint when the PR lookup fails for a non-auth reason', async () => {
+    const lookupError = new GitHubApiError('boom', undefined)
+    const deps = createDeps({
+      pullRequest: errAsync(lookupError),
+    })
+
+    await buildWorkflowRunNotification(baseInput(), deps)
+
+    expect(vi.mocked(captureWithFingerprint).mock.calls).toEqual([
+      [
+        lookupError,
+        'webhook-hub.github-api-lookup-failed',
+        {
+          extras: {
+            repo: 'fohte/example',
+            sha: 'abcdef1234567890abcdef1234567890abcdef12',
+          },
+        },
+      ],
+    ])
+  })
+
+  it('reports the octo-sts auth-failure fingerprint when the PR lookup fails due to a token error', async () => {
+    const lookupError = new GitHubAuthError(
+      'failed to obtain a GitHub API token',
+      undefined,
+    )
+    const deps = createDeps({
+      pullRequest: errAsync(lookupError),
+    })
+
+    await buildWorkflowRunNotification(baseInput(), deps)
+
+    expect(vi.mocked(captureWithFingerprint).mock.calls).toEqual([
+      [
+        lookupError,
+        'webhook-hub.octo-sts-auth-failed',
+        {
+          extras: {
+            repo: 'fohte/example',
+            sha: 'abcdef1234567890abcdef1234567890abcdef12',
+          },
+        },
+      ],
+    ])
+  })
+
+  it('reports the octo-sts auth-failure fingerprint when the failed-step lookup fails due to a token error', async () => {
+    const lookupError = new GitHubAuthError(
+      'failed to obtain a GitHub API token',
+      undefined,
+    )
+    const deps = createDeps({
+      failedStep: errAsync(lookupError),
+    })
+
+    await buildWorkflowRunNotification(baseInput(), deps)
+
+    expect(vi.mocked(captureWithFingerprint).mock.calls).toEqual([
+      [
+        lookupError,
+        'webhook-hub.octo-sts-auth-failed',
+        {
+          extras: {
+            repo: 'fohte/example',
+            run_id: 42,
+          },
+        },
+      ],
     ])
   })
 

@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@fohte/service-kit':
-        specifier: 0.1.11
-        version: 0.1.11(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)
+        specifier: 0.1.12
+        version: 0.1.12(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)
       '@hono/node-server':
         specifier: 2.0.12
         version: 2.0.12(hono@4.12.34)
@@ -94,6 +94,9 @@ packages:
   '@babel/helper-validator-identifier@7.29.7':
     resolution: {integrity: sha512-qehxGkRj55h/ff8EMaJ+cYhyaKlHIxqYDn682wQD7RNp9UujOQsHog2uS0r2vzr4pW+sXf90NeeayjcNaX3fFg==}
     engines: {node: '>=6.9.0'}
+
+  '@bufbuild/protobuf@2.14.0':
+    resolution: {integrity: sha512-C3UGsiCwSprE2NKIIFA3hCDlpXTMCAXRZuEVp88L1GY36Y41+rYL5fryE+nOFhp4p4JPQvdV8PQ4DWgHgeTE+w==}
 
   '@commitlint/cli@21.2.1':
     resolution: {integrity: sha512-blsZGe29hJ72VGEFVl72IVYX+1vsfINpjA9yWQA6i7OKD/McGEOXg08sKIRKjFk4JvzhV/9n0l3i6NooPLTNfg==}
@@ -561,8 +564,8 @@ packages:
       typescript:
         optional: true
 
-  '@fohte/service-kit@0.1.11':
-    resolution: {integrity: sha512-VfJ5XyQLQOaIDpOiFHTbD4Om/f7Y3D/mCYY8FRFD9s/hC4uRL9S75/Y+T21zyrIbiTwWEbWowdi6wvsH7Z1P2Q==}
+  '@fohte/service-kit@0.1.12':
+    resolution: {integrity: sha512-vs8rf+e1Dea++I0Ua6fmPdJlBax6KPrQ3tjKEo/h2zRzlfjsdTIzNvkSQBlyR8MHfD69lFIrabgmfPrmmsnALA==}
     peerDependencies:
       '@langchain/core': ^1.2.0
       '@opentelemetry/api': ^1.9.1
@@ -3146,6 +3149,8 @@ snapshots:
 
   '@babel/helper-validator-identifier@7.29.7': {}
 
+  '@bufbuild/protobuf@2.14.0': {}
+
   '@commitlint/cli@21.2.1(@types/node@24.13.3)(typescript@6.0.3)':
     dependencies:
       '@commitlint/config-conventional': 21.2.0
@@ -3499,8 +3504,9 @@ snapshots:
       '@ninoseki/eslint-plugin-neverthrow': 0.2.0(eslint@10.6.0(jiti@2.6.1)(supports-color@10.2.2))(typescript@6.0.3)
       typescript: 6.0.3
 
-  '@fohte/service-kit@0.1.11(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)':
+  '@fohte/service-kit@0.1.12(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)':
     dependencies:
+      '@bufbuild/protobuf': 2.14.0
       '@opentelemetry/auto-instrumentations-node': 0.77.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(supports-color@10.2.2)
       '@opentelemetry/exporter-metrics-otlp-proto': 0.219.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/exporter-trace-otlp-proto': 0.219.0(@opentelemetry/api@1.9.1)

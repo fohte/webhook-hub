@@ -1,9 +1,13 @@
+import type { OctoStsTokenCache } from '@fohte/service-kit/octo-sts'
+import { OctoStsError } from '@fohte/service-kit/octo-sts'
 import { errAsync, okAsync } from 'neverthrow'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { OctoStsTokenCache } from '#auth/octo-sts'
-import { OctoStsError } from '#auth/octo-sts'
-import { createGitHubClient, GitHubApiError } from '#github-client'
+import {
+  createGitHubClient,
+  GitHubApiError,
+  GitHubAuthError,
+} from '#github-client'
 
 const createTokenCache = (
   overrides: {
@@ -129,7 +133,7 @@ describe('createGitHubClient', () => {
     })
   })
 
-  it('propagates a token acquisition failure as a GitHubApiError', async () => {
+  it('propagates a token acquisition failure as a GitHubAuthError', async () => {
     const tokenCache = createTokenCache({
       getToken: errAsync(new OctoStsError('boom', undefined)),
     })
@@ -138,7 +142,7 @@ describe('createGitHubClient', () => {
     const result = await client.findFailedStep('fohte', 'example', 42)
 
     expect(result._unsafeUnwrapErr()).toEqual(
-      new GitHubApiError(
+      new GitHubAuthError(
         'failed to obtain a GitHub API token',
         new OctoStsError('boom', undefined),
       ),

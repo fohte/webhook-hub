@@ -1,10 +1,13 @@
+import { captureWithFingerprint } from '@fohte/service-kit/observability'
 import type { WorkflowRunCompletedEvent } from '@octokit/webhooks-types'
 import { okAsync, type ResultAsync } from 'neverthrow'
 
-import type {
-  FailedStep,
-  GitHubClient,
-  PullRequestSummary,
+import {
+  type FailedStep,
+  type GitHubApiError,
+  GitHubAuthError,
+  type GitHubClient,
+  type PullRequestSummary,
 } from '#github-client'
 import { logger } from '#logger'
 import type { SlackBlock, SlackMessageContent } from '#slack'
@@ -58,6 +61,25 @@ export const extractWorkflowRunInput = (
   commitMessage: payload.workflow_run.head_commit.message,
   triggeringActor: payload.workflow_run.triggering_actor.login,
 })
+
+// octo-sts token acquisition failing is a persistent auth outage, not a
+// one-off API blip, so it gets its own fingerprint: the same issue keeps
+// accumulating events instead of getting lost among transient GitHub API
+// failures.
+const OCTO_STS_AUTH_FAILURE_FINGERPRINT = 'webhook-hub.octo-sts-auth-failed'
+const GITHUB_API_LOOKUP_FAILURE_FINGERPRINT =
+  'webhook-hub.github-api-lookup-failed'
+
+const reportGitHubApiFailure = (
+  error: GitHubApiError,
+  extras: Record<string, unknown>,
+): void => {
+  const fingerprint =
+    error instanceof GitHubAuthError
+      ? OCTO_STS_AUTH_FAILURE_FINGERPRINT
+      : GITHUB_API_LOOKUP_FAILURE_FINGERPRINT
+  captureWithFingerprint(error, fingerprint, { extras })
+}
 
 const FAILURE_COLOR = '#d73a49'
 const GITHUB_CI_USERNAME = 'GitHub CI'
@@ -166,6 +188,10 @@ export const buildWorkflowRunNotification = (
   const failedStep = deps.githubClient
     .findFailedStep(input.repoOwner, input.repoName, input.runId)
     .orElse((error) => {
+      reportGitHubApiFailure(error, {
+        repo: input.repo,
+        run_id: input.runId,
+      })
       logger.warn(
         { err: error, repo: input.repo, run_id: input.runId },
         'github_api_failed_step_lookup_failed',
@@ -182,6 +208,10 @@ export const buildWorkflowRunNotification = (
       ? deps.githubClient
           .findPullRequestForCommit(input.repoOwner, input.repoName, input.sha)
           .orElse((error) => {
+            reportGitHubApiFailure(error, {
+              repo: input.repo,
+              sha: input.sha,
+            })
             logger.warn(
               { err: error, repo: input.repo, sha: input.sha },
               'github_api_pull_request_lookup_failed',
