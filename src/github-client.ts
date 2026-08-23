@@ -1,6 +1,6 @@
+import type { OctoStsTokenCache } from '@fohte/service-kit/octo-sts'
 import { errAsync, ResultAsync } from 'neverthrow'
 
-import type { OctoStsTokenCache } from '#auth/octo-sts'
 import { BoundaryError } from '#errors'
 
 export class GitHubApiError extends BoundaryError {}

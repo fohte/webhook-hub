@@ -1,8 +1,8 @@
+import type { OctoStsTokenCache } from '@fohte/service-kit/octo-sts'
+import { OctoStsError } from '@fohte/service-kit/octo-sts'
 import { errAsync, okAsync } from 'neverthrow'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { OctoStsTokenCache } from '#auth/octo-sts'
-import { OctoStsError } from '#auth/octo-sts'
 import { createGitHubClient, GitHubApiError } from '#github-client'
 
 const createTokenCache = (

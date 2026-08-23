@@ -4,13 +4,13 @@
 // eslint-disable-next-line simple-import-sort/imports -- must stay first, see comment above
 import { observability } from '#bootstrap'
 
+import { createOctoStsTokenCache } from '@fohte/service-kit/octo-sts'
 import {
   createShutdownHandler,
   type ShutdownStep,
 } from '@fohte/service-kit/shutdown'
 import { serve } from '@hono/node-server'
 
-import { createOctoStsTokenCache } from '#auth/octo-sts'
 import { loadConfig } from '#config'
 import { createGitHubClient } from '#github-client'
 import { logger } from '#logger'

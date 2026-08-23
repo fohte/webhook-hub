@@ -6,9 +6,8 @@ import {
   parseEnv,
   requireString,
 } from '@fohte/service-kit/env'
+import type { OctoStsConfig } from '@fohte/service-kit/octo-sts'
 import type { Result } from 'neverthrow'
-
-import type { OctoStsConfig } from '#auth/octo-sts'
 
 export interface Config {
   githubWebhookSecret: string
