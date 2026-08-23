@@ -1,13 +1,13 @@
 import { captureWithFingerprint } from '@fohte/service-kit/observability'
-import { OctoStsError } from '@fohte/service-kit/octo-sts'
 import type { WorkflowRunCompletedEvent } from '@octokit/webhooks-types'
 import { okAsync, type ResultAsync } from 'neverthrow'
 
-import type {
-  FailedStep,
-  GitHubApiError,
-  GitHubClient,
-  PullRequestSummary,
+import {
+  type FailedStep,
+  type GitHubApiError,
+  GitHubAuthError,
+  type GitHubClient,
+  type PullRequestSummary,
 } from '#github-client'
 import { logger } from '#logger'
 import type { SlackBlock, SlackMessageContent } from '#slack'
@@ -75,7 +75,7 @@ const reportGitHubApiFailure = (
   extras: Record<string, unknown>,
 ): void => {
   const fingerprint =
-    error.cause instanceof OctoStsError
+    error instanceof GitHubAuthError
       ? OCTO_STS_AUTH_FAILURE_FINGERPRINT
       : GITHUB_API_LOOKUP_FAILURE_FINGERPRINT
   captureWithFingerprint(error, fingerprint, { extras })

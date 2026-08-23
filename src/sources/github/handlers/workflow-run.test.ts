@@ -1,9 +1,12 @@
 import { captureWithFingerprint } from '@fohte/service-kit/observability'
-import { OctoStsError } from '@fohte/service-kit/octo-sts'
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { GitHubApiError, type GitHubClient } from '#github-client'
+import {
+  GitHubApiError,
+  GitHubAuthError,
+  type GitHubClient,
+} from '#github-client'
 import type { SlackBlock } from '#slack'
 import type {
   WorkflowRunInput,
@@ -153,9 +156,8 @@ describe('buildWorkflowRunNotification', () => {
   })
 
   it('falls back to the commit message when the PR lookup fails', async () => {
-    const lookupError = new GitHubApiError('boom', undefined)
     const deps = createDeps({
-      pullRequest: errAsync(lookupError),
+      pullRequest: errAsync(new GitHubApiError('boom', undefined)),
     })
 
     const result = await buildWorkflowRunNotification(baseInput(), deps)
@@ -167,6 +169,16 @@ describe('buildWorkflowRunNotification', () => {
         'fohte/example · <https://github.com/fohte/example/actions/runs/1|View run>',
       ),
     ])
+  })
+
+  it('reports the github-api-lookup-failed fingerprint when the PR lookup fails for a non-auth reason', async () => {
+    const lookupError = new GitHubApiError('boom', undefined)
+    const deps = createDeps({
+      pullRequest: errAsync(lookupError),
+    })
+
+    await buildWorkflowRunNotification(baseInput(), deps)
+
     expect(vi.mocked(captureWithFingerprint).mock.calls).toEqual([
       [
         lookupError,
@@ -182,9 +194,9 @@ describe('buildWorkflowRunNotification', () => {
   })
 
   it('reports the octo-sts auth-failure fingerprint when the PR lookup fails due to a token error', async () => {
-    const lookupError = new GitHubApiError(
+    const lookupError = new GitHubAuthError(
       'failed to obtain a GitHub API token',
-      new OctoStsError('boom', undefined),
+      undefined,
     )
     const deps = createDeps({
       pullRequest: errAsync(lookupError),
@@ -207,9 +219,9 @@ describe('buildWorkflowRunNotification', () => {
   })
 
   it('reports the octo-sts auth-failure fingerprint when the failed-step lookup fails due to a token error', async () => {
-    const lookupError = new GitHubApiError(
+    const lookupError = new GitHubAuthError(
       'failed to obtain a GitHub API token',
-      new OctoStsError('boom', undefined),
+      undefined,
     )
     const deps = createDeps({
       failedStep: errAsync(lookupError),

@@ -5,6 +5,11 @@ import { BoundaryError } from '#errors'
 
 export class GitHubApiError extends BoundaryError {}
 
+// Distinguishes a token acquisition failure from every other GitHubApiError
+// cause, so callers can tell a persistent auth outage apart from a
+// transient GitHub API failure without depending on octo-sts's error type.
+export class GitHubAuthError extends GitHubApiError {}
+
 export interface PullRequestSummary {
   number: number
   title: string
@@ -52,7 +57,7 @@ export const createGitHubClient = (
       .getToken()
       .mapErr(
         (cause) =>
-          new GitHubApiError('failed to obtain a GitHub API token', cause),
+          new GitHubAuthError('failed to obtain a GitHub API token', cause),
       )
       .andThen((token) =>
         ResultAsync.fromPromise(
