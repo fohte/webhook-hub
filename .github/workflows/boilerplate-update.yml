@@ -51,6 +51,33 @@ jobs:
           fi
           echo "version=${from_version}" >> "$GITHUB_OUTPUT"
 
+      - name: Backfill repo_id in copier answers
+        id: backfill
+        env:
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          # `repo_id` is a normal copier.yml question (no `when: false`), so
+          # `copier update --defaults` reuses whatever value already sits in
+          # `.copier-answers.yml` instead of resetting it. Only the
+          # still-empty default is patched; an already-backfilled value is
+          # left as-is, and a missing key (pre-repo_id template versions) is
+          # a no-op here and picked up on a later run once copier adds it.
+          if grep -q "^repo_id: ''$" .copier-answers.yml; then
+            sed -i "s/^repo_id: ''$/repo_id: '${REPO_ID}'/" .copier-answers.yml
+            # `copier update` refuses to run against a dirty working tree, so
+            # commit immediately rather than leaving this as an uncommitted change.
+            git add .copier-answers.yml
+            git -c 'user.name=fohte-bot[bot]' \
+                -c 'user.email=139195068+fohte-bot[bot]@users.noreply.github.com' \
+                commit -m "chore: backfill repo_id in copier answers"
+            echo "backfilled=true" >> "$GITHUB_OUTPUT"
+            echo "Backfilled repo_id=${REPO_ID}"
+          else
+            echo "backfilled=false" >> "$GITHUB_OUTPUT"
+            echo "repo_id already set or key not present; skipping backfill" >&2
+          fi
+
       - name: Run copier-update-action
         id: copier-update
         uses: fohte/copier-update-action@a1c6dfff1b9bb8d5c7ec7af88436611fe7d3f209 # v0.1.5
@@ -67,15 +94,18 @@ jobs:
           TARGET_VERSION: ${{ steps.copier-update.outputs.target-version }}
           # Only set when workflow_dispatch explicitly pins a target version.
           MANUAL_TARGET_VERSION: ${{ github.event.inputs.target-version }}
+          BACKFILLED: ${{ steps.backfill.outputs.backfilled }}
         run: |
           set -euo pipefail
-          if [ "${CHANGED}" != "true" ]; then
+          if [ "${CHANGED}" != "true" ] && [ "${BACKFILLED}" != "true" ]; then
             echo "value=false" >> "$GITHUB_OUTPUT"
-          elif [ -z "${MANUAL_TARGET_VERSION}" ] && [ "${FROM_VERSION}" = "${TARGET_VERSION}" ]; then
+          elif [ "${BACKFILLED}" != "true" ] && [ -z "${MANUAL_TARGET_VERSION}" ] && [ "${FROM_VERSION}" = "${TARGET_VERSION}" ]; then
             # copier-update-action's `changed` output reflects any diff (e.g. YAML
             # quote-style drift), not whether the template version itself moved.
             # Skip the no-op case for scheduled/latest-release runs; an explicit
             # manual target-version means the caller wants to re-apply regardless.
+            # A repo_id backfill is never skipped this way: this PR is the only
+            # path that lands it on the default branch.
             echo "Template version unchanged (${FROM_VERSION}); skipping." >&2
             echo "value=false" >> "$GITHUB_OUTPUT"
           else
@@ -89,6 +119,67 @@ jobs:
             chmod +x scripts/bootstrap
           fi
 
+      # copier-update-action leaves conflict markers in the working tree when
+      # it can't cleanly 3-way-merge a file; a marker landing in a file
+      # pnpm/cargo parse directly (e.g. pnpm-workspace.yaml) crashes the sync
+      # outright, so lockfile sync must wait until conflicts are resolved.
+      - name: Determine whether lockfile sync is safe
+        if: steps.should-update.outputs.value == 'true'
+        id: can-sync-lockfiles
+        env:
+          UNRESOLVED_FILES: ${{ steps.copier-update.outputs.unresolved-files }}
+        run: |
+          set -euo pipefail
+          if [ -z "${UNRESOLVED_FILES}" ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # copier only rewrites version strings in package.json/Cargo.toml; the
+      # lockfiles are never touched, so they must be regenerated here or the
+      # PR ships a stale lockfile. continue-on-error below lets a sync failure
+      # (e.g. a bumped version that doesn't exist upstream, or mise/corepack
+      # itself failing) fall through to the PR step instead of killing the
+      # job before a PR exists.
+      - name: Set up mise
+        if: steps.can-sync-lockfiles.outputs.value == 'true' && hashFiles('**/pnpm-lock.yaml') != ''
+        continue-on-error: true
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.7.12
+
+      - name: Sync pnpm lockfiles
+        if: steps.can-sync-lockfiles.outputs.value == 'true' && hashFiles('**/pnpm-lock.yaml') != ''
+        id: sync-pnpm-lockfiles
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # corepack creates the pnpm executable inside mise's node install bin
+          # directory; reshim so the mise shims dir (which is on PATH) picks it up.
+          corepack enable
+          mise reshim
+          while IFS= read -r -d '' lockfile; do
+            dir=$(dirname "$lockfile")
+            echo "Updating ${lockfile}"
+            # --ignore-scripts: this job holds an OIDC token (id-token: write)
+            # and a checked-out repo with credentials; don't let an installed
+            # package's lifecycle script run with access to either.
+            (cd "$dir" && pnpm install --no-frozen-lockfile --ignore-scripts)
+          done < <(find . -name pnpm-lock.yaml -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
+
+      - name: Sync Cargo lockfiles
+        if: steps.can-sync-lockfiles.outputs.value == 'true' && hashFiles('**/Cargo.lock') != ''
+        id: sync-cargo-lockfiles
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' lockfile; do
+            dir=$(dirname "$lockfile")
+            echo "Updating ${lockfile}"
+            (cd "$dir" && rustup show && cargo generate-lockfile)
+          done < <(find . -name Cargo.lock -not -path '*/target/*' -not -path '*/.git/*' -print0)
+
       - name: Create branch
         if: steps.should-update.outputs.value == 'true'
         id: branch
@@ -101,6 +192,15 @@ jobs:
           # copier-update-action leaves unmerged entries in the index when
           # conflicts remain; stage everything so `git checkout -B` succeeds.
           git add -A
+          # Whether copier update produced anything beyond the repo_id backfill
+          # commit (already committed in the `backfill` step, if any). Computed
+          # once here and reused below so the title/commit/PR-body steps agree
+          # on whether this run is backfill-only.
+          if git diff --cached --quiet; then
+            echo "has-extra-changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-extra-changes=true" >> "$GITHUB_OUTPUT"
+          fi
           git checkout -B "${branch}"
 
       - name: Compose commit and PR title
@@ -109,21 +209,36 @@ jobs:
         env:
           FROM_VERSION: ${{ steps.current-version.outputs.version }}
           TARGET_VERSION: ${{ steps.copier-update.outputs.target-version }}
+          BACKFILLED: ${{ steps.backfill.outputs.backfilled }}
+          HAS_EXTRA_CHANGES: ${{ steps.branch.outputs.has-extra-changes }}
         run: |
           set -euo pipefail
-          echo "value=chore: update ${TEMPLATE_REPO} from ${FROM_VERSION} to ${TARGET_VERSION}" >> "$GITHUB_OUTPUT"
+          if [ "${BACKFILLED}" = "true" ] && [ "${HAS_EXTRA_CHANGES}" != "true" ]; then
+            # copier update produced nothing beyond the repo_id backfill commit
+            # (not just a version-string match — e.g. this rules out an
+            # unrelated YAML quote-style drift landing under this title).
+            echo "value=chore: backfill repo_id in copier answers" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=chore: update ${TEMPLATE_REPO} from ${FROM_VERSION} to ${TARGET_VERSION}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Commit and push changes
         if: steps.should-update.outputs.value == 'true'
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
           COMMIT_MESSAGE: ${{ steps.title.outputs.value }}
+          HAS_EXTRA_CHANGES: ${{ steps.branch.outputs.has-extra-changes }}
         run: |
           set -euo pipefail
-          git -c 'user.name=fohte-bot[bot]' \
-              -c 'user.email=139195068+fohte-bot[bot]@users.noreply.github.com' \
-              commit -m "${COMMIT_MESSAGE}"
-          # Force-push so the remote branch always equals "default branch HEAD + 1 copier-update commit".
+          # Nothing to commit when the only change this run is the repo_id
+          # backfill (already committed in its own step above) and copier
+          # update itself produced no further diff.
+          if [ "${HAS_EXTRA_CHANGES}" = "true" ]; then
+            git -c 'user.name=fohte-bot[bot]' \
+                -c 'user.email=139195068+fohte-bot[bot]@users.noreply.github.com' \
+                commit -m "${COMMIT_MESSAGE}"
+          fi
+          # Force-push so the remote branch always equals "default branch HEAD + this run's commits".
           # Without this, commits on the branch (fixed per template repo, reused across
           # versions) accumulate and the PR drifts from the default branch.
           #
@@ -140,16 +255,26 @@ jobs:
           FROM_VERSION: ${{ steps.current-version.outputs.version }}
           TARGET_VERSION: ${{ steps.copier-update.outputs.target-version }}
           UNRESOLVED_FILES: ${{ steps.copier-update.outputs.unresolved-files }}
+          LOCKFILE_SYNC_FAILED: ${{ steps.sync-pnpm-lockfiles.outcome == 'failure' || steps.sync-cargo-lockfiles.outcome == 'failure' }}
+          HAS_LOCKFILES: ${{ hashFiles('**/pnpm-lock.yaml', '**/Cargo.lock') != '' }}
           BRANCH: ${{ steps.branch.outputs.name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+          BACKFILLED: ${{ steps.backfill.outputs.backfilled }}
+          HAS_EXTRA_CHANGES: ${{ steps.branch.outputs.has-extra-changes }}
         run: |
           set -euo pipefail
 
           release_url="https://github.com/${TEMPLATE_REPO}/releases/tag/${TARGET_VERSION}"
-          summary="Update \`${TEMPLATE_REPO}\` from \`${FROM_VERSION}\` to [\`${TARGET_VERSION}\`](${release_url})."
+          if [ "${BACKFILLED}" = "true" ] && [ "${HAS_EXTRA_CHANGES}" != "true" ]; then
+            summary="Backfill \`repo_id\` in \`.copier-answers.yml\` (template version unchanged at [\`${TARGET_VERSION}\`](${release_url}))."
+          else
+            summary="Update \`${TEMPLATE_REPO}\` from \`${FROM_VERSION}\` to [\`${TARGET_VERSION}\`](${release_url})."
+          fi
 
+          needs_review=false
           body="${summary}"
           if [ -n "${UNRESOLVED_FILES}" ]; then
+            needs_review=true
             # Prefix each unresolved file with `> - ` so it stays inside the WARNING alert as a bullet.
             unresolved_list=$(printf '%s\n' "${UNRESOLVED_FILES}" | sed 's/^/> - /')
             body="${body}
@@ -158,6 +283,19 @@ jobs:
           > Manual review required. Unresolved conflicts remain in:
           >
           ${unresolved_list}"
+            if [ "${HAS_LOCKFILES}" = "true" ]; then
+              body="${body}
+          >
+          > Lockfiles were not synced because conflicts remain. Resolve the conflicts above, then sync lockfiles manually (e.g. \`pnpm install\`, \`cargo generate-lockfile\`)."
+            fi
+          elif [ "${LOCKFILE_SYNC_FAILED}" = "true" ]; then
+            needs_review=true
+            body="${body}
+
+          > [!WARNING]
+          > Manual review required. Lockfile sync failed; see the [workflow run](${RUN_URL}) for the error.
+          >
+          > Lockfiles may be stale. Resolve the underlying issue, then sync lockfiles manually (e.g. \`pnpm install\`, \`cargo generate-lockfile\`)."
           fi
 
           body="${body}
@@ -166,7 +304,7 @@ jobs:
           <sub>Generated by the [boilerplate-update workflow run](${RUN_URL}).</sub>"
 
           create_args=(--title "${TITLE}" --body "${body}" --head "${BRANCH}")
-          if [ -n "${UNRESOLVED_FILES}" ]; then
+          if [ "${needs_review}" = "true" ]; then
             create_args+=(--draft)
           fi
 
@@ -174,7 +312,7 @@ jobs:
           if [ -n "${existing_pr}" ]; then
             pr_url="${existing_pr}"
             gh pr edit "${pr_url}" --title "${TITLE}" --body "${body}"
-            if [ -n "${UNRESOLVED_FILES}" ]; then
+            if [ "${needs_review}" = "true" ]; then
               gh pr ready "${pr_url}" --undo
             else
               gh pr ready "${pr_url}"
@@ -191,7 +329,7 @@ jobs:
           # failure is treated the same as an "UNKNOWN" reading and retried,
           # rather than aborting the step outright.
           should_disable_auto=false
-          if [ -n "${UNRESOLVED_FILES}" ]; then
+          if [ "${needs_review}" = "true" ]; then
             should_disable_auto=true
           else
             mergeable=UNKNOWN
