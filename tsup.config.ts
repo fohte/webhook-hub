@@ -15,8 +15,8 @@ export default defineConfig({
   // applies to the real package in node_modules instead of a bundled copy.
   bundle: true,
   skipNodeModulesBundle: true,
-  // skipNodeModulesBundle externalizes any non-relative specifier, including
-  // `#`-prefixed subpath imports (package.json "imports" field) — force those
-  // back into the bundle since they resolve to first-party src/, not a package.
+  // skipNodeModulesBundle treats subpath imports (`#foo`) as external too,
+  // leaving `./src/*.ts` specifiers unresolved in a runtime image that only
+  // ships dist/. Force-bundle them so dist stays self-contained.
   noExternal: [/^#/],
 })
