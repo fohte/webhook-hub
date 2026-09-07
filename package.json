@@ -31,8 +31,7 @@
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",
-    "@eslint/eslintrc": "3.3.6",
-    "@fohte/eslint-config": "0.4.1",
+    "@fohte/eslint-config": "0.4.3",
     "@ninoseki/eslint-plugin-neverthrow": "0.2.0",
     "@slack/types": "2.21.1",
     "@tsconfig/node-lts": "24.0.1",
@@ -41,6 +40,7 @@
     "concurrently": "10.0.5",
     "eslint": "10.6.0",
     "eslint-plugin-simple-import-sort": "13.0.0",
+    "knip": "6.32.2",
     "prettier": "3.9.6",
     "tsup": "8.5.1",
     "tsx": "4.23.13",
