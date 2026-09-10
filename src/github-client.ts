@@ -103,9 +103,6 @@ export const createGitHubClient = (
           : { number: pr.number, title: pr.title, url: pr.html_url }
       }),
     findFailedStep: (owner, repo, runId) =>
-      // ponytail: reads only the first 100 jobs (API max per_page), so a run
-      // with a larger matrix can miss its failed step. Add Link-header
-      // pagination if that turns out to matter in practice.
       request<JobsResponse>(
         `/repos/${owner}/${repo}/actions/runs/${String(runId)}/jobs?per_page=100`,
       ).map(({ jobs }) => {
