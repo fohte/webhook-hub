@@ -4,21 +4,13 @@
 // eslint-disable-next-line simple-import-sort/imports -- must stay first, see comment above
 import { observability } from '#bootstrap'
 
-<<<<<<< before updating
 import { createOctoStsTokenCache } from '@fohte/service-kit/octo-sts'
 import {
   createShutdownHandler,
   type ShutdownStep,
 } from '@fohte/service-kit/shutdown'
 import { serve } from '@hono/node-server'
-||||||| last update
-export const greet = (name: string): string => {
-  return `Hello, ${name}!`
-=======
-import { err, ok, type Result } from 'neverthrow'
->>>>>>> after updating
 
-<<<<<<< before updating
 import { loadConfig } from '#config'
 import { createGitHubClient } from '#github-client'
 import { logger } from '#logger'
@@ -84,14 +76,6 @@ const main = (): void => {
     })
   }
   createShutdownHandler(steps, { logger })
-||||||| last update
-export const greet = (name: string): string => {
-  return `Hello, ${name}!`
-=======
-export const greet = (name: string): Result<string, Error> => {
-  if (!name) return err(new Error('name must not be empty'))
-  return ok(`Hello, ${name}!`)
->>>>>>> after updating
 }
 
 main()
