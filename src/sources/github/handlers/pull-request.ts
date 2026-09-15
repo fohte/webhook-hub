@@ -10,7 +10,7 @@ import type {
 } from '#sources/github/third-party'
 import { buildThirdPartyActivityNotification } from '#sources/github/third-party'
 
-export type PullRequestState = 'opened' | 'closed' | 'merged'
+type PullRequestState = 'opened' | 'closed' | 'merged'
 
 export interface PullRequestInput {
   repo: string
