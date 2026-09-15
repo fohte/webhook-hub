@@ -11,7 +11,7 @@ export class SlackApiError extends Error {
   }
 }
 
-export interface SlackMessageMetadata {
+interface SlackMessageMetadata {
   event_type: string
   event_payload: Record<string, string | number | boolean>
 }

@@ -1,7 +1,7 @@
 {
   "name": "webhook-hub",
   "private": true,
-  "packageManager": "pnpm@11.16.0",
+  "packageManager": "pnpm@12.3.4",
   "type": "module",
   "imports": {
     "#*": "./src/*.ts"
@@ -19,7 +19,7 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
-    "@fohte/service-kit": "0.1.13",
+    "@fohte/service-kit": "0.1.14",
     "@hono/node-server": "2.0.12",
     "@octokit/webhooks": "14.2.0",
     "@octokit/webhooks-types": "7.6.1",
@@ -31,16 +31,16 @@
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",
-    "@eslint/eslintrc": "3.3.6",
-    "@fohte/eslint-config": "0.4.1",
-    "@ninoseki/eslint-plugin-neverthrow": "0.2.0",
+    "@fohte/eslint-config": "0.4.4",
+    "@ninoseki/eslint-plugin-neverthrow": "0.3.1",
     "@slack/types": "2.21.1",
     "@tsconfig/node-lts": "24.0.1",
     "@tsconfig/strictest": "2.0.8",
     "@types/node": "24.13.3",
     "concurrently": "10.0.5",
-    "eslint": "10.6.0",
+    "eslint": "10.10.0",
     "eslint-plugin-simple-import-sort": "13.0.0",
+    "knip": "6.34.0",
     "prettier": "3.9.6",
     "tsup": "8.5.1",
     "tsx": "4.23.13",
