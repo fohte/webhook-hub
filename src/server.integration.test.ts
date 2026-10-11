@@ -82,13 +82,21 @@ const githubWorkflowRunFailureContent = {
   color: '#d73a49',
   blocks: [
     { type: 'header', text: { type: 'plain_text', text: '🚨 CI failed' } },
-    { type: 'section', text: { type: 'mrkdwn', text: 'fix: something' } },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: '*Repository*\nfohte/example' },
+        { type: 'mrkdwn', text: '*起点の PR*\nfix: something' },
+        { type: 'mrkdwn', text: '*失敗箇所*\n不明' },
+        { type: 'mrkdwn', text: '*トリガー*\npush' },
+      ],
+    },
     {
       type: 'context',
       elements: [
         {
           type: 'mrkdwn',
-          text: 'fohte/example · <https://github.com/fohte/example/actions/runs/1|View run>',
+          text: '<https://github.com/fohte/example/actions/runs/1|View run>',
         },
       ],
     },
