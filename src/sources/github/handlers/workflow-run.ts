@@ -92,7 +92,7 @@ const truncateHeaderText = (text: string): string =>
     ? `${text.slice(0, HEADER_TEXT_MAX_LENGTH - 1)}…`
     : text
 
-const buildBodyLine = (
+const buildOriginLine = (
   input: WorkflowRunInput,
   pullRequest: PullRequestSummary | null,
 ): string | null => {
@@ -110,10 +110,10 @@ const buildBodyLine = (
   }
 }
 
-const buildTriggerLabel = (input: WorkflowRunInput): string | null => {
+const buildTriggerLabel = (input: WorkflowRunInput): string => {
   switch (input.event) {
     case 'push':
-      return null
+      return 'push'
     case 'schedule':
       return '定期実行'
     case 'workflow_dispatch':
@@ -124,12 +124,7 @@ const buildTriggerLabel = (input: WorkflowRunInput): string | null => {
 }
 
 const buildContextText = (input: WorkflowRunInput): string => {
-  const triggerLabel = buildTriggerLabel(input)
-  return [
-    escapeSlackMrkdwn(input.repo),
-    ...(triggerLabel === null ? [] : [triggerLabel]),
-    `<${input.url}|View run>`,
-  ].join(' · ')
+  return `<${input.url}|View run>`
 }
 
 const formatWorkflowRunNotification = (
@@ -138,28 +133,40 @@ const formatWorkflowRunNotification = (
   pullRequest: PullRequestSummary | null,
 ): WorkflowRunNotification => {
   const headerText = truncateHeaderText(`🚨 ${input.workflow} failed`)
-  const bodyLine = buildBodyLine(input, pullRequest)
-  const failedStepLine =
+  const originLine = buildOriginLine(input, pullRequest)
+  const failedStepValue =
     failedStep === null
       ? null
-      : `失敗: \`${escapeSlackMrkdwn(failedStep.job)}\` › \`${escapeSlackMrkdwn(failedStep.step)}\``
+      : `\`${escapeSlackMrkdwn(failedStep.job)}\` › \`${escapeSlackMrkdwn(failedStep.step)}\``
 
   const blocks: SlackBlock[] = [
     { type: 'header', text: { type: 'plain_text', text: headerText } },
-  ]
-  if (bodyLine !== null) {
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: bodyLine } })
-  }
-  if (failedStepLine !== null) {
-    blocks.push({
+    {
       type: 'section',
-      text: { type: 'mrkdwn', text: failedStepLine },
-    })
-  }
-  blocks.push({
-    type: 'context',
-    elements: [{ type: 'mrkdwn', text: buildContextText(input) }],
-  })
+      fields: [
+        {
+          type: 'mrkdwn',
+          text: `*Repository*\n${escapeSlackMrkdwn(input.repo)}`,
+        },
+        {
+          type: 'mrkdwn',
+          text: `*起点の PR*\n${originLine ?? 'なし'}`,
+        },
+        {
+          type: 'mrkdwn',
+          text: `*失敗箇所*\n${failedStepValue ?? '不明'}`,
+        },
+        {
+          type: 'mrkdwn',
+          text: `*トリガー*\n${buildTriggerLabel(input)}`,
+        },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: buildContextText(input) }],
+    },
+  ]
 
   return {
     content: {
