@@ -22,5 +22,7 @@ jobs:
           generate-command: |
             corepack enable
             pnpm install --frozen-lockfile
-            pnpm run generate:tq-contract
+            tq_spec_ref=$(git ls-remote https://github.com/fohte/tq.git refs/heads/main | cut -f1)
+            test -n "$tq_spec_ref"
+            TQ_SPEC_REF="$tq_spec_ref" pnpm run generate:tq-contract
           octo-sts-identity: webhook-hub-sync-tq-spec

@@ -14,7 +14,7 @@
     "format:eslint": "eslint --fix .",
     "format:prettier": "prettier --write .",
     "format": "conc -m 1 pnpm:format:eslint pnpm:format:prettier",
-    "generate:tq-contract": "openapi-zod-client https://raw.githubusercontent.com/fohte/tq/main/openapi.json -o src/plugins/tq/generated/tq-contract.ts -t src/plugins/tq/tq-contract.template.hbs --export-schemas",
+    "generate:tq-contract": "openapi-zod-client \"https://raw.githubusercontent.com/fohte/tq/${TQ_SPEC_REF:-main}/openapi.json\" -o src/plugins/tq/generated/tq-contract.ts -t src/plugins/tq/tq-contract.template.hbs --export-schemas",
     "test": "conc pnpm:test:type pnpm:test:unit",
     "test:type": "tsc --noEmit",
     "test:unit": "vitest run"

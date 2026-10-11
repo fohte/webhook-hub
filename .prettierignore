@@ -1,6 +1,8 @@
+# Handlebars templates
+*.template.hbs
+
 # Auto-generated files
 CHANGELOG.md
-*.template.hbs
 
 # Copier rewraps this to a width prettier doesn't agree with, so the two
 # fight over its formatting on every `copier update`.
