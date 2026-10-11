@@ -1,3 +1,4 @@
+import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 
 export interface SentryIssueAlertEvent {
@@ -7,6 +8,8 @@ export interface SentryIssueAlertEvent {
       title: string
       level: string
       web_url: string
+      url?: string | null
+      culprit?: string | null
     }
     triggered_rule: string
   }
@@ -14,6 +17,8 @@ export interface SentryIssueAlertEvent {
 
 export interface IssueAlertInput {
   action: string
+  app: string
+  culprit: string
   title: string
   level: string
   webUrl: string
@@ -21,17 +26,34 @@ export interface IssueAlertInput {
 }
 
 export interface IssueAlertNotification {
-  text: string
+  content: SlackMessageContent
   title: string
   level: string
   webUrl: string
   triggeredRule: string
 }
 
+const SENTRY_ALERT_COLOR = '#d73a49'
+// Slack header blocks use plain_text and are limited to 150 characters.
+const HEADER_TEXT_MAX_LENGTH = 150
+
+const extractProjectSlug = (eventUrl: string | null | undefined): string =>
+  eventUrl?.split('/projects/')[1]?.split('/')[1] ?? ''
+
+const truncateHeaderText = (text: string): string =>
+  text.length > HEADER_TEXT_MAX_LENGTH
+    ? `${text.slice(0, HEADER_TEXT_MAX_LENGTH - 1)}…`
+    : text
+
+const renderFieldValue = (value: string, asCode: boolean): string =>
+  asCode ? `\`${escapeSlackMrkdwn(value)}\`` : escapeSlackMrkdwn(value)
+
 export const extractIssueAlertInput = (
   payload: SentryIssueAlertEvent,
 ): IssueAlertInput => ({
   action: payload.action,
+  app: extractProjectSlug(payload.data.event.url),
+  culprit: payload.data.event.culprit ?? '',
   title: payload.data.event.title,
   level: payload.data.event.level,
   webUrl: payload.data.event.web_url,
@@ -43,14 +65,42 @@ export const buildIssueAlertNotification = (
 ): IssueAlertNotification | null => {
   if (input.action !== 'triggered') return null
 
-  const text = [
-    `:rotating_light: *Sentry alert: ${escapeSlackMrkdwn(input.title)}*`,
-    `Level: *${escapeSlackMrkdwn(input.level)}* / Rule: *${escapeSlackMrkdwn(input.triggeredRule)}*`,
-    `<${input.webUrl}|View issue>`,
-  ].join('\n')
+  const headerText = truncateHeaderText(`🐛 ${input.title}`)
+  const fieldDefinitions = [
+    { label: 'アプリ', value: input.app, asCode: false },
+    { label: 'Level', value: input.level, asCode: false },
+    { label: '発生箇所', value: input.culprit, asCode: true },
+    { label: 'Rule', value: input.triggeredRule, asCode: false },
+  ]
+  const fields = fieldDefinitions
+    .filter(({ value }) => value !== '')
+    .map(({ label, value, asCode }) => ({
+      type: 'mrkdwn' as const,
+      text: `*${label}*\n${renderFieldValue(value, asCode)}`,
+    }))
+  const issueLink = `<${input.webUrl}|View issue>`
+  const blocks: SlackBlock[] = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: headerText },
+    },
+    {
+      type: 'section',
+      fields,
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: issueLink }],
+    },
+  ]
+  const content: SlackMessageContent = {
+    text: `🐛 ${input.title}`,
+    color: SENTRY_ALERT_COLOR,
+    blocks,
+  }
 
   return {
-    text,
+    content,
     title: input.title,
     level: input.level,
     webUrl: input.webUrl,

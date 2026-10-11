@@ -43,19 +43,17 @@ export const dispatch = (
   const note = buildIssueAlertNotification(extractIssueAlertInput(typed))
   if (note === null) return okAsync('ignored')
 
-  return ctx.notifier
-    .postMessage({ text: note.text })
-    .map((): DispatchOutcome => {
-      logger.info(
-        {
-          delivery_id: ctx.deliveryId,
-          event: 'sentry_issue_alert',
-          title: note.title,
-          level: note.level,
-          url: note.webUrl,
-        },
-        'slack_notified',
-      )
-      return 'notified'
-    })
+  return ctx.notifier.postMessage(note.content).map((): DispatchOutcome => {
+    logger.info(
+      {
+        delivery_id: ctx.deliveryId,
+        event: 'sentry_issue_alert',
+        title: note.title,
+        level: note.level,
+        url: note.webUrl,
+      },
+      'slack_notified',
+    )
+    return 'notified'
+  })
 }

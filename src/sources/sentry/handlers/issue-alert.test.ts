@@ -13,10 +13,12 @@ const baseInput = (
   overrides: Partial<IssueAlertInput> = {},
 ): IssueAlertInput => ({
   action: 'triggered',
+  app: 'sample-app',
+  culprit: 'src/example.ts in runTask',
   title: 'TypeError: Cannot read properties of undefined',
   level: 'error',
-  webUrl: 'https://sentry.io/organizations/fohte/issues/1/',
-  triggeredRule: 'Production errors',
+  webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+  triggeredRule: 'sample-rule',
   ...overrides,
 })
 
@@ -28,18 +30,47 @@ describe('extractIssueAlertInput', () => {
         event: {
           title: 'TypeError: Cannot read properties of undefined',
           level: 'error',
-          web_url: 'https://sentry.io/organizations/fohte/issues/1/',
+          web_url: 'https://sentry.io/organizations/example-org/issues/123/',
+          url: 'https://sentry.io/api/0/projects/example-org/sample-app/events/456/',
+          culprit: 'src/example.ts in runTask',
         },
-        triggered_rule: 'Production errors',
+        triggered_rule: 'sample-rule',
       },
     }
 
     expect(extractIssueAlertInput(payload)).toEqual({
       action: 'triggered',
+      app: 'sample-app',
+      culprit: 'src/example.ts in runTask',
       title: 'TypeError: Cannot read properties of undefined',
       level: 'error',
-      webUrl: 'https://sentry.io/organizations/fohte/issues/1/',
-      triggeredRule: 'Production errors',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
+    })
+  })
+
+  it('uses empty app and culprit values when the event omits them', () => {
+    const payload: SentryIssueAlertEvent = {
+      action: 'triggered',
+      data: {
+        event: {
+          title: 'TypeError: Cannot read properties of undefined',
+          level: 'error',
+          web_url: 'https://sentry.io/organizations/example-org/issues/123/',
+          culprit: null,
+        },
+        triggered_rule: 'sample-rule',
+      },
+    }
+
+    expect(extractIssueAlertInput(payload)).toEqual({
+      action: 'triggered',
+      app: '',
+      culprit: '',
+      title: 'TypeError: Cannot read properties of undefined',
+      level: 'error',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
     })
   })
 })
@@ -47,15 +78,127 @@ describe('extractIssueAlertInput', () => {
 describe('buildIssueAlertNotification', () => {
   it('returns a notification for a triggered issue alert', () => {
     expect(buildIssueAlertNotification(baseInput())).toEqual({
-      text: [
-        ':rotating_light: *Sentry alert: TypeError: Cannot read properties of undefined*',
-        'Level: *error* / Rule: *Production errors*',
-        '<https://sentry.io/organizations/fohte/issues/1/|View issue>',
-      ].join('\n'),
+      content: {
+        text: '🐛 TypeError: Cannot read properties of undefined',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '🐛 TypeError: Cannot read properties of undefined',
+            },
+          },
+          {
+            type: 'section',
+            fields: [
+              { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
+              { type: 'mrkdwn', text: '*Level*\nerror' },
+              {
+                type: 'mrkdwn',
+                text: '*発生箇所*\n`src/example.ts in runTask`',
+              },
+              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+              },
+            ],
+          },
+        ],
+      },
       title: 'TypeError: Cannot read properties of undefined',
       level: 'error',
-      webUrl: 'https://sentry.io/organizations/fohte/issues/1/',
-      triggeredRule: 'Production errors',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
+    })
+  })
+
+  it('omits empty app and culprit fields', () => {
+    expect(
+      buildIssueAlertNotification(baseInput({ app: '', culprit: '' })),
+    ).toEqual({
+      content: {
+        text: '🐛 TypeError: Cannot read properties of undefined',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '🐛 TypeError: Cannot read properties of undefined',
+            },
+          },
+          {
+            type: 'section',
+            fields: [
+              { type: 'mrkdwn', text: '*Level*\nerror' },
+              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+              },
+            ],
+          },
+        ],
+      },
+      title: 'TypeError: Cannot read properties of undefined',
+      level: 'error',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
+    })
+  })
+
+  it('truncates a long title to fit a Slack header block', () => {
+    const title = 'A'.repeat(160)
+    const headerText = `🐛 ${'A'.repeat(146)}…`
+
+    expect(buildIssueAlertNotification(baseInput({ title }))).toEqual({
+      content: {
+        text: `🐛 ${title}`,
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: headerText },
+          },
+          {
+            type: 'section',
+            fields: [
+              { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
+              { type: 'mrkdwn', text: '*Level*\nerror' },
+              {
+                type: 'mrkdwn',
+                text: '*発生箇所*\n`src/example.ts in runTask`',
+              },
+              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+              },
+            ],
+          },
+        ],
+      },
+      title,
+      level: 'error',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
     })
   })
 
@@ -64,19 +207,47 @@ describe('buildIssueAlertNotification', () => {
       buildIssueAlertNotification(
         baseInput({
           title: 'Error: <script> & "quotes"',
+          app: 'app<&',
+          culprit: 'src/<script>.ts & runTask',
           level: '<b>error</b>',
           triggeredRule: 'A & B',
         }),
       ),
     ).toEqual({
-      text: [
-        ':rotating_light: *Sentry alert: Error: &lt;script&gt; &amp; "quotes"*',
-        'Level: *&lt;b&gt;error&lt;/b&gt;* / Rule: *A &amp; B*',
-        '<https://sentry.io/organizations/fohte/issues/1/|View issue>',
-      ].join('\n'),
+      content: {
+        text: '🐛 Error: <script> & "quotes"',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: '🐛 Error: <script> & "quotes"' },
+          },
+          {
+            type: 'section',
+            fields: [
+              { type: 'mrkdwn', text: '*アプリ*\napp&lt;&amp;' },
+              { type: 'mrkdwn', text: '*Level*\n&lt;b&gt;error&lt;/b&gt;' },
+              {
+                type: 'mrkdwn',
+                text: '*発生箇所*\n`src/&lt;script&gt;.ts &amp; runTask`',
+              },
+              { type: 'mrkdwn', text: '*Rule*\nA &amp; B' },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+              },
+            ],
+          },
+        ],
+      },
       title: 'Error: <script> & "quotes"',
       level: '<b>error</b>',
-      webUrl: 'https://sentry.io/organizations/fohte/issues/1/',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
       triggeredRule: 'A & B',
     })
   })
