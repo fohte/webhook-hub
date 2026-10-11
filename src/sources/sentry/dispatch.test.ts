@@ -49,14 +49,7 @@ describe('dispatch', () => {
       postMessageCalls: [
         [
           {
-            text: [
-              '🐛 TypeError: Cannot read properties of undefined',
-              'アプリ: sample-app',
-              'Level: error',
-              '発生箇所: `src/example.ts in runTask`',
-              'Rule: Production errors',
-              '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
-            ].join('\n'),
+            text: '🐛 TypeError: Cannot read properties of undefined',
             color: '#d73a49',
             blocks: [
               {

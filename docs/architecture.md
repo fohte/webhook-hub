@@ -119,6 +119,6 @@ A Slack message is posted only when **both** of the following are true:
 - `Sentry-Hook-Resource === "event_alert"`
 - `payload.action === "triggered"`
 
-The message includes the issue title, level, triggered rule, and a link to the issue page.
+The red attachment uses the issue title in a header, the project slug, level, culprit, and triggered rule in section fields, and a link to the issue page in a context block. Empty project slug and culprit values are omitted.
 
 All other resources and actions short-circuit to `ignored`. No further filtering is applied on top of this — every verified, triggered issue alert is forwarded.

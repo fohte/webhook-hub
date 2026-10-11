@@ -48,20 +48,38 @@ describe('extractIssueAlertInput', () => {
       triggeredRule: 'sample-rule',
     })
   })
+
+  it('uses empty app and culprit values when the event omits them', () => {
+    const payload: SentryIssueAlertEvent = {
+      action: 'triggered',
+      data: {
+        event: {
+          title: 'TypeError: Cannot read properties of undefined',
+          level: 'error',
+          web_url: 'https://sentry.io/organizations/example-org/issues/123/',
+          culprit: null,
+        },
+        triggered_rule: 'sample-rule',
+      },
+    }
+
+    expect(extractIssueAlertInput(payload)).toEqual({
+      action: 'triggered',
+      app: '',
+      culprit: '',
+      title: 'TypeError: Cannot read properties of undefined',
+      level: 'error',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
+    })
+  })
 })
 
 describe('buildIssueAlertNotification', () => {
   it('returns a notification for a triggered issue alert', () => {
     expect(buildIssueAlertNotification(baseInput())).toEqual({
       content: {
-        text: [
-          '🐛 TypeError: Cannot read properties of undefined',
-          'アプリ: sample-app',
-          'Level: error',
-          '発生箇所: `src/example.ts in runTask`',
-          'Rule: sample-rule',
-          '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
-        ].join('\n'),
+        text: '🐛 TypeError: Cannot read properties of undefined',
         color: '#d73a49',
         blocks: [
           {
@@ -101,6 +119,89 @@ describe('buildIssueAlertNotification', () => {
     })
   })
 
+  it('omits empty app and culprit fields', () => {
+    expect(
+      buildIssueAlertNotification(baseInput({ app: '', culprit: '' })),
+    ).toEqual({
+      content: {
+        text: '🐛 TypeError: Cannot read properties of undefined',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '🐛 TypeError: Cannot read properties of undefined',
+            },
+          },
+          {
+            type: 'section',
+            fields: [
+              { type: 'mrkdwn', text: '*Level*\nerror' },
+              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+              },
+            ],
+          },
+        ],
+      },
+      title: 'TypeError: Cannot read properties of undefined',
+      level: 'error',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
+    })
+  })
+
+  it('truncates a long title to fit a Slack header block', () => {
+    const title = 'A'.repeat(160)
+    const headerText = `🐛 ${'A'.repeat(146)}…`
+
+    expect(buildIssueAlertNotification(baseInput({ title }))).toEqual({
+      content: {
+        text: `🐛 ${title}`,
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: headerText },
+          },
+          {
+            type: 'section',
+            fields: [
+              { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
+              { type: 'mrkdwn', text: '*Level*\nerror' },
+              {
+                type: 'mrkdwn',
+                text: '*発生箇所*\n`src/example.ts in runTask`',
+              },
+              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+              },
+            ],
+          },
+        ],
+      },
+      title,
+      level: 'error',
+      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
+      triggeredRule: 'sample-rule',
+    })
+  })
+
   it('escapes Slack mrkdwn metacharacters in title, level and triggered rule', () => {
     expect(
       buildIssueAlertNotification(
@@ -114,14 +215,7 @@ describe('buildIssueAlertNotification', () => {
       ),
     ).toEqual({
       content: {
-        text: [
-          '🐛 Error: &lt;script&gt; &amp; "quotes"',
-          'アプリ: app&lt;&amp;',
-          'Level: &lt;b&gt;error&lt;/b&gt;',
-          '発生箇所: `src/&lt;script&gt;.ts &amp; runTask`',
-          'Rule: A &amp; B',
-          '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
-        ].join('\n'),
+        text: '🐛 Error: <script> & "quotes"',
         color: '#d73a49',
         blocks: [
           {

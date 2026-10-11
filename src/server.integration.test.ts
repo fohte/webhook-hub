@@ -117,14 +117,7 @@ const sentryIssueAlertTriggeredBody = JSON.stringify({
 })
 
 const sentryIssueAlertTriggeredContent = {
-  text: [
-    '🐛 TypeError: Cannot read properties of undefined',
-    'アプリ: sample-app',
-    'Level: error',
-    '発生箇所: `src/example.ts in runTask`',
-    'Rule: sample-rule',
-    '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
-  ].join('\n'),
+  text: '🐛 TypeError: Cannot read properties of undefined',
   color: '#d73a49',
   blocks: [
     {
