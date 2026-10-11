@@ -78,6 +78,28 @@ const contextBlock = (text: string): SlackBlock => ({
   elements: [{ type: 'mrkdwn', text }],
 })
 
+const expectedNotification = (
+  workflow: string,
+  fields: [string, string][],
+) => ({
+  content: {
+    text: `🚨 ${workflow} failed`,
+    color: '#d73a49',
+    blocks: [
+      headerBlock(`🚨 ${workflow} failed`),
+      fieldsBlock(fields),
+      contextBlock(
+        '<https://github.com/fohte/example/actions/runs/1|View run>',
+      ),
+    ],
+    username: 'GitHub CI',
+    iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+  },
+  repo: 'fohte/example',
+  workflow,
+  url: 'https://github.com/fohte/example/actions/runs/1',
+})
+
 describe('buildWorkflowRunNotification', () => {
   it('links the merged PR title on a push run when one is found', async () => {
     const deps = createDeps({
@@ -91,32 +113,17 @@ describe('buildWorkflowRunNotification', () => {
 
     const result = await buildWorkflowRunNotification(baseInput(), deps)
 
-    expect(result._unsafeUnwrap()).toEqual({
-      content: {
-        text: '🚨 CI failed',
-        color: '#d73a49',
-        blocks: [
-          headerBlock('🚨 CI failed'),
-          fieldsBlock([
-            ['Repository', 'fohte/example'],
-            [
-              '起点の PR',
-              '<https://github.com/fohte/example/pull/128|#128 Bump aws provider to v5.31.0>',
-            ],
-            ['失敗箇所', '`plan (production)` › `terraform plan`'],
-            ['トリガー', 'push'],
-          ]),
-          contextBlock(
-            '<https://github.com/fohte/example/actions/runs/1|View run>',
-          ),
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification('CI', [
+        ['Repository', 'fohte/example'],
+        [
+          '起点の PR',
+          '<https://github.com/fohte/example/pull/128|#128 Bump aws provider to v5.31.0>',
         ],
-        username: 'GitHub CI',
-        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-      },
-      repo: 'fohte/example',
-      workflow: 'CI',
-      url: 'https://github.com/fohte/example/actions/runs/1',
-    })
+        ['失敗箇所', '`plan (production)` › `terraform plan`'],
+        ['トリガー', 'push'],
+      ]),
+    )
   })
 
   it('calls the GitHub API with the commit sha and run id on a push run', async () => {
@@ -143,29 +150,14 @@ describe('buildWorkflowRunNotification', () => {
 
     const result = await buildWorkflowRunNotification(baseInput(), deps)
 
-    expect(result._unsafeUnwrap()).toEqual({
-      content: {
-        text: '🚨 CI failed',
-        color: '#d73a49',
-        blocks: [
-          headerBlock('🚨 CI failed'),
-          fieldsBlock([
-            ['Repository', 'fohte/example'],
-            ['起点の PR', 'fix: something'],
-            ['失敗箇所', '不明'],
-            ['トリガー', 'push'],
-          ]),
-          contextBlock(
-            '<https://github.com/fohte/example/actions/runs/1|View run>',
-          ),
-        ],
-        username: 'GitHub CI',
-        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-      },
-      repo: 'fohte/example',
-      workflow: 'CI',
-      url: 'https://github.com/fohte/example/actions/runs/1',
-    })
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification('CI', [
+        ['Repository', 'fohte/example'],
+        ['起点の PR', 'fix: something'],
+        ['失敗箇所', '不明'],
+        ['トリガー', 'push'],
+      ]),
+    )
   })
 
   it('falls back to the commit message when the PR lookup fails', async () => {
@@ -175,29 +167,14 @@ describe('buildWorkflowRunNotification', () => {
 
     const result = await buildWorkflowRunNotification(baseInput(), deps)
 
-    expect(result._unsafeUnwrap()).toEqual({
-      content: {
-        text: '🚨 CI failed',
-        color: '#d73a49',
-        blocks: [
-          headerBlock('🚨 CI failed'),
-          fieldsBlock([
-            ['Repository', 'fohte/example'],
-            ['起点の PR', 'fix: something'],
-            ['失敗箇所', '不明'],
-            ['トリガー', 'push'],
-          ]),
-          contextBlock(
-            '<https://github.com/fohte/example/actions/runs/1|View run>',
-          ),
-        ],
-        username: 'GitHub CI',
-        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-      },
-      repo: 'fohte/example',
-      workflow: 'CI',
-      url: 'https://github.com/fohte/example/actions/runs/1',
-    })
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification('CI', [
+        ['Repository', 'fohte/example'],
+        ['起点の PR', 'fix: something'],
+        ['失敗箇所', '不明'],
+        ['トリガー', 'push'],
+      ]),
+    )
   })
 
   it('reports the github-api-lookup-failed fingerprint when the PR lookup fails for a non-auth reason', async () => {
@@ -282,29 +259,14 @@ describe('buildWorkflowRunNotification', () => {
       deps,
     )
 
-    expect(result._unsafeUnwrap()).toEqual({
-      content: {
-        text: '🚨 Boilerplate update failed',
-        color: '#d73a49',
-        blocks: [
-          headerBlock('🚨 Boilerplate update failed'),
-          fieldsBlock([
-            ['Repository', 'fohte/example'],
-            ['起点の PR', 'なし'],
-            ['失敗箇所', '`sync` › `Run template sync`'],
-            ['トリガー', '定期実行'],
-          ]),
-          contextBlock(
-            '<https://github.com/fohte/example/actions/runs/1|View run>',
-          ),
-        ],
-        username: 'GitHub CI',
-        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-      },
-      repo: 'fohte/example',
-      workflow: 'Boilerplate update',
-      url: 'https://github.com/fohte/example/actions/runs/1',
-    })
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification('Boilerplate update', [
+        ['Repository', 'fohte/example'],
+        ['起点の PR', 'なし'],
+        ['失敗箇所', '`sync` › `Run template sync`'],
+        ['トリガー', '定期実行'],
+      ]),
+    )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
   })
 
@@ -316,29 +278,14 @@ describe('buildWorkflowRunNotification', () => {
       deps,
     )
 
-    expect(result._unsafeUnwrap()).toEqual({
-      content: {
-        text: '🚨 CI failed',
-        color: '#d73a49',
-        blocks: [
-          headerBlock('🚨 CI failed'),
-          fieldsBlock([
-            ['Repository', 'fohte/example'],
-            ['起点の PR', 'なし'],
-            ['失敗箇所', '不明'],
-            ['トリガー', '`@octocat` が手動実行'],
-          ]),
-          contextBlock(
-            '<https://github.com/fohte/example/actions/runs/1|View run>',
-          ),
-        ],
-        username: 'GitHub CI',
-        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-      },
-      repo: 'fohte/example',
-      workflow: 'CI',
-      url: 'https://github.com/fohte/example/actions/runs/1',
-    })
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification('CI', [
+        ['Repository', 'fohte/example'],
+        ['起点の PR', 'なし'],
+        ['失敗箇所', '不明'],
+        ['トリガー', '`@octocat` が手動実行'],
+      ]),
+    )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
   })
 
@@ -353,29 +300,14 @@ describe('buildWorkflowRunNotification', () => {
       deps,
     )
 
-    expect(result._unsafeUnwrap()).toEqual({
-      content: {
-        text: '🚨 CI failed',
-        color: '#d73a49',
-        blocks: [
-          headerBlock('🚨 CI failed'),
-          fieldsBlock([
-            ['Repository', 'fohte/example'],
-            ['起点の PR', 'Bump aws provider (#42)'],
-            ['失敗箇所', '不明'],
-            ['トリガー', '`issue_comment` 起因'],
-          ]),
-          contextBlock(
-            '<https://github.com/fohte/example/actions/runs/1|View run>',
-          ),
-        ],
-        username: 'GitHub CI',
-        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-      },
-      repo: 'fohte/example',
-      workflow: 'CI',
-      url: 'https://github.com/fohte/example/actions/runs/1',
-    })
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification('CI', [
+        ['Repository', 'fohte/example'],
+        ['起点の PR', 'Bump aws provider (#42)'],
+        ['失敗箇所', '不明'],
+        ['トリガー', '`issue_comment` 起因'],
+      ]),
+    )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
   })
 
@@ -390,32 +322,17 @@ describe('buildWorkflowRunNotification', () => {
 
     const result = await buildWorkflowRunNotification(baseInput(), deps)
 
-    expect(result._unsafeUnwrap()).toEqual({
-      content: {
-        text: '🚨 CI failed',
-        color: '#d73a49',
-        blocks: [
-          headerBlock('🚨 CI failed'),
-          fieldsBlock([
-            ['Repository', 'fohte/example'],
-            [
-              '起点の PR',
-              '<https://github.com/fohte/example/pull/1|#1 Bump &lt;generics&gt; &amp; things>',
-            ],
-            ['失敗箇所', '不明'],
-            ['トリガー', 'push'],
-          ]),
-          contextBlock(
-            '<https://github.com/fohte/example/actions/runs/1|View run>',
-          ),
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification('CI', [
+        ['Repository', 'fohte/example'],
+        [
+          '起点の PR',
+          '<https://github.com/fohte/example/pull/1|#1 Bump &lt;generics&gt; &amp; things>',
         ],
-        username: 'GitHub CI',
-        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-      },
-      repo: 'fohte/example',
-      workflow: 'CI',
-      url: 'https://github.com/fohte/example/actions/runs/1',
-    })
+        ['失敗箇所', '不明'],
+        ['トリガー', 'push'],
+      ]),
+    )
   })
 
   it.each([
