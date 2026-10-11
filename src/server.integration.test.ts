@@ -52,6 +52,11 @@ const signGithubBody = (body: string): Promise<string> =>
 const signSentryBody = (body: string): string =>
   createHmac('sha256', SENTRY_SECRET).update(body, 'utf8').digest('hex')
 
+const observePostMessage = <TResult, TCalls>(
+  result: TResult,
+  postMessageCalls: TCalls,
+) => ({ result, postMessageCalls })
+
 const githubWorkflowRunFailureBody = JSON.stringify({
   action: 'completed',
   repository: {
@@ -103,17 +108,52 @@ const sentryIssueAlertTriggeredBody = JSON.stringify({
     event: {
       title: 'TypeError: Cannot read properties of undefined',
       level: 'error',
-      web_url: 'https://sentry.io/organizations/fohte/issues/1/',
+      web_url: 'https://sentry.io/organizations/example-org/issues/123/',
+      url: 'https://sentry.io/api/0/projects/example-org/sample-app/events/456/',
+      culprit: 'src/example.ts in runTask',
     },
-    triggered_rule: 'Production errors',
+    triggered_rule: 'sample-rule',
   },
 })
 
-const sentryIssueAlertTriggeredText = [
-  ':rotating_light: *Sentry alert: TypeError: Cannot read properties of undefined*',
-  'Level: *error* / Rule: *Production errors*',
-  '<https://sentry.io/organizations/fohte/issues/1/|View issue>',
-].join('\n')
+const sentryIssueAlertTriggeredContent = {
+  text: [
+    '🐛 TypeError: Cannot read properties of undefined',
+    'アプリ: sample-app',
+    'Level: error',
+    '発生箇所: `src/example.ts in runTask`',
+    'Rule: sample-rule',
+    '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+  ].join('\n'),
+  color: '#d73a49',
+  blocks: [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: '🐛 TypeError: Cannot read properties of undefined',
+      },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
+        { type: 'mrkdwn', text: '*Level*\nerror' },
+        { type: 'mrkdwn', text: '*発生箇所*\n`src/example.ts in runTask`' },
+        { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+        },
+      ],
+    },
+  ],
+}
 
 describe('createApp with the real GitHub and Sentry sources', () => {
   it('notifies Slack for POST /github with a valid signature and a workflow_run failure on the default branch', async () => {
@@ -153,13 +193,13 @@ describe('createApp with the real GitHub and Sentry sources', () => {
       body,
     })
 
-    expect(result).toEqual({
-      status: 200,
-      body: { ok: true, outcome: 'notified' },
+    expect(observePostMessage(result, postMessage.mock.calls)).toEqual({
+      result: {
+        status: 200,
+        body: { ok: true, outcome: 'notified' },
+      },
+      postMessageCalls: [[sentryIssueAlertTriggeredContent]],
     })
-    expect(postMessage.mock.calls).toEqual([
-      [{ text: sentryIssueAlertTriggeredText }],
-    ])
   })
 
   it('returns 404 for a path with no registered source', async () => {
@@ -309,7 +349,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
 
     expect(postMessage.mock.calls).toEqual([
       [githubWorkflowRunFailureContent],
-      [{ text: sentryIssueAlertTriggeredText }],
+      [sentryIssueAlertTriggeredContent],
     ])
   })
 })
