@@ -1,0 +1,7 @@
+issuer: https://token.actions.githubusercontent.com
+subject_pattern: ^repo:fohte@11088009/webhook-hub@1263108494:ref:refs/heads/main$
+claim_pattern:
+  job_workflow_ref: ^fohte/webhook-hub/\.github/workflows/sync-tq-spec\.yml@[^@]+$
+permissions:
+  contents: write
+  pull_requests: write
