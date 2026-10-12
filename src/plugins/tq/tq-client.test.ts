@@ -34,19 +34,30 @@ const taskResponse = {
   linkSync: { outgoing: [], unresolvedRefs: [] },
 }
 
-const observeRequest = (
-  result: unknown,
-  url: string | null,
-  init: RequestInit | undefined,
-) => ({
-  result,
-  request: {
-    url,
+const observeRequests = (
+  calls: [input: string | URL | Request, init?: RequestInit | undefined][],
+) =>
+  calls.map(([input, init]) => ({
+    url:
+      typeof input === 'string'
+        ? input
+        : input instanceof Request
+          ? input.url
+          : input instanceof URL
+            ? input.href
+            : null,
     method: init?.method ?? null,
     headers: Object.fromEntries(new Headers(init?.headers).entries()),
     body: init?.body ?? null,
     signal: init?.signal === undefined ? null : 'timeout',
-  },
+  }))
+
+const observeResult = (
+  result: unknown,
+  calls: Parameters<typeof observeRequests>[0],
+) => ({
+  result,
+  requests: observeRequests(calls),
 })
 
 describe('createTqClient', () => {
@@ -59,26 +70,24 @@ describe('createTqClient', () => {
     const client = createTqClient('http://tq.example.test:3001/', fetchImpl)
 
     const result = await client.createTask(taskRequest)
-    const call = fetchImpl.mock.calls[0]
-    const url =
-      call === undefined || typeof call[0] !== 'string' ? null : call[0]
 
-    expect(observeRequest(result._unsafeUnwrap(), url, call?.[1])).toEqual({
-      result: {
-        id: '00000000-0000-4000-8000-000000000001',
-        number: 42,
+    expect(observeResult(result._unsafeUnwrap(), fetchImpl.mock.calls)).toEqual(
+      {
+        result: { id: '00000000-0000-4000-8000-000000000001', number: 42 },
+        requests: [
+          {
+            url: 'http://tq.example.test:3001/api/tasks',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-author': 'service:webhook-hub',
+            },
+            body: JSON.stringify(taskRequest),
+            signal: 'timeout',
+          },
+        ],
       },
-      request: {
-        url: 'http://tq.example.test:3001/api/tasks',
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-author': 'service:webhook-hub',
-        },
-        body: JSON.stringify(taskRequest),
-        signal: 'timeout',
-      },
-    })
+    )
   })
 
   it('returns an API error when task creation fails', async () => {

@@ -40,6 +40,7 @@ export interface DispatchContext {
   activityChannel: string
   githubClient: GitHubClient
   tqClient: TqClient
+  tqWebUrl: string
 }
 
 interface ParsedEvent {
@@ -78,7 +79,9 @@ export const dispatch = (
           repo: note.repo,
         })
           .andThen((task) =>
-            ctx.notifier.postMessage(addTqTaskStatus(note.content, task)),
+            ctx.notifier.postMessage(
+              addTqTaskStatus(note.content, task, ctx.tqWebUrl),
+            ),
           )
           .map((): DispatchOutcome => {
             logger.info(

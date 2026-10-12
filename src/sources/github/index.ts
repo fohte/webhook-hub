@@ -10,6 +10,7 @@ export const createGithubSource = (
   activityChannel: string,
   githubClient: GitHubClient,
   tqClient: TqClient,
+  tqWebUrl: string,
 ): WebhookSource => {
   const webhooks = new Webhooks({ secret: webhookSecret })
   return {
@@ -38,6 +39,7 @@ export const createGithubSource = (
           activityChannel,
           githubClient,
           tqClient,
+          tqWebUrl,
         },
         { name: context.eventName, payload },
       ),

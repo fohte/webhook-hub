@@ -26,6 +26,7 @@ const TQ_TASK_REF = {
   id: '00000000-0000-4000-8000-000000000001',
   number: 42,
 }
+const TQ_WEB_URL = 'https://tq.fohte.net'
 
 const createTqClient = (
   result: ReturnType<TqClient['createTask']> = okAsync(TQ_TASK_REF),
@@ -37,6 +38,7 @@ const createContext = (
   event: string,
   notifier: DispatchContext['notifier'],
   tqClient = createTqClient(),
+  tqWebUrl = TQ_WEB_URL,
 ): DispatchContext => ({
   deliveryId: 'delivery-1',
   event,
@@ -44,6 +46,7 @@ const createContext = (
   activityChannel: '#github_activity',
   githubClient: createGithubClient(),
   tqClient,
+  tqWebUrl,
 })
 
 const dispatchOutcome = async (
@@ -149,7 +152,12 @@ describe('dispatch (workflow_run)', () => {
     const tqClient = createTqClient()
 
     const outcome = await dispatchOutcome(
-      createContext('workflow_run', notifier, tqClient),
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        'https://tasks.example.test',
+      ),
       { name: 'workflow_run', payload: workflowRunPayload({}) },
     )
 
@@ -179,7 +187,7 @@ describe('dispatch (workflow_run)', () => {
       postMessageCalls: [
         [
           {
-            text: '🚨 CI failed\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+            text: '🚨 CI failed\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
             color: '#d73a49',
             blocks: [
               {
@@ -209,7 +217,7 @@ describe('dispatch (workflow_run)', () => {
                 elements: [
                   {
                     type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
                   },
                 ],
               },

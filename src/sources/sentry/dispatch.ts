@@ -15,6 +15,7 @@ export interface DispatchContext {
   deliveryId: string
   notifier: SlackNotifier
   tqClient: TqClient
+  tqWebUrl: string
 }
 
 interface ParsedEvent {
@@ -52,7 +53,9 @@ export const dispatch = (
     url: note.webUrl,
   })
     .andThen((task) =>
-      ctx.notifier.postMessage(addTqTaskStatus(note.content, task)),
+      ctx.notifier.postMessage(
+        addTqTaskStatus(note.content, task, ctx.tqWebUrl),
+      ),
     )
     .map((): DispatchOutcome => {
       logger.info(

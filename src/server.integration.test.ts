@@ -19,6 +19,7 @@ vi.mock('@fohte/service-kit/observability', () => ({
 const GITHUB_SECRET = 'github-test-secret'
 const SENTRY_SECRET = 'sentry-test-secret'
 const ACTIVITY_CHANNEL = '#github_activity'
+const TQ_WEB_URL = 'https://tq.fohte.net'
 const TQ_TASK_REF = {
   id: '00000000-0000-4000-8000-000000000001',
   number: 42,
@@ -53,8 +54,9 @@ const createTestApp = (notifier: SlackNotifier): Hono =>
         ACTIVITY_CHANNEL,
         createGithubClient(),
         createTqClient(),
+        TQ_WEB_URL,
       ),
-      createSentrySource(SENTRY_SECRET, createTqClient()),
+      createSentrySource(SENTRY_SECRET, createTqClient(), TQ_WEB_URL),
     ],
     notifier,
   })

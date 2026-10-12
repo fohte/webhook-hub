@@ -9,9 +9,11 @@
 
 Only the following events are forwarded to Slack; everything else is acknowledged with `200` and dropped.
 
-- **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change. Each alert creates an unhandled tq task and links it in Slack.
+- **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change.
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
-- **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`. Each alert creates an unhandled tq task and links it in Slack.
+- **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`.
+
+CI and Sentry alert notifications include an `未対応` status and a [tq task](https://github.com/fohte/tq) link. Task creation is best-effort: if the tq API is unavailable, the Slack notification still posts without a task link.
 
 ## Endpoints
 
@@ -31,6 +33,7 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 | `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
 | `SLACK_ACTIVITY_CHANNEL` | No       | `#activity`                              | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
 | `TQ_API_URL`             | Yes      | —                                        | tq API base URL used to create tasks for CI and Sentry alerts.                                                |
+| `TQ_WEB_URL`             | No       | `https://tq.fohte.net`                   | tq web app base URL used to link created tasks in Slack.                                                      |
 | `PORT`                   | No       | `8080`                                   | HTTP listen port.                                                                                             |
 | `OCTO_STS_URL`           | Yes      | —                                        | octo-sts endpoint used to exchange an OIDC token for a short-lived GitHub App token.                          |
 | `OCTO_STS_SCOPE`         | Yes      | —                                        | GitHub org octo-sts issues the token for (owner-only, not `owner/repo`).                                      |
@@ -50,10 +53,13 @@ To run the service against real deliveries, these things need to be wired up.
      -e SLACK_BOT_TOKEN=xoxb-... \
      -e SLACK_CHANNEL=#your-channel \
      -e TQ_API_URL=http://tq-api.example.test:3001 \
+     -e TQ_WEB_URL=https://tq.example.test \
      ghcr.io/fohte/webhook-hub:latest
    ```
 
    Expose the container behind HTTPS at a URL the webhook sources can reach.
+
+   Set `TQ_API_URL` to a tq API endpoint reachable from the container. webhook-hub sends `POST <TQ_API_URL>/api/tasks` without an authentication header. Set `TQ_WEB_URL` when the task links should use a different web app host.
 
 2. **Register the webhook on each source repository** (Settings → Webhooks):
    - Payload URL: `https://<your-host>/github`

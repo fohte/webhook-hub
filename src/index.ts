@@ -42,8 +42,9 @@ const main = (): void => {
         config.slackActivityChannel,
         githubClient,
         tqClient,
+        config.tqWebUrl,
       ),
-      createSentrySource(config.sentryWebhookSecret, tqClient),
+      createSentrySource(config.sentryWebhookSecret, tqClient, config.tqWebUrl),
     ],
     notifier,
   })

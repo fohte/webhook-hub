@@ -16,6 +16,7 @@ export interface Config {
   slackChannel: string
   slackActivityChannel: string
   tqApiUrl: string
+  tqWebUrl: string
   port: number
   octoSts: OctoStsConfig
 }
@@ -34,6 +35,7 @@ export const loadConfig = (
       '#activity',
     ),
     tqApiUrl: requireString(env, 'TQ_API_URL'),
+    tqWebUrl: optionalString(env, 'TQ_WEB_URL', 'https://tq.fohte.net'),
     port: optionalInt(env, 'PORT', 8080, { min: 1, max: 65_535 }),
     octoStsUrl: requireString(env, 'OCTO_STS_URL'),
     octoStsScope: requireString(env, 'OCTO_STS_SCOPE'),
@@ -50,6 +52,7 @@ export const loadConfig = (
     slackChannel: f.slackChannel,
     slackActivityChannel: f.slackActivityChannel,
     tqApiUrl: f.tqApiUrl,
+    tqWebUrl: f.tqWebUrl,
     port: f.port,
     octoSts: {
       url: f.octoStsUrl,

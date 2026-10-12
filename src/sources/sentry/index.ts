@@ -9,6 +9,7 @@ import type { WebhookSource } from '#webhook-source'
 export const createSentrySource = (
   webhookSecret: string,
   tqClient: TqClient,
+  tqWebUrl: string,
 ): WebhookSource => ({
   name: 'sentry',
   path: '/sentry',
@@ -17,7 +18,7 @@ export const createSentrySource = (
     verifySentrySignature(rawBody, headers, webhookSecret),
   dispatch: (context, payload, notifier) =>
     dispatch(
-      { deliveryId: context.deliveryId, notifier, tqClient },
+      { deliveryId: context.deliveryId, notifier, tqClient, tqWebUrl },
       { resource: context.eventName, payload },
     ),
 })

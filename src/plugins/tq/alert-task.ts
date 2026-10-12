@@ -6,7 +6,6 @@ import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import type { SlackMessageContent } from '#slack'
 
-const TQ_TASK_URL = 'https://tq.fohte.net/tasks'
 const TQ_TASK_CREATION_FAILURE_FINGERPRINT =
   'webhook-hub.tq-task-creation-failed'
 
@@ -26,11 +25,12 @@ export const createAlertTask = (
 export const addTqTaskStatus = (
   content: SlackMessageContent,
   task: TqTaskRef | null,
+  tqWebUrl: string,
 ): SlackMessageContent => {
   const taskLink =
     task === null
       ? null
-      : `<${TQ_TASK_URL}/${task.id}|tq #${String(task.number)}>`
+      : `<${tqWebUrl.replace(/\/+$/, '')}/tasks/${task.id}|tq #${String(task.number)}>`
   const status = `未対応${taskLink === null ? '' : ` · ${taskLink}`}`
   const statusBlock = {
     type: 'context' as const,

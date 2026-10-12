@@ -20,6 +20,7 @@ const TQ_TASK_REF = {
   id: '00000000-0000-4000-8000-000000000001',
   number: 42,
 }
+const TQ_WEB_URL = 'https://tq.fohte.net'
 
 const createTqClient = (
   result: ReturnType<TqClient['createTask']> = okAsync(TQ_TASK_REF),
@@ -30,7 +31,8 @@ const createTqClient = (
 const createContext = (
   notifier: DispatchContext['notifier'],
   tqClient = createTqClient(),
-): DispatchContext => ({ deliveryId: 'req-1', notifier, tqClient })
+  tqWebUrl = TQ_WEB_URL,
+): DispatchContext => ({ deliveryId: 'req-1', notifier, tqClient, tqWebUrl })
 
 const dispatchOutcome = async (
   ...args: Parameters<typeof dispatch>
