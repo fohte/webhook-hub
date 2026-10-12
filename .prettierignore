@@ -1,3 +1,6 @@
+# Handlebars templates
+*.template.hbs
+
 # Auto-generated files
 CHANGELOG.md
 

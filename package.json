@@ -14,6 +14,7 @@
     "format:eslint": "eslint --fix .",
     "format:prettier": "prettier --write .",
     "format": "conc -m 1 pnpm:format:eslint pnpm:format:prettier",
+    "generate:tq-contract": "openapi-zod-client \"https://raw.githubusercontent.com/fohte/tq/${TQ_SPEC_REF:-main}/openapi.json\" -o src/plugins/tq/generated/tq-contract.ts -t src/plugins/tq/tq-contract.template.hbs --export-schemas",
     "test": "conc pnpm:test:type pnpm:test:unit",
     "test:type": "tsc --noEmit",
     "test:unit": "vitest run"
@@ -27,7 +28,8 @@
     "@slack/web-api": "7.16.0",
     "hono": "4.12.34",
     "neverthrow": "8.2.0",
-    "pino": "10.3.1"
+    "pino": "10.3.1",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",
@@ -41,6 +43,7 @@
     "eslint": "10.11.0",
     "eslint-plugin-simple-import-sort": "13.0.0",
     "knip": "6.37.0",
+    "openapi-zod-client": "1.18.3",
     "prettier": "3.9.8",
     "tsup": "8.5.1",
     "tsx": "4.23.13",
