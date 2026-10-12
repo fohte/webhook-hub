@@ -11,7 +11,7 @@ export class SlackApiError extends Error {
   }
 }
 
-interface SlackMessageMetadata {
+export interface SlackMessageMetadata {
   event_type: string
   event_payload: Record<string, string | number | boolean>
 }
@@ -36,6 +36,17 @@ export interface SlackMessageRef {
   ts: string
 }
 
+interface SlackMessageMatch {
+  ref: SlackMessageRef
+  eventPayload: Record<string, unknown>
+}
+
+export interface SlackHistorySearchOptions {
+  oldest?: string
+  latest?: string
+  maxPages?: number
+}
+
 export interface SlackNotifier {
   postMessage(
     content: SlackMessageContent,
@@ -47,7 +58,8 @@ export interface SlackNotifier {
   findMessageByMetadata(
     eventType: string,
     payloadMatcher: (payload: Record<string, unknown>) => boolean,
-  ): ResultAsync<SlackMessageRef | null, SlackApiError>
+    options?: SlackHistorySearchOptions,
+  ): ResultAsync<SlackMessageMatch | null, SlackApiError>
 }
 
 type SlackAttachment =
@@ -58,6 +70,30 @@ type MessagePayload = { metadata?: SlackMessageMetadata } & (
   | { text: string; attachments?: never }
   | { attachments: SlackAttachment[]; text?: never }
 )
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const readMessageMetadata = (message: unknown): SlackMessageMetadata | null => {
+  if (!isRecord(message)) return null
+  const metadata = message['metadata']
+  if (!isRecord(metadata)) return null
+  const eventType = metadata['event_type']
+  const eventPayload = metadata['event_payload']
+  if (typeof eventType !== 'string' || !isRecord(eventPayload)) return null
+  const normalizedPayload: Record<string, string | number | boolean> = {}
+  for (const [key, value] of Object.entries(eventPayload)) {
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean'
+    ) {
+      return null
+    }
+    normalizedPayload[key] = value
+  }
+  return { event_type: eventType, event_payload: normalizedPayload }
+}
 
 const wrapSlackApi = <T>(
   promise: Promise<T>,
@@ -144,6 +180,54 @@ export const createSlackNotifier = (
     return resolved
   }
 
+  const findMessageInHistory = (
+    channelId: string,
+    eventType: string,
+    payloadMatcher: (payload: Record<string, unknown>) => boolean,
+    options: SlackHistorySearchOptions,
+    cursor = '',
+    page = 1,
+  ): ResultAsync<SlackMessageMatch | null, SlackApiError> =>
+    wrapSlackApi(
+      client.conversations.history({
+        channel: channelId,
+        limit: 200,
+        include_all_metadata: true,
+        ...(options.oldest === undefined ? {} : { oldest: options.oldest }),
+        ...(options.latest === undefined ? {} : { latest: options.latest }),
+        ...(cursor === '' ? {} : { cursor }),
+      }),
+      'failed to fetch Slack conversation history',
+    ).andThen((res) => {
+      const match = res.messages?.flatMap((message) => {
+        const metadata = readMessageMetadata(message)
+        return message.ts !== undefined &&
+          metadata !== null &&
+          metadata.event_type === eventType &&
+          payloadMatcher(metadata.event_payload)
+          ? [
+              {
+                ref: { channel: channelId, ts: message.ts },
+                eventPayload: metadata.event_payload,
+              },
+            ]
+          : []
+      })[0]
+      if (match !== undefined) return ok(match)
+
+      const nextCursor = res.response_metadata?.next_cursor ?? ''
+      return nextCursor === '' || page >= (options.maxPages ?? 5)
+        ? ok(null)
+        : findMessageInHistory(
+            channelId,
+            eventType,
+            payloadMatcher,
+            options,
+            nextCursor,
+            page + 1,
+          )
+    })
+
   return {
     postMessage(content) {
       return resolveChannelId(content.channel ?? defaultChannel).andThen(
@@ -181,26 +265,9 @@ export const createSlackNotifier = (
         'failed to update Slack message',
       ).map(() => undefined)
     },
-    findMessageByMetadata(eventType, payloadMatcher) {
+    findMessageByMetadata(eventType, payloadMatcher, options = {}) {
       return resolveChannelId(defaultChannel).andThen((channelId) =>
-        wrapSlackApi(
-          client.conversations.history({
-            channel: channelId,
-            limit: 200,
-            include_all_metadata: true,
-          }),
-          'failed to fetch Slack conversation history',
-        ).map((res) => {
-          const match = res.messages?.find((m) => {
-            const md = (m as { metadata?: Partial<SlackMessageMetadata> })
-              .metadata
-            if (md?.event_payload == null) return false
-            if (md.event_type !== eventType) return false
-            return payloadMatcher(md.event_payload)
-          })
-          if (match?.ts === undefined) return null
-          return { channel: channelId, ts: match.ts }
-        }),
+        findMessageInHistory(channelId, eventType, payloadMatcher, options),
       )
     },
   }

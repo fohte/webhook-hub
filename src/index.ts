@@ -18,6 +18,7 @@ import { createTqClient } from '#plugins/tq/tq-client'
 import { createApp } from '#server'
 import { createSlackNotifier } from '#slack'
 import { createGithubSource } from '#sources/github/index'
+import { createGrafanaSource } from '#sources/grafana/index'
 import { createSentrySource } from '#sources/sentry/index'
 
 const main = (): void => {
@@ -45,6 +46,11 @@ const main = (): void => {
         config.tqWebUrl,
       ),
       createSentrySource(config.sentryWebhookSecret, tqClient, config.tqWebUrl),
+      createGrafanaSource(
+        config.grafanaWebhookSecret,
+        tqClient,
+        config.tqWebUrl,
+      ),
     ],
     notifier,
   })

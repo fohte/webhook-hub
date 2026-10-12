@@ -373,7 +373,12 @@ describe('dispatch (pull_request)', () => {
   it('updates the existing Slack message when a security PR is closed and one is found', async () => {
     const notifier = createNotifier()
     notifier.findMessageByMetadata.mockReturnValue(
-      okAsync({ channel: 'C1', ts: 'existing-ts' }),
+      okAsync({
+        ref: { channel: 'C1', ts: 'existing-ts' },
+        eventPayload: {
+          pr_url: 'https://code.example.test/team/demo/pull/7',
+        },
+      }),
     )
 
     const outcome = await dispatchOutcome(

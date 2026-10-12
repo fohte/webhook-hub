@@ -144,10 +144,11 @@ export const dispatch = (
               .findMessageByMetadata(
                 'security_pr',
                 (p) => p['pr_url'] === note.url,
+                { maxPages: 1 },
               )
               .andThen((existing) => {
                 if (existing !== null) {
-                  return ctx.notifier.updateMessage(existing, content)
+                  return ctx.notifier.updateMessage(existing.ref, content)
                 }
                 logger.info(
                   {
