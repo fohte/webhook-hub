@@ -12,6 +12,7 @@ import type { Result } from 'neverthrow'
 export interface Config {
   githubWebhookSecret: string
   sentryWebhookSecret: string
+  grafanaWebhookSecret: string
   slackBotToken: string
   slackChannel: string
   slackActivityChannel: string
@@ -27,6 +28,7 @@ export const loadConfig = (
   parseEnv({
     githubWebhookSecret: requireString(env, 'GITHUB_WEBHOOK_SECRET'),
     sentryWebhookSecret: requireString(env, 'SENTRY_WEBHOOK_SECRET'),
+    grafanaWebhookSecret: requireString(env, 'GRAFANA_WEBHOOK_SECRET'),
     slackBotToken: requireString(env, 'SLACK_BOT_TOKEN'),
     slackChannel: optionalString(env, 'SLACK_CHANNEL', '#infra_alert'),
     slackActivityChannel: optionalString(
@@ -48,6 +50,7 @@ export const loadConfig = (
   }).map((f) => ({
     githubWebhookSecret: f.githubWebhookSecret,
     sentryWebhookSecret: f.sentryWebhookSecret,
+    grafanaWebhookSecret: f.grafanaWebhookSecret,
     slackBotToken: f.slackBotToken,
     slackChannel: f.slackChannel,
     slackActivityChannel: f.slackActivityChannel,

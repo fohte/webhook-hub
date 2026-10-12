@@ -46,6 +46,10 @@ Headers: `x-github-delivery`, `x-github-event`, `x-hub-signature-256`. `@octokit
 
 Headers: `Request-ID`, `Sentry-Hook-Resource`, `Sentry-Hook-Signature`. The signature is an HMAC-SHA256 of the raw body against `SENTRY_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/sentry/verify.ts`).
 
+### Grafana (`POST /grafana`)
+
+Header: `X-Grafana-Alerting-Signature`. The signature is an HMAC-SHA256 of the raw body against `GRAFANA_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/grafana/verify.ts`); the optional timestamp header is not configured. Each alert is dispatched separately. Slack metadata stores its fingerprint and tq task reference so repeated notifications update the existing message without creating another task.
+
 ## Notification rules
 
 ### `workflow_run`

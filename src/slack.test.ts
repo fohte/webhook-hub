@@ -8,15 +8,21 @@ import {
   type SlackMessageContent,
 } from '#slack'
 
-const { conversationsList, chatPostMessage } = vi.hoisted(() => ({
-  conversationsList: vi.fn(),
-  chatPostMessage: vi.fn(),
-}))
+const { conversationsList, conversationsHistory, chatPostMessage } = vi.hoisted(
+  () => ({
+    conversationsList: vi.fn(),
+    conversationsHistory: vi.fn(),
+    chatPostMessage: vi.fn(),
+  }),
+)
 
 vi.mock('@slack/web-api', () => ({
   WebClient: vi.fn().mockImplementation(function WebClient() {
     return {
-      conversations: { list: conversationsList },
+      conversations: {
+        list: conversationsList,
+        history: conversationsHistory,
+      },
       chat: { postMessage: chatPostMessage },
     }
   }),
@@ -33,8 +39,14 @@ const LIST_CALL_ARGS = {
   limit: 1000,
 }
 
+const observeHistory = <TResult, TCalls>(result: TResult, calls: TCalls) => ({
+  result,
+  calls,
+})
+
 beforeEach(() => {
   conversationsList.mockReset()
+  conversationsHistory.mockReset()
   chatPostMessage.mockReset()
   conversationsList.mockResolvedValue({
     channels: CHANNELS,
@@ -125,6 +137,110 @@ describe('postMessage', () => {
       [LIST_CALL_ARGS],
       [LIST_CALL_ARGS],
     ])
+  })
+})
+
+describe('findMessageByMetadata', () => {
+  it('returns the matched message reference with its event payload', async () => {
+    conversationsHistory.mockResolvedValue({
+      messages: [
+        {
+          ts: 'message-ts',
+          metadata: {
+            event_type: 'grafana_alert',
+            event_payload: { fingerprint: 'fp-match', task_number: 9 },
+          },
+        },
+      ],
+    })
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier
+      .findMessageByMetadata(
+        'grafana_alert',
+        (payload) => payload['fingerprint'] === 'fp-match',
+      )
+      .match(
+        (match) => match,
+        () => null,
+      )
+
+    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+      result: {
+        ref: { channel: 'CDEFAULT', ts: 'message-ts' },
+        eventPayload: { fingerprint: 'fp-match', task_number: 9 },
+      },
+      calls: [
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+          },
+        ],
+      ],
+    })
+  })
+
+  it('continues through Slack history pages until it finds matching metadata', async () => {
+    conversationsHistory
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            ts: 'recent-ts',
+            metadata: {
+              event_type: 'other_alert',
+              event_payload: { fingerprint: 'fp-other' },
+            },
+          },
+        ],
+        response_metadata: { next_cursor: 'page-two' },
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            ts: 'older-ts',
+            metadata: {
+              event_type: 'grafana_alert',
+              event_payload: { fingerprint: 'fp-match', task_number: 9 },
+            },
+          },
+        ],
+        response_metadata: { next_cursor: '' },
+      })
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier
+      .findMessageByMetadata(
+        'grafana_alert',
+        (payload) => payload['fingerprint'] === 'fp-match',
+      )
+      .match(
+        (match) => match,
+        () => null,
+      )
+
+    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+      result: {
+        ref: { channel: 'CDEFAULT', ts: 'older-ts' },
+        eventPayload: { fingerprint: 'fp-match', task_number: 9 },
+      },
+      calls: [
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+          },
+        ],
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+            cursor: 'page-two',
+          },
+        ],
+      ],
+    })
   })
 })
 

@@ -147,7 +147,7 @@ export const dispatch = (
               )
               .andThen((existing) => {
                 if (existing !== null) {
-                  return ctx.notifier.updateMessage(existing, content)
+                  return ctx.notifier.updateMessage(existing.ref, content)
                 }
                 logger.info(
                   {

@@ -1,6 +1,6 @@
 # webhook-hub
 
-@fohte's personal hub that receives webhooks (GitHub, Sentry) and forwards a curated subset to a configurable Slack channel.
+@fohte's personal hub that receives webhooks (GitHub, Sentry, Grafana) and forwards a curated subset to a configurable Slack channel.
 
 [![Test](https://github.com/fohte/webhook-hub/actions/workflows/test.yml/badge.svg)](https://github.com/fohte/webhook-hub/actions/workflows/test.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-fohte%2Fwebhook--hub-blue?logo=github)](https://github.com/fohte/webhook-hub/pkgs/container/webhook-hub)
@@ -12,8 +12,9 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 - **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change.
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
 - **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`.
+- **Grafana alerts** — each alert in a webhook notification is posted separately. Alerts with the same fingerprint update the existing Slack message without creating another tq task.
 
-CI and Sentry alert notifications include an `未対応` status and a [tq task](https://github.com/fohte/tq) link. Task creation is best-effort: if the tq API is unavailable, the Slack notification still posts without a task link.
+CI, Sentry, and Grafana alert notifications include an `未対応` status and a [tq task](https://github.com/fohte/tq) link. Task creation is best-effort: if the tq API is unavailable, the Slack notification still posts without a task link.
 
 ## Endpoints
 
@@ -21,6 +22,7 @@ CI and Sentry alert notifications include an `未対応` status and a [tq task](
 | ------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST` | `/github`  | GitHub webhook receiver. Verifies `x-hub-signature-256`; rejects invalid signatures with `401`. Handler errors return `200` to suppress GitHub's redelivery.   |
 | `POST` | `/sentry`  | Sentry webhook receiver. Verifies `Sentry-Hook-Signature`; rejects invalid signatures with `401`. Handler errors return `200` to suppress Sentry's redelivery. |
+| `POST` | `/grafana` | Grafana webhook receiver. Verifies `X-Grafana-Alerting-Signature`; rejects invalid signatures with `401`.                                                      |
 | `GET`  | `/healthz` | Liveness probe; returns `ok`.                                                                                                                                  |
 
 ## Configuration
@@ -29,6 +31,7 @@ CI and Sentry alert notifications include an `未対応` status and a [tq task](
 | ------------------------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                                                |
 | `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
+| `GRAFANA_WEBHOOK_SECRET` | Yes      | —                                        | Shared secret for `X-Grafana-Alerting-Signature` verification.                                                |
 | `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                                             |
 | `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
 | `SLACK_ACTIVITY_CHANNEL` | No       | `#activity`                              | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
@@ -50,6 +53,7 @@ To run the service against real deliveries, these things need to be wired up.
    docker run --rm -p 8080:8080 \
      -e GITHUB_WEBHOOK_SECRET=... \
      -e SENTRY_WEBHOOK_SECRET=... \
+     -e GRAFANA_WEBHOOK_SECRET=... \
      -e SLACK_BOT_TOKEN=xoxb-... \
      -e SLACK_CHANNEL=#your-channel \
      -e TQ_API_URL=http://tq-api.example.test:3001 \
@@ -73,13 +77,19 @@ To run the service against real deliveries, these things need to be wired up.
 
    Creating the integration alone does not send anything — add an action to each project's Alert Rules that notifies this integration.
 
-4. **Provision octo-sts.** The CI-failure notification calls the GitHub REST API (PR lookup, failed job/step) via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. This requires an octo-sts trust policy that grants the deploying identity read-only `pull_requests` and `actions` permissions, and a Kubernetes ServiceAccount token projected into the container at the path configured by `OCTO_STS_SA_TOKEN_PATH`. The `OCTO_STS_*` variables above point the service at the octo-sts endpoint and the trust policy identity/scope to assume.
+4. **Register a Grafana webhook contact point**:
+   - URL: `https://<your-host>/grafana`
+   - Enable HMAC signature and use the same value as `GRAFANA_WEBHOOK_SECRET`
+   - Keep the signature header as `X-Grafana-Alerting-Signature`
+   - Leave the optional timestamp header unset
 
-5. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
+5. **Provision octo-sts.** The CI-failure notification calls the GitHub REST API (PR lookup, failed job/step) via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. This requires an octo-sts trust policy that grants the deploying identity read-only `pull_requests` and `actions` permissions, and a Kubernetes ServiceAccount token projected into the container at the path configured by `OCTO_STS_SA_TOKEN_PATH`. The `OCTO_STS_*` variables above point the service at the octo-sts endpoint and the trust policy identity/scope to assume.
+
+6. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
    - `chat:write` — post and edit messages
    - `chat:write.customize` — post CI-failure notifications under a custom username/icon
-   - `channels:history` (public channel) or `groups:history` (private channel) — look up the original PR message to edit on close
-   - `metadata.message:read` — read the embedded PR identifier on history items
+   - `channels:history` (public channel) or `groups:history` (private channel) — look up messages to update on alert redelivery or PR close
+   - `metadata.message:read` — read embedded alert fingerprints, task references, and PR identifiers on history items
    - `channels:read` and/or `groups:read` — resolve `SLACK_CHANNEL` name (`#foo`) to a channel ID
 
    Adding a scope to an existing app requires reinstalling it to the workspace.
