@@ -9,6 +9,8 @@ import { okAsync, type ResultAsync } from 'neverthrow'
 
 import type { GitHubClient } from '#github-client'
 import { logger } from '#logger'
+import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
+import { type TqClient } from '#plugins/tq/tq-client'
 import type { SlackApiError, SlackMessageContent, SlackNotifier } from '#slack'
 import {
   buildIssueNotification,
@@ -37,6 +39,8 @@ export interface DispatchContext {
   notifier: SlackNotifier
   activityChannel: string
   githubClient: GitHubClient
+  tqClient: TqClient
+  tqWebUrl: string
 }
 
 interface ParsedEvent {
@@ -69,8 +73,16 @@ export const dispatch = (
         githubClient: ctx.githubClient,
       }).andThen((note) => {
         if (note === null) return okAsync<DispatchOutcome>('filtered')
-        return ctx.notifier
-          .postMessage(note.content)
+        return createAlertTask(ctx.tqClient, note.task, {
+          delivery_id: ctx.deliveryId,
+          event: 'workflow_run',
+          repo: note.repo,
+        })
+          .andThen((task) =>
+            ctx.notifier.postMessage(
+              addTqTaskStatus(note.content, task, ctx.tqWebUrl),
+            ),
+          )
           .map((): DispatchOutcome => {
             logger.info(
               {

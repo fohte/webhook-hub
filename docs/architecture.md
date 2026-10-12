@@ -8,12 +8,20 @@ webhook-hub is a single Hono HTTP service that receives webhooks from multiple s
 sequenceDiagram
   participant SRC as Webhook source (GitHub / Sentry)
   participant POD as webhook-hub
+  participant TQ as tq API
   participant SLACK as Slack
 
   SRC->>POD: POST /<source> (webhook payload + signature header)
   POD->>POD: verify signature, dispatch, filter
   alt event matches a notification rule
-    POD->>SLACK: chat.postMessage
+    POD->>TQ: POST /api/tasks
+    alt task created
+      TQ-->>POD: task id and number
+      POD->>SLACK: chat.postMessage with task link and metadata
+    else tq API unavailable or returns an error
+      TQ-->>POD: error
+      POD->>SLACK: chat.postMessage without task link
+    end
     SLACK-->>POD: ok
   end
   POD-->>SRC: 200
@@ -119,5 +127,7 @@ A Slack message is posted only when **both** of the following are true:
 - `payload.action === "triggered"`
 
 The red attachment uses the issue title in a header, the project slug, level, culprit, and triggered rule in section fields, and a link to the issue page in a context block. Empty project slug and culprit values are omitted.
+
+Every matching CI or Sentry alert attempts to create a personal-context tq task with the alert details and source URL in its description. The Slack notification includes an `未対応` status; on successful task creation it also includes a link and Slack message metadata containing the task ID. Task creation failures are logged and captured, while the Slack notification still posts without a task link.
 
 All other resources and actions short-circuit to `ignored`. No further filtering is applied on top of this — every verified, triggered issue alert is forwarded.

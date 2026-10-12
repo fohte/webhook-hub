@@ -14,6 +14,7 @@ import { serve } from '@hono/node-server'
 import { loadConfig } from '#config'
 import { createGitHubClient } from '#github-client'
 import { logger } from '#logger'
+import { createTqClient } from '#plugins/tq/tq-client'
 import { createApp } from '#server'
 import { createSlackNotifier } from '#slack'
 import { createGithubSource } from '#sources/github/index'
@@ -33,14 +34,17 @@ const main = (): void => {
   )
   const octoStsTokenCache = createOctoStsTokenCache(config.octoSts)
   const githubClient = createGitHubClient(octoStsTokenCache)
+  const tqClient = createTqClient(config.tqApiUrl)
   const app = createApp({
     sources: [
       createGithubSource(
         config.githubWebhookSecret,
         config.slackActivityChannel,
         githubClient,
+        tqClient,
+        config.tqWebUrl,
       ),
-      createSentrySource(config.sentryWebhookSecret),
+      createSentrySource(config.sentryWebhookSecret, tqClient, config.tqWebUrl),
     ],
     notifier,
   })

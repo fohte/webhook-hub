@@ -1,6 +1,7 @@
 import { Webhooks } from '@octokit/webhooks'
 
 import type { GitHubClient } from '#github-client'
+import type { TqClient } from '#plugins/tq/tq-client'
 import { dispatch } from '#sources/github/dispatch'
 import type { WebhookSource } from '#webhook-source'
 
@@ -8,6 +9,8 @@ export const createGithubSource = (
   webhookSecret: string,
   activityChannel: string,
   githubClient: GitHubClient,
+  tqClient: TqClient,
+  tqWebUrl: string,
 ): WebhookSource => {
   const webhooks = new Webhooks({ secret: webhookSecret })
   return {
@@ -35,6 +38,8 @@ export const createGithubSource = (
           notifier,
           activityChannel,
           githubClient,
+          tqClient,
+          tqWebUrl,
         },
         { name: context.eventName, payload },
       ),

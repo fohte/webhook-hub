@@ -1,6 +1,8 @@
 import { okAsync, type ResultAsync } from 'neverthrow'
 
 import { logger } from '#logger'
+import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
+import { type TqClient } from '#plugins/tq/tq-client'
 import type { SlackApiError, SlackNotifier } from '#slack'
 import type { SentryIssueAlertEvent } from '#sources/sentry/handlers/issue-alert'
 import {
@@ -12,6 +14,8 @@ import type { DispatchOutcome } from '#webhook-source'
 export interface DispatchContext {
   deliveryId: string
   notifier: SlackNotifier
+  tqClient: TqClient
+  tqWebUrl: string
 }
 
 interface ParsedEvent {
@@ -43,17 +47,27 @@ export const dispatch = (
   const note = buildIssueAlertNotification(extractIssueAlertInput(typed))
   if (note === null) return okAsync('ignored')
 
-  return ctx.notifier.postMessage(note.content).map((): DispatchOutcome => {
-    logger.info(
-      {
-        delivery_id: ctx.deliveryId,
-        event: 'sentry_issue_alert',
-        title: note.title,
-        level: note.level,
-        url: note.webUrl,
-      },
-      'slack_notified',
-    )
-    return 'notified'
+  return createAlertTask(ctx.tqClient, note.task, {
+    delivery_id: ctx.deliveryId,
+    event: 'sentry_issue_alert',
+    url: note.webUrl,
   })
+    .andThen((task) =>
+      ctx.notifier.postMessage(
+        addTqTaskStatus(note.content, task, ctx.tqWebUrl),
+      ),
+    )
+    .map((): DispatchOutcome => {
+      logger.info(
+        {
+          delivery_id: ctx.deliveryId,
+          event: 'sentry_issue_alert',
+          title: note.title,
+          level: note.level,
+          url: note.webUrl,
+        },
+        'slack_notified',
+      )
+      return 'notified'
+    })
 }
