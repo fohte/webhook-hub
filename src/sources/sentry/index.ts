@@ -1,3 +1,4 @@
+import type { TqClient } from '#plugins/tq/tq-client'
 import { dispatch } from '#sources/sentry/dispatch'
 import {
   extractSentryContext,
@@ -5,7 +6,10 @@ import {
 } from '#sources/sentry/verify'
 import type { WebhookSource } from '#webhook-source'
 
-export const createSentrySource = (webhookSecret: string): WebhookSource => ({
+export const createSentrySource = (
+  webhookSecret: string,
+  tqClient: TqClient,
+): WebhookSource => ({
   name: 'sentry',
   path: '/sentry',
   extractContext: extractSentryContext,
@@ -13,7 +17,7 @@ export const createSentrySource = (webhookSecret: string): WebhookSource => ({
     verifySentrySignature(rawBody, headers, webhookSecret),
   dispatch: (context, payload, notifier) =>
     dispatch(
-      { deliveryId: context.deliveryId, notifier },
+      { deliveryId: context.deliveryId, notifier, tqClient },
       { resource: context.eventName, payload },
     ),
 })

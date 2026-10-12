@@ -19,6 +19,10 @@ vi.mock('@fohte/service-kit/observability', () => ({
 const GITHUB_SECRET = 'github-test-secret'
 const SENTRY_SECRET = 'sentry-test-secret'
 const ACTIVITY_CHANNEL = '#github_activity'
+const TQ_TASK_REF = {
+  id: '00000000-0000-4000-8000-000000000001',
+  number: 42,
+}
 
 const createNotifier = () => {
   const postMessage = vi.fn((): ResultAsync<SlackMessageRef, SlackApiError> =>
@@ -37,11 +41,20 @@ const createGithubClient = () => ({
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
 })
 
+const createTqClient = () => ({
+  createTask: vi.fn().mockReturnValue(okAsync(TQ_TASK_REF)),
+})
+
 const createTestApp = (notifier: SlackNotifier): Hono =>
   createApp({
     sources: [
-      createGithubSource(GITHUB_SECRET, ACTIVITY_CHANNEL, createGithubClient()),
-      createSentrySource(SENTRY_SECRET),
+      createGithubSource(
+        GITHUB_SECRET,
+        ACTIVITY_CHANNEL,
+        createGithubClient(),
+        createTqClient(),
+      ),
+      createSentrySource(SENTRY_SECRET, createTqClient()),
     ],
     notifier,
   })
@@ -83,7 +96,7 @@ const githubWorkflowRunFailureBody = JSON.stringify({
 })
 
 const githubWorkflowRunFailureContent = {
-  text: '🚨 CI failed',
+  text: '🚨 CI failed\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
   color: '#d73a49',
   blocks: [
     { type: 'header', text: { type: 'plain_text', text: '🚨 CI failed' } },
@@ -105,7 +118,20 @@ const githubWorkflowRunFailureContent = {
         },
       ],
     },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '*状態*\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+        },
+      ],
+    },
   ],
+  metadata: {
+    event_type: 'alert_task',
+    event_payload: { task_id: '00000000-0000-4000-8000-000000000001' },
+  },
   username: 'GitHub CI',
   iconUrl: 'https://avatars.githubusercontent.com/in/15368',
 }
@@ -125,7 +151,7 @@ const sentryIssueAlertTriggeredBody = JSON.stringify({
 })
 
 const sentryIssueAlertTriggeredContent = {
-  text: '🐛 TypeError: Cannot read properties of undefined',
+  text: '🐛 TypeError: Cannot read properties of undefined\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
   color: '#d73a49',
   blocks: [
     {
@@ -153,7 +179,20 @@ const sentryIssueAlertTriggeredContent = {
         },
       ],
     },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '*状態*\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+        },
+      ],
+    },
   ],
+  metadata: {
+    event_type: 'alert_task',
+    event_payload: { task_id: '00000000-0000-4000-8000-000000000001' },
+  },
 }
 
 describe('createApp with the real GitHub and Sentry sources', () => {

@@ -10,6 +10,7 @@ import {
   type PullRequestSummary,
 } from '#github-client'
 import { logger } from '#logger'
+import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 
@@ -33,6 +34,7 @@ export interface WorkflowRunInput {
 
 export interface WorkflowRunNotification {
   content: SlackMessageContent
+  task: CreateTaskRequest
   repo: string
   workflow: string
   url: string
@@ -175,6 +177,17 @@ const formatWorkflowRunNotification = (
       blocks,
       username: GITHUB_CI_USERNAME,
       iconUrl: GITHUB_CI_ICON_URL,
+    },
+    task: {
+      title: `CI failure: ${input.workflow} (${input.repo})`,
+      description: [
+        `Repository: ${input.repo}`,
+        `Workflow: ${input.workflow}`,
+        `Branch: ${input.branch}`,
+        `Failed step: ${failedStep === null ? 'Unknown' : `${failedStep.job} / ${failedStep.step}`}`,
+        `Run: ${input.url}`,
+      ].join('\n'),
+      context: 'personal',
     },
     repo: input.repo,
     workflow: input.workflow,

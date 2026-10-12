@@ -1,3 +1,4 @@
+import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 
@@ -27,6 +28,7 @@ export interface IssueAlertInput {
 
 export interface IssueAlertNotification {
   content: SlackMessageContent
+  task: CreateTaskRequest
   title: string
   level: string
   webUrl: string
@@ -101,6 +103,18 @@ export const buildIssueAlertNotification = (
 
   return {
     content,
+    task: {
+      title: `Sentry alert: ${input.title}`,
+      description: [
+        `Application: ${input.app || 'Unknown'}`,
+        `Issue: ${input.title}`,
+        `Level: ${input.level}`,
+        `Location: ${input.culprit || 'Unknown'}`,
+        `Rule: ${input.triggeredRule}`,
+        `Issue URL: ${input.webUrl}`,
+      ].join('\n'),
+      context: 'personal',
+    },
     title: input.title,
     level: input.level,
     webUrl: input.webUrl,

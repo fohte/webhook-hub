@@ -81,6 +81,7 @@ const contextBlock = (text: string): SlackBlock => ({
 const expectedNotification = (
   workflow: string,
   fields: [string, string][],
+  failedStep: { job: string; step: string } | null = null,
 ) => ({
   content: {
     text: `🚨 ${workflow} failed`,
@@ -94,6 +95,17 @@ const expectedNotification = (
     ],
     username: 'GitHub CI',
     iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+  },
+  task: {
+    title: `CI failure: ${workflow} (fohte/example)`,
+    description: [
+      'Repository: fohte/example',
+      `Workflow: ${workflow}`,
+      'Branch: main',
+      `Failed step: ${failedStep === null ? 'Unknown' : `${failedStep.job} / ${failedStep.step}`}`,
+      'Run: https://github.com/fohte/example/actions/runs/1',
+    ].join('\n'),
+    context: 'personal',
   },
   repo: 'fohte/example',
   workflow,
@@ -114,15 +126,19 @@ describe('buildWorkflowRunNotification', () => {
     const result = await buildWorkflowRunNotification(baseInput(), deps)
 
     expect(result._unsafeUnwrap()).toEqual(
-      expectedNotification('CI', [
-        ['Repository', 'fohte/example'],
+      expectedNotification(
+        'CI',
         [
-          '起点の PR',
-          '<https://github.com/fohte/example/pull/128|#128 Bump aws provider to v5.31.0>',
+          ['Repository', 'fohte/example'],
+          [
+            '起点の PR',
+            '<https://github.com/fohte/example/pull/128|#128 Bump aws provider to v5.31.0>',
+          ],
+          ['失敗箇所', '`plan (production)` › `terraform plan`'],
+          ['トリガー', 'push'],
         ],
-        ['失敗箇所', '`plan (production)` › `terraform plan`'],
-        ['トリガー', 'push'],
-      ]),
+        { job: 'plan (production)', step: 'terraform plan' },
+      ),
     )
   })
 
@@ -260,12 +276,16 @@ describe('buildWorkflowRunNotification', () => {
     )
 
     expect(result._unsafeUnwrap()).toEqual(
-      expectedNotification('Boilerplate update', [
-        ['Repository', 'fohte/example'],
-        ['起点の PR', 'なし'],
-        ['失敗箇所', '`sync` › `Run template sync`'],
-        ['トリガー', '定期実行'],
-      ]),
+      expectedNotification(
+        'Boilerplate update',
+        [
+          ['Repository', 'fohte/example'],
+          ['起点の PR', 'なし'],
+          ['失敗箇所', '`sync` › `Run template sync`'],
+          ['トリガー', '定期実行'],
+        ],
+        { job: 'sync', step: 'Run template sync' },
+      ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
   })

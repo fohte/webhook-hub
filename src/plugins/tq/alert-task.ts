@@ -1,0 +1,53 @@
+import { captureWithFingerprint } from '@fohte/service-kit/observability'
+import { okAsync, type ResultAsync } from 'neverthrow'
+
+import { logger } from '#logger'
+import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
+import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
+import type { SlackMessageContent } from '#slack'
+
+const TQ_TASK_URL = 'https://tq.fohte.net/tasks'
+const TQ_TASK_CREATION_FAILURE_FINGERPRINT =
+  'webhook-hub.tq-task-creation-failed'
+
+export const createAlertTask = (
+  tqClient: TqClient,
+  request: CreateTaskRequest,
+  extras: Record<string, unknown>,
+): ResultAsync<TqTaskRef | null, never> =>
+  tqClient.createTask(request).orElse((error) => {
+    captureWithFingerprint(error, TQ_TASK_CREATION_FAILURE_FINGERPRINT, {
+      extras,
+    })
+    logger.warn({ err: error, ...extras }, 'tq_task_creation_failed')
+    return okAsync(null)
+  })
+
+export const addTqTaskStatus = (
+  content: SlackMessageContent,
+  task: TqTaskRef | null,
+): SlackMessageContent => {
+  const taskLink =
+    task === null
+      ? null
+      : `<${TQ_TASK_URL}/${task.id}|tq #${String(task.number)}>`
+  const status = `未対応${taskLink === null ? '' : ` · ${taskLink}`}`
+  const statusBlock = {
+    type: 'context' as const,
+    elements: [{ type: 'mrkdwn' as const, text: `*状態*\n${status}` }],
+  }
+
+  return {
+    ...content,
+    text: `${content.text}\n${status}`,
+    blocks: [...(content.blocks ?? []), statusBlock],
+    ...(task === null
+      ? {}
+      : {
+          metadata: {
+            event_type: 'alert_task',
+            event_payload: { task_id: task.id },
+          },
+        }),
+  }
+}

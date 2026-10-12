@@ -1,10 +1,15 @@
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
+import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import { SlackApiError } from '#slack'
 import type { DispatchContext } from '#sources/github/dispatch'
 import { dispatch } from '#sources/github/dispatch'
 import type { DispatchOutcome } from '#webhook-source'
+
+vi.mock('@fohte/service-kit/observability', () => ({
+  captureWithFingerprint: vi.fn(),
+}))
 
 const createNotifier = () => ({
   postMessage: vi.fn().mockReturnValue(okAsync({ channel: 'C1', ts: '1' })),
@@ -17,20 +22,39 @@ const createGithubClient = () => ({
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
 })
 
+const TQ_TASK_REF = {
+  id: '00000000-0000-4000-8000-000000000001',
+  number: 42,
+}
+
+const createTqClient = (
+  result: ReturnType<TqClient['createTask']> = okAsync(TQ_TASK_REF),
+) => ({
+  createTask: vi.fn().mockReturnValue(result),
+})
+
 const createContext = (
   event: string,
   notifier: DispatchContext['notifier'],
+  tqClient = createTqClient(),
 ): DispatchContext => ({
   deliveryId: 'delivery-1',
   event,
   notifier,
   activityChannel: '#github_activity',
   githubClient: createGithubClient(),
+  tqClient,
 })
 
 const dispatchOutcome = async (
   ...args: Parameters<typeof dispatch>
 ): Promise<DispatchOutcome> => (await dispatch(...args))._unsafeUnwrap()
+
+const observeDispatch = <TOutcome, TTaskCalls, TPostMessageCalls>(
+  outcome: TOutcome,
+  taskCalls: TTaskCalls,
+  postMessageCalls: TPostMessageCalls,
+) => ({ outcome, taskCalls, postMessageCalls })
 
 const workflowRunPayload = (overrides: {
   action?: string
@@ -122,39 +146,160 @@ const issuesPayload = (overrides: {
 describe('dispatch (workflow_run)', () => {
   it('posts to Slack and returns notified for a failed run on the default branch', async () => {
     const notifier = createNotifier()
+    const tqClient = createTqClient()
 
     const outcome = await dispatchOutcome(
-      createContext('workflow_run', notifier),
+      createContext('workflow_run', notifier, tqClient),
       { name: 'workflow_run', payload: workflowRunPayload({}) },
     )
 
-    expect(outcome).toBe('notified')
-    expect(notifier.postMessage).toHaveBeenCalledExactlyOnceWith({
-      text: '🚨 CI failed',
-      color: '#d73a49',
-      blocks: [
-        { type: 'header', text: { type: 'plain_text', text: '🚨 CI failed' } },
-        {
-          type: 'section',
-          fields: [
-            { type: 'mrkdwn', text: '*Repository*\nfohte/example' },
-            { type: 'mrkdwn', text: '*起点の PR*\nfix: something' },
-            { type: 'mrkdwn', text: '*失敗箇所*\n不明' },
-            { type: 'mrkdwn', text: '*トリガー*\npush' },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: '<https://github.com/fohte/example/actions/runs/1|View run>',
-            },
-          ],
-        },
+    expect(
+      observeDispatch(
+        outcome,
+        tqClient.createTask.mock.calls,
+        notifier.postMessage.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'notified',
+      taskCalls: [
+        [
+          {
+            title: 'CI failure: CI (fohte/example)',
+            description: [
+              'Repository: fohte/example',
+              'Workflow: CI',
+              'Branch: main',
+              'Failed step: Unknown',
+              'Run: https://github.com/fohte/example/actions/runs/1',
+            ].join('\n'),
+            context: 'personal',
+          },
+        ],
       ],
-      username: 'GitHub CI',
-      iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+      postMessageCalls: [
+        [
+          {
+            text: '🚨 CI failed\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+            color: '#d73a49',
+            blocks: [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: '🚨 CI failed' },
+              },
+              {
+                type: 'section',
+                fields: [
+                  { type: 'mrkdwn', text: '*Repository*\nfohte/example' },
+                  { type: 'mrkdwn', text: '*起点の PR*\nfix: something' },
+                  { type: 'mrkdwn', text: '*失敗箇所*\n不明' },
+                  { type: 'mrkdwn', text: '*トリガー*\npush' },
+                ],
+              },
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
+                    text: '<https://github.com/fohte/example/actions/runs/1|View run>',
+                  },
+                ],
+              },
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
+                    text: '*状態*\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+                  },
+                ],
+              },
+            ],
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: {
+                task_id: '00000000-0000-4000-8000-000000000001',
+              },
+            },
+            username: 'GitHub CI',
+            iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+          },
+        ],
+      ],
+    })
+  })
+
+  it('posts the CI alert without a task link when tq task creation fails', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient(
+      errAsync(new TqApiError('TQ API unavailable', undefined)),
+    )
+
+    const outcome = await dispatchOutcome(
+      createContext('workflow_run', notifier, tqClient),
+      { name: 'workflow_run', payload: workflowRunPayload({}) },
+    )
+
+    expect(
+      observeDispatch(
+        outcome,
+        tqClient.createTask.mock.calls,
+        notifier.postMessage.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'notified',
+      taskCalls: [
+        [
+          {
+            title: 'CI failure: CI (fohte/example)',
+            description: [
+              'Repository: fohte/example',
+              'Workflow: CI',
+              'Branch: main',
+              'Failed step: Unknown',
+              'Run: https://github.com/fohte/example/actions/runs/1',
+            ].join('\n'),
+            context: 'personal',
+          },
+        ],
+      ],
+      postMessageCalls: [
+        [
+          {
+            text: '🚨 CI failed\n未対応',
+            color: '#d73a49',
+            blocks: [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: '🚨 CI failed' },
+              },
+              {
+                type: 'section',
+                fields: [
+                  { type: 'mrkdwn', text: '*Repository*\nfohte/example' },
+                  { type: 'mrkdwn', text: '*起点の PR*\nfix: something' },
+                  { type: 'mrkdwn', text: '*失敗箇所*\n不明' },
+                  { type: 'mrkdwn', text: '*トリガー*\npush' },
+                ],
+              },
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
+                    text: '<https://github.com/fohte/example/actions/runs/1|View run>',
+                  },
+                ],
+              },
+              {
+                type: 'context',
+                elements: [{ type: 'mrkdwn', text: '*状態*\n未対応' }],
+              },
+            ],
+            username: 'GitHub CI',
+            iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+          },
+        ],
+      ],
     })
   })
 
