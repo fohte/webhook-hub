@@ -36,7 +36,7 @@ export interface SlackMessageRef {
   ts: string
 }
 
-export interface SlackMessageMatch {
+interface SlackMessageMatch {
   ref: SlackMessageRef
   eventPayload: Record<string, unknown>
 }
