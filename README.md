@@ -12,18 +12,18 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 - **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change.
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
 - **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`.
-- **Grafana alerts** — each alert in a webhook notification is posted separately. Alerts with the same fingerprint update the existing Slack message without creating another tq task.
+- **Grafana alerts** — each firing or resolved alert is posted separately. Redeliveries with the same fingerprint and `startsAt` update the existing Slack message without creating another tq task; a later incident with the same fingerprint gets its own message and task.
 
 CI, Sentry, and Grafana alert notifications include an `未対応` status and a [tq task](https://github.com/fohte/tq) link. Task creation is best-effort: if the tq API is unavailable, the Slack notification still posts without a task link.
 
 ## Endpoints
 
-| Method | Path       | Description                                                                                                                                                    |
-| ------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST` | `/github`  | GitHub webhook receiver. Verifies `x-hub-signature-256`; rejects invalid signatures with `401`. Handler errors return `200` to suppress GitHub's redelivery.   |
-| `POST` | `/sentry`  | Sentry webhook receiver. Verifies `Sentry-Hook-Signature`; rejects invalid signatures with `401`. Handler errors return `200` to suppress Sentry's redelivery. |
-| `POST` | `/grafana` | Grafana webhook receiver. Verifies `X-Grafana-Alerting-Signature`; rejects invalid signatures with `401`.                                                      |
-| `GET`  | `/healthz` | Liveness probe; returns `ok`.                                                                                                                                  |
+| Method | Path       | Description                                                                                                                                                             |
+| ------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/github`  | GitHub webhook receiver. Verifies `x-hub-signature-256`; rejects invalid signatures with `401`. Handler errors return `200` to suppress GitHub's redelivery.            |
+| `POST` | `/sentry`  | Sentry webhook receiver. Verifies `Sentry-Hook-Signature`; rejects invalid signatures with `401`. Handler errors return `200` to suppress Sentry's redelivery.          |
+| `POST` | `/grafana` | Grafana webhook receiver. Verifies `X-Grafana-Alerting-Signature`; rejects invalid signatures with `401`. Handler errors return `200` to suppress Grafana's redelivery. |
+| `GET`  | `/healthz` | Liveness probe; returns `ok`.                                                                                                                                           |
 
 ## Configuration
 
@@ -35,7 +35,7 @@ CI, Sentry, and Grafana alert notifications include an `未対応` status and a 
 | `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                                             |
 | `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
 | `SLACK_ACTIVITY_CHANNEL` | No       | `#activity`                              | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
-| `TQ_API_URL`             | Yes      | —                                        | tq API base URL used to create tasks for CI and Sentry alerts.                                                |
+| `TQ_API_URL`             | Yes      | —                                        | tq API base URL used to create tasks for CI, Sentry, and Grafana alerts.                                      |
 | `TQ_WEB_URL`             | No       | `https://tq.fohte.net`                   | tq web app base URL used to link created tasks in Slack.                                                      |
 | `PORT`                   | No       | `8080`                                   | HTTP listen port.                                                                                             |
 | `OCTO_STS_URL`           | Yes      | —                                        | octo-sts endpoint used to exchange an OIDC token for a short-lived GitHub App token.                          |

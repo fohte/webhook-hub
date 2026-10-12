@@ -1,9 +1,9 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 
 import type { SourceContext, WebhookHeaders } from '#webhook-source'
 
 export const extractGrafanaContext = (): SourceContext => ({
-  deliveryId: 'grafana',
+  deliveryId: randomUUID(),
   eventName: 'alerting',
 })
 

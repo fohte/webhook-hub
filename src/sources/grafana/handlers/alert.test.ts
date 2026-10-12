@@ -93,7 +93,6 @@ describe('buildGrafanaAlertNotification', () => {
         context: 'personal',
       },
       status: 'firing',
-      fingerprint: 'fp-abcdef',
     })
   })
 
@@ -104,6 +103,7 @@ describe('buildGrafanaAlertNotification', () => {
         labels: { alertname: 'Queue <full>' },
         annotations: { summary: 'Recovered & stable' },
         fingerprint: 'fp-recovered',
+        startsAt: '2026-01-02T00:00:00Z',
       }),
     ).toEqual({
       alertName: 'Queue <full>',
@@ -130,13 +130,13 @@ describe('buildGrafanaAlertNotification', () => {
         description: [
           'Alert: Queue <full>',
           'Status: resolved',
+          'Started at: 2026-01-02T00:00:00Z',
           'Labels:\n- alertname: Queue <full>',
           'Annotations:\n- summary: Recovered & stable',
         ].join('\n\n'),
         context: 'personal',
       },
       status: 'resolved',
-      fingerprint: 'fp-recovered',
     })
   })
 })

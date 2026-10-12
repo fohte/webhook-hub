@@ -7,7 +7,7 @@ export interface GrafanaAlert {
   labels: Record<string, string>
   annotations: Record<string, string>
   fingerprint: string
-  startsAt?: string
+  startsAt: string
   endsAt?: string
   generatorURL?: string
   dashboardURL?: string
@@ -19,7 +19,6 @@ export interface GrafanaAlertNotification {
   content: SlackMessageContent
   task: CreateTaskRequest
   status: GrafanaAlert['status']
-  fingerprint: string
 }
 
 const ALERT_COLORS = {
@@ -38,12 +37,16 @@ const slackLink = (url: string | undefined, label: string): string | null => {
   return `<${escapeSlackMrkdwn(url)}|${escapeSlackMrkdwn(label)}>`
 }
 
-const renderAlertDetails = (alert: GrafanaAlert): SlackBlock[] => {
-  const alertName = alert.labels['alertname'] ?? 'Grafana alert'
+const renderAlertDetails = (
+  alert: GrafanaAlert,
+  alertName: string,
+  statusLabel: string,
+  statusIcon: string,
+): SlackBlock[] => {
   const fields = [
     {
       type: 'mrkdwn' as const,
-      text: `*状態*\n${alert.status === 'firing' ? '発生中' : '解決'}`,
+      text: `*状態*\n${statusLabel}`,
     },
     ...(alert.labels['severity'] === undefined
       ? []
@@ -81,10 +84,7 @@ const renderAlertDetails = (alert: GrafanaAlert): SlackBlock[] => {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: truncate(
-          `${alert.status === 'firing' ? '🚨' : '✅'} ${alertName}`,
-          150,
-        ),
+        text: truncate(`${statusIcon} ${alertName}`, 150),
       },
     },
     { type: 'section', fields },
@@ -136,7 +136,7 @@ const renderTaskDescription = (
   return [
     `Alert: ${alertName}`,
     `Status: ${alert.status}`,
-    ...(alert.startsAt === undefined ? [] : [`Started at: ${alert.startsAt}`]),
+    `Started at: ${alert.startsAt}`,
     ...(alert.endsAt === undefined ? [] : [`Ended at: ${alert.endsAt}`]),
     ...(labels.length === 0 ? [] : [`Labels:\n${labels.join('\n')}`]),
     ...(annotations.length === 0
@@ -161,7 +161,7 @@ export const buildGrafanaAlertNotification = (
   const content: SlackMessageContent = {
     text: `${statusIcon} ${alertName} (${statusLabel})`,
     color: ALERT_COLORS[alert.status],
-    blocks: renderAlertDetails(alert),
+    blocks: renderAlertDetails(alert, alertName, statusLabel, statusIcon),
   }
 
   return {
@@ -173,6 +173,5 @@ export const buildGrafanaAlertNotification = (
       context: 'personal',
     },
     status: alert.status,
-    fingerprint: alert.fingerprint,
   }
 }

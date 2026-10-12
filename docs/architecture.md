@@ -2,11 +2,11 @@
 
 ## Overview
 
-webhook-hub is a single Hono HTTP service that receives webhooks from multiple sources (GitHub, Sentry), applies a small set of filters, and posts matching events to Slack.
+webhook-hub is a single Hono HTTP service that receives webhooks from multiple sources (GitHub, Sentry, Grafana), applies a small set of filters, and posts matching events to Slack.
 
 ```mermaid
 sequenceDiagram
-  participant SRC as Webhook source (GitHub / Sentry)
+  participant SRC as Webhook source (GitHub / Sentry / Grafana)
   participant POD as webhook-hub
   participant TQ as tq API
   participant SLACK as Slack
@@ -31,7 +31,7 @@ sequenceDiagram
 
 Each registered `WebhookSource` (`src/webhook-source.ts`) is mounted at its own path and runs the same pipeline (`src/server.ts`):
 
-1. `extractContext()` pulls the delivery ID and event/resource name from the request headers. Missing headers return `400`.
+1. `extractContext()` pulls source-specific delivery context from the request. Missing required headers return `400`; Grafana assigns a request ID because its webhook has no delivery ID header.
 2. `verify()` checks the request's signature against the source's shared secret. Failure returns `401`.
 3. The raw body is parsed as JSON. Parse failure returns `400`.
 4. `dispatch()` runs the source-specific handler for the event.
@@ -48,7 +48,9 @@ Headers: `Request-ID`, `Sentry-Hook-Resource`, `Sentry-Hook-Signature`. The sign
 
 ### Grafana (`POST /grafana`)
 
-Header: `X-Grafana-Alerting-Signature`. The signature is an HMAC-SHA256 of the raw body against `GRAFANA_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/grafana/verify.ts`); the optional timestamp header is not configured. Each alert is dispatched separately. Slack metadata stores its fingerprint and tq task reference so repeated notifications update the existing message without creating another task.
+Header: `X-Grafana-Alerting-Signature`. The signature is an HMAC-SHA256 of the raw body against `GRAFANA_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/grafana/verify.ts`); the optional timestamp header is not configured. Each firing or resolved alert with a non-empty fingerprint and valid `startsAt` is dispatched separately. Slack metadata stores the fingerprint, `startsAt`, and tq task reference. Redeliveries for the same incident update its message and reuse its task; a later incident with the same fingerprint creates a new message and task. History lookup is bounded to five pages within one day of the incident start.
+
+The Slack notification includes alert labels, summary and description annotations, and available panel, dashboard, rule, and runbook links. It uses mrkdwn links for destinations because Slack interactive buttons require a separate request endpoint.
 
 ## Notification rules
 
@@ -132,6 +134,6 @@ A Slack message is posted only when **both** of the following are true:
 
 The red attachment uses the issue title in a header, the project slug, level, culprit, and triggered rule in section fields, and a link to the issue page in a context block. Empty project slug and culprit values are omitted.
 
-Every matching CI or Sentry alert attempts to create a personal-context tq task with the alert details and source URL in its description. The Slack notification includes an `未対応` status; on successful task creation it also includes a link and Slack message metadata containing the task ID. Task creation failures are logged and captured, while the Slack notification still posts without a task link.
+Every matching CI, Sentry, or Grafana alert attempts to create a personal-context tq task with the alert details and source URL in its description. The Slack notification includes an `未対応` status; on successful task creation it also includes a link and Slack message metadata containing the task ID. Task creation failures are logged and captured, while the Slack notification still posts without a task link. Grafana processes every alert in a grouped payload even if one alert's Slack delivery fails.
 
 All other resources and actions short-circuit to `ignored`. No further filtering is applied on top of this — every verified, triggered issue alert is forwarded.

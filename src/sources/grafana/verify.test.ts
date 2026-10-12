@@ -32,10 +32,14 @@ const verifyMalformedSignatures = (): boolean[] => [
   ),
 ]
 
+const normalizeGrafanaContext = (
+  context: ReturnType<typeof extractGrafanaContext>,
+) => ({ ...context, deliveryId: '<request-id>' })
+
 describe('extractGrafanaContext', () => {
-  it('returns the static Grafana event context', () => {
-    expect(extractGrafanaContext()).toEqual({
-      deliveryId: 'grafana',
+  it('assigns a request id to the Grafana event context', () => {
+    expect(normalizeGrafanaContext(extractGrafanaContext())).toEqual({
+      deliveryId: '<request-id>',
       eventName: 'alerting',
     })
   })

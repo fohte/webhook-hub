@@ -242,6 +242,53 @@ describe('findMessageByMetadata', () => {
       ],
     })
   })
+
+  it('bounds history lookup to the requested time range and page count', async () => {
+    conversationsHistory.mockResolvedValue({
+      messages: [],
+      response_metadata: { next_cursor: 'next-page' },
+    })
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier
+      .findMessageByMetadata(
+        'grafana_alert',
+        (payload) => payload['fingerprint'] === 'fp-match',
+        {
+          oldest: '1767139200',
+          latest: '1767312000',
+          maxPages: 2,
+        },
+      )
+      .match(
+        (match) => match,
+        () => null,
+      )
+
+    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+      result: null,
+      calls: [
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+            oldest: '1767139200',
+            latest: '1767312000',
+          },
+        ],
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+            oldest: '1767139200',
+            latest: '1767312000',
+            cursor: 'next-page',
+          },
+        ],
+      ],
+    })
+  })
 })
 
 describe('buildPayload', () => {

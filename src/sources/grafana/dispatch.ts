@@ -1,9 +1,14 @@
-import { okAsync, type ResultAsync } from 'neverthrow'
+import { err, ok, okAsync, type Result, ResultAsync } from 'neverthrow'
 
 import { logger } from '#logger'
 import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
 import { type TqClient, type TqTaskRef } from '#plugins/tq/tq-client'
-import type { SlackApiError, SlackMessageMetadata, SlackNotifier } from '#slack'
+import type {
+  SlackHistorySearchOptions,
+  SlackMessageMetadata,
+  SlackNotifier,
+} from '#slack'
+import { SlackApiError } from '#slack'
 import {
   buildGrafanaAlertNotification,
   type GrafanaAlert,
@@ -18,6 +23,11 @@ export interface DispatchContext {
   tqWebUrl: string
 }
 
+const alertDispatchLocks = new WeakMap<
+  SlackNotifier,
+  Map<string, Promise<void>>
+>()
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -30,6 +40,9 @@ const isOptionalString = (
   key: string,
 ): boolean => value[key] === undefined || typeof value[key] === 'string'
 
+const isTimestampString = (value: unknown): value is string =>
+  typeof value === 'string' && Number.isFinite(Date.parse(value))
+
 const isGrafanaAlert = (value: unknown): value is GrafanaAlert =>
   isRecord(value) &&
   (value['status'] === 'firing' || value['status'] === 'resolved') &&
@@ -37,7 +50,7 @@ const isGrafanaAlert = (value: unknown): value is GrafanaAlert =>
   isStringRecord(value['annotations']) &&
   typeof value['fingerprint'] === 'string' &&
   value['fingerprint'] !== '' &&
-  isOptionalString(value, 'startsAt') &&
+  isTimestampString(value['startsAt']) &&
   isOptionalString(value, 'endsAt') &&
   isOptionalString(value, 'generatorURL') &&
   isOptionalString(value, 'dashboardURL') &&
@@ -57,15 +70,28 @@ const readTaskRef = (payload: Record<string, unknown>): TqTaskRef | null => {
 }
 
 const buildMetadata = (
-  fingerprint: string,
+  alert: GrafanaAlert,
   task: TqTaskRef | null,
 ): SlackMessageMetadata => ({
   event_type: 'grafana_alert',
   event_payload: {
-    fingerprint,
+    fingerprint: alert.fingerprint,
+    starts_at: alert.startsAt,
     ...(task === null ? {} : { task_id: task.id, task_number: task.number }),
   },
 })
+
+const historySearchOptions = (startsAt: string): SlackHistorySearchOptions => {
+  const timestamp = Date.parse(startsAt)
+  if (!Number.isFinite(timestamp)) return { maxPages: 5 }
+
+  const startSecond = Math.floor(timestamp / 1000)
+  return {
+    oldest: String(Math.max(0, startSecond - 86_400)),
+    latest: String(startSecond + 86_400),
+    maxPages: 5,
+  }
+}
 
 const dispatchAlert = (
   ctx: DispatchContext,
@@ -76,7 +102,10 @@ const dispatchAlert = (
   return ctx.notifier
     .findMessageByMetadata(
       'grafana_alert',
-      (payload) => payload['fingerprint'] === alert.fingerprint,
+      (payload) =>
+        payload['fingerprint'] === alert.fingerprint &&
+        payload['starts_at'] === alert.startsAt,
+      historySearchOptions(alert.startsAt),
     )
     .andThen((existing) => {
       const createOrReuseTask =
@@ -85,6 +114,7 @@ const dispatchAlert = (
               delivery_id: ctx.deliveryId,
               event: ctx.eventName,
               fingerprint: alert.fingerprint,
+              starts_at: alert.startsAt,
             })
           : okAsync(readTaskRef(existing.eventPayload))
 
@@ -93,7 +123,7 @@ const dispatchAlert = (
           note.content,
           task,
           ctx.tqWebUrl,
-          buildMetadata(alert.fingerprint, task),
+          buildMetadata(alert, task),
         )
         const notification =
           existing === null
@@ -106,6 +136,7 @@ const dispatchAlert = (
               delivery_id: ctx.deliveryId,
               event: ctx.eventName,
               fingerprint: alert.fingerprint,
+              starts_at: alert.startsAt,
               title: note.alertName,
               status: note.status,
             },
@@ -117,6 +148,49 @@ const dispatchAlert = (
     })
 }
 
+const dispatchAlertWithLock = (
+  ctx: DispatchContext,
+  alert: GrafanaAlert,
+): ResultAsync<DispatchOutcome, SlackApiError> => {
+  const locks =
+    alertDispatchLocks.get(ctx.notifier) ?? new Map<string, Promise<void>>()
+  alertDispatchLocks.set(ctx.notifier, locks)
+
+  const key = JSON.stringify([alert.fingerprint, alert.startsAt])
+  const previous = locks.get(key) ?? Promise.resolve()
+  let release = () => {}
+  const lock = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  locks.set(key, lock)
+
+  const finish = (): void => {
+    if (locks.get(key) === lock) {
+      locks.delete(key)
+      if (locks.size === 0) alertDispatchLocks.delete(ctx.notifier)
+    }
+    release()
+  }
+
+  const queuedDispatch: Promise<Result<DispatchOutcome, SlackApiError>> =
+    previous.then(async () => await dispatchAlert(ctx, alert))
+
+  return ResultAsync.fromPromise(
+    queuedDispatch,
+    (caughtErr) =>
+      new SlackApiError('failed to dispatch Grafana alert', caughtErr),
+  )
+    .andThen((result) => result)
+    .map((outcome) => {
+      finish()
+      return outcome
+    })
+    .mapErr((error) => {
+      finish()
+      return error
+    })
+}
+
 export const dispatch = (
   ctx: DispatchContext,
   payload: unknown,
@@ -124,15 +198,29 @@ export const dispatch = (
   const alerts = extractAlerts(payload)
   if (alerts.length === 0) return okAsync('ignored')
 
-  return alerts.reduce<ResultAsync<DispatchOutcome, SlackApiError>>(
-    (result, alert) =>
-      result.andThen((previous) =>
-        dispatchAlert(ctx, alert).map((current) =>
-          previous === 'notified' || current === 'notified'
-            ? 'notified'
-            : current,
-        ),
-      ),
-    okAsync('ignored'),
-  )
+  const dispatchAlerts = async (): Promise<
+    Result<DispatchOutcome, SlackApiError>
+  > => {
+    let notified = false
+    let firstError: SlackApiError | null = null
+
+    for (const alert of alerts) {
+      const result = await dispatchAlertWithLock(ctx, alert)
+      if (result.isErr()) {
+        firstError ??= result.error
+      } else if (result.value === 'notified') {
+        notified = true
+      }
+    }
+
+    return firstError === null
+      ? ok(notified ? 'notified' : 'ignored')
+      : err(firstError)
+  }
+
+  return ResultAsync.fromPromise(
+    dispatchAlerts(),
+    (caughtErr) =>
+      new SlackApiError('failed to dispatch Grafana alerts', caughtErr),
+  ).andThen((result) => result)
 }

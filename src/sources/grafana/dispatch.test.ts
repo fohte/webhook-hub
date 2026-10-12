@@ -2,7 +2,7 @@ import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
-import type { SlackNotifier } from '#slack'
+import { SlackApiError, type SlackNotifier } from '#slack'
 import type { DispatchContext } from '#sources/grafana/dispatch'
 import { dispatch } from '#sources/grafana/dispatch'
 import type { DispatchOutcome } from '#webhook-source'
@@ -16,11 +16,13 @@ const TQ_TASK_REF = {
   number: 9,
 }
 const TQ_WEB_URL = 'https://tasks.example.test'
+const INCIDENT_START = '2026-01-01T00:00:00Z'
 const ALERT = {
   status: 'firing',
   labels: { alertname: 'Queue depth' },
   annotations: { summary: 'Queue is growing' },
   fingerprint: 'fp-queue',
+  startsAt: INCIDENT_START,
 }
 
 const createNotifier = () => {
@@ -59,11 +61,14 @@ const dispatchOutcome = async (
 
 const matcherCalls = (
   calls: Parameters<SlackNotifier['findMessageByMetadata']>[],
+  startsAt = '',
 ): unknown[][] =>
-  calls.map(([eventType, matcher]) => [
+  calls.map(([eventType, matcher, options]) => [
     eventType,
-    matcher({ fingerprint: 'fp-queue' }),
-    matcher({ fingerprint: 'another-fingerprint' }),
+    matcher({ fingerprint: 'fp-queue', starts_at: startsAt }),
+    matcher({ fingerprint: 'fp-queue', starts_at: 'different-incident' }),
+    matcher({ fingerprint: 'another-fingerprint', starts_at: startsAt }),
+    options,
   ])
 
 const observeDispatch = <TOutcome, TObservations>(
@@ -81,14 +86,29 @@ describe('dispatch', () => {
 
     expect(
       observeDispatch(outcome, {
-        matcherCalls: matcherCalls(notifier.findMessageByMetadata.mock.calls),
+        matcherCalls: matcherCalls(
+          notifier.findMessageByMetadata.mock.calls,
+          INCIDENT_START,
+        ),
         taskCalls: tqClient.createTask.mock.calls,
         postCalls: notifier.postMessage.mock.calls,
         updateCalls: notifier.updateMessage.mock.calls,
       }),
     ).toEqual({
       outcome: 'notified',
-      matcherCalls: [['grafana_alert', true, false]],
+      matcherCalls: [
+        [
+          'grafana_alert',
+          true,
+          false,
+          false,
+          {
+            oldest: '1767139200',
+            latest: '1767312000',
+            maxPages: 5,
+          },
+        ],
+      ],
       taskCalls: [
         [
           {
@@ -96,6 +116,7 @@ describe('dispatch', () => {
             description: [
               'Alert: Queue depth',
               'Status: firing',
+              `Started at: ${INCIDENT_START}`,
               'Labels:\n- alertname: Queue depth',
               'Annotations:\n- summary: Queue is growing',
             ].join('\n\n'),
@@ -135,6 +156,7 @@ describe('dispatch', () => {
               event_type: 'grafana_alert',
               event_payload: {
                 fingerprint: 'fp-queue',
+                starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
               },
@@ -153,6 +175,7 @@ describe('dispatch', () => {
         ref: { channel: 'C9', ts: 'existing-ts' },
         eventPayload: {
           fingerprint: 'fp-queue',
+          starts_at: INCIDENT_START,
           task_id: TQ_TASK_REF.id,
           task_number: TQ_TASK_REF.number,
         },
@@ -165,12 +188,29 @@ describe('dispatch', () => {
 
     expect(
       observeDispatch(outcome, {
+        matcherCalls: matcherCalls(
+          notifier.findMessageByMetadata.mock.calls,
+          INCIDENT_START,
+        ),
         taskCalls: tqClient.createTask.mock.calls,
         postCalls: notifier.postMessage.mock.calls,
         updateCalls: notifier.updateMessage.mock.calls,
       }),
     ).toEqual({
       outcome: 'notified',
+      matcherCalls: [
+        [
+          'grafana_alert',
+          true,
+          false,
+          false,
+          {
+            oldest: '1767139200',
+            latest: '1767312000',
+            maxPages: 5,
+          },
+        ],
+      ],
       taskCalls: [],
       postCalls: [],
       updateCalls: [
@@ -206,6 +246,7 @@ describe('dispatch', () => {
               event_type: 'grafana_alert',
               event_payload: {
                 fingerprint: 'fp-queue',
+                starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
               },
@@ -213,6 +254,198 @@ describe('dispatch', () => {
           },
         ],
       ],
+    })
+  })
+
+  it('creates a new task and message for a later incident with the same fingerprint', async () => {
+    const notifier = createNotifier()
+    const earlierIncident = {
+      ref: { channel: 'C9', ts: 'existing-ts' },
+      eventPayload: {
+        fingerprint: 'fp-queue',
+        starts_at: INCIDENT_START,
+        task_id: TQ_TASK_REF.id,
+        task_number: TQ_TASK_REF.number,
+      },
+    }
+    notifier.findMessageByMetadata.mockImplementation((_eventType, matcher) =>
+      matcher(earlierIncident.eventPayload)
+        ? okAsync(earlierIncident)
+        : okAsync(null),
+    )
+    const tqClient = createTqClient()
+    const nextIncidentStart = '2026-01-02T00:00:00Z'
+    const outcome = await dispatchOutcome(createContext(notifier, tqClient), {
+      alerts: [{ ...ALERT, startsAt: nextIncidentStart }],
+    })
+
+    expect(
+      observeDispatch(outcome, {
+        matcherCalls: matcherCalls(
+          notifier.findMessageByMetadata.mock.calls,
+          nextIncidentStart,
+        ),
+        taskCalls: tqClient.createTask.mock.calls,
+        postCalls: notifier.postMessage.mock.calls,
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      matcherCalls: [
+        [
+          'grafana_alert',
+          true,
+          false,
+          false,
+          {
+            oldest: '1767225600',
+            latest: '1767398400',
+            maxPages: 5,
+          },
+        ],
+      ],
+      taskCalls: [
+        [
+          {
+            title: 'Grafana alert: Queue depth',
+            description: [
+              'Alert: Queue depth',
+              'Status: firing',
+              `Started at: ${nextIncidentStart}`,
+              'Labels:\n- alertname: Queue depth',
+              'Annotations:\n- summary: Queue is growing',
+            ].join('\n\n'),
+            context: 'personal',
+          },
+        ],
+      ],
+      postCalls: [
+        [
+          {
+            text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+            color: '#d73a49',
+            blocks: [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: '🚨 Queue depth' },
+              },
+              {
+                type: 'section',
+                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+              },
+              {
+                type: 'section',
+                text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
+              },
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
+                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+                  },
+                ],
+              },
+            ],
+            metadata: {
+              event_type: 'grafana_alert',
+              event_payload: {
+                fingerprint: 'fp-queue',
+                starts_at: nextIncidentStart,
+                task_id: '00000000-0000-4000-8000-000000000009',
+                task_number: 9,
+              },
+            },
+          },
+        ],
+      ],
+      updateCalls: [],
+    })
+  })
+
+  it('serializes simultaneous deliveries for the same incident', async () => {
+    const notifier = createNotifier()
+    const messageRef = { channel: 'C1', ts: 'message-ts' }
+    let existingPayload: Record<string, unknown> | null = null
+    notifier.findMessageByMetadata.mockImplementation((_eventType, matcher) =>
+      okAsync(
+        existingPayload !== null && matcher(existingPayload)
+          ? { ref: messageRef, eventPayload: existingPayload }
+          : null,
+      ),
+    )
+    notifier.postMessage.mockImplementation((content) => {
+      existingPayload = content.metadata?.event_payload ?? null
+      return okAsync(messageRef)
+    })
+    const tqClient = createTqClient()
+    const ctx = createContext(notifier, tqClient)
+    const [firstOutcome, secondOutcome] = await Promise.all([
+      dispatchOutcome(ctx, { alerts: [ALERT] }),
+      dispatchOutcome(ctx, { alerts: [ALERT] }),
+    ])
+    const expectedContent = {
+      text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+      color: '#d73a49',
+      blocks: [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: '🚨 Queue depth' },
+        },
+        {
+          type: 'section',
+          fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+        },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+            },
+          ],
+        },
+      ],
+      metadata: {
+        event_type: 'grafana_alert',
+        event_payload: {
+          fingerprint: 'fp-queue',
+          starts_at: INCIDENT_START,
+          task_id: '00000000-0000-4000-8000-000000000009',
+          task_number: 9,
+        },
+      },
+    }
+
+    expect(
+      observeDispatch([firstOutcome, secondOutcome], {
+        taskCalls: tqClient.createTask.mock.calls,
+        postCalls: notifier.postMessage.mock.calls,
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: ['notified', 'notified'],
+      taskCalls: [
+        [
+          {
+            title: 'Grafana alert: Queue depth',
+            description: [
+              'Alert: Queue depth',
+              'Status: firing',
+              `Started at: ${INCIDENT_START}`,
+              'Labels:\n- alertname: Queue depth',
+              'Annotations:\n- summary: Queue is growing',
+            ].join('\n\n'),
+            context: 'personal',
+          },
+        ],
+      ],
+      postCalls: [[expectedContent]],
+      updateCalls: [[messageRef, expectedContent]],
     })
   })
 
@@ -226,12 +459,14 @@ describe('dispatch', () => {
           labels: { alertname: 'Queue depth' },
           annotations: {},
           fingerprint: 'fp-queue',
+          startsAt: INCIDENT_START,
         },
         {
           status: 'firing',
           labels: { alertname: 'Disk usage' },
           annotations: {},
           fingerprint: 'fp-disk',
+          startsAt: INCIDENT_START,
         },
       ],
     })
@@ -250,6 +485,7 @@ describe('dispatch', () => {
             description: [
               'Alert: Queue depth',
               'Status: firing',
+              `Started at: ${INCIDENT_START}`,
               'Labels:\n- alertname: Queue depth',
             ].join('\n\n'),
             context: 'personal',
@@ -261,6 +497,7 @@ describe('dispatch', () => {
             description: [
               'Alert: Disk usage',
               'Status: firing',
+              `Started at: ${INCIDENT_START}`,
               'Labels:\n- alertname: Disk usage',
             ].join('\n\n'),
             context: 'personal',
@@ -295,6 +532,7 @@ describe('dispatch', () => {
               event_type: 'grafana_alert',
               event_payload: {
                 fingerprint: 'fp-queue',
+                starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
               },
@@ -328,6 +566,7 @@ describe('dispatch', () => {
               event_type: 'grafana_alert',
               event_payload: {
                 fingerprint: 'fp-disk',
+                starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
               },
@@ -361,6 +600,7 @@ describe('dispatch', () => {
             description: [
               'Alert: Queue depth',
               'Status: firing',
+              `Started at: ${INCIDENT_START}`,
               'Labels:\n- alertname: Queue depth',
               'Annotations:\n- summary: Queue is growing',
             ].join('\n\n'),
@@ -393,7 +633,10 @@ describe('dispatch', () => {
             ],
             metadata: {
               event_type: 'grafana_alert',
-              event_payload: { fingerprint: 'fp-queue' },
+              event_payload: {
+                fingerprint: 'fp-queue',
+                starts_at: INCIDENT_START,
+              },
             },
           },
         ],
@@ -405,7 +648,14 @@ describe('dispatch', () => {
     const notifier = createNotifier()
     const tqClient = createTqClient()
     const outcome = await dispatchOutcome(createContext(notifier, tqClient), {
-      alerts: [{ status: 'pending' }],
+      alerts: [
+        {
+          status: 'firing',
+          labels: { alertname: 'Queue depth' },
+          annotations: {},
+          fingerprint: 'fp-no-start',
+        },
+      ],
     })
 
     expect(
@@ -419,6 +669,165 @@ describe('dispatch', () => {
       lookupCalls: [],
       taskCalls: [],
       postCalls: [],
+    })
+  })
+
+  it('continues notifying later alerts after a Slack post fails', async () => {
+    const notifier = createNotifier()
+    notifier.postMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('Slack unavailable')))
+      .mockReturnValueOnce(okAsync({ channel: 'C1', ts: '2' }))
+    const tqClient = createTqClient()
+    const result = await dispatch(createContext(notifier, tqClient), {
+      alerts: [
+        {
+          status: 'firing',
+          labels: {},
+          annotations: {},
+          fingerprint: 'fp-first',
+          startsAt: INCIDENT_START,
+        },
+        {
+          status: 'firing',
+          labels: {},
+          annotations: {},
+          fingerprint: 'fp-second',
+          startsAt: INCIDENT_START,
+        },
+      ],
+    })
+
+    expect(
+      observeDispatch(
+        result.match(
+          (outcome) => ({ outcome }),
+          (error) => ({ error: error.name, message: error.message }),
+        ),
+        {
+          taskCalls: tqClient.createTask.mock.calls,
+          postCalls: notifier.postMessage.mock.calls,
+          updateCalls: notifier.updateMessage.mock.calls,
+        },
+      ),
+    ).toEqual({
+      outcome: { error: 'SlackApiError', message: 'Slack unavailable' },
+      taskCalls: [
+        [
+          {
+            title: 'Grafana alert: Grafana alert',
+            description: `Alert: Grafana alert\n\nStatus: firing\n\nStarted at: ${INCIDENT_START}`,
+            context: 'personal',
+          },
+        ],
+        [
+          {
+            title: 'Grafana alert: Grafana alert',
+            description: `Alert: Grafana alert\n\nStatus: firing\n\nStarted at: ${INCIDENT_START}`,
+            context: 'personal',
+          },
+        ],
+      ],
+      postCalls: [
+        [
+          {
+            text: '🚨 Grafana alert (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+            color: '#d73a49',
+            blocks: [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: '🚨 Grafana alert' },
+              },
+              {
+                type: 'section',
+                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+              },
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
+                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+                  },
+                ],
+              },
+            ],
+            metadata: {
+              event_type: 'grafana_alert',
+              event_payload: {
+                fingerprint: 'fp-first',
+                starts_at: INCIDENT_START,
+                task_id: '00000000-0000-4000-8000-000000000009',
+                task_number: 9,
+              },
+            },
+          },
+        ],
+        [
+          {
+            text: '🚨 Grafana alert (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+            color: '#d73a49',
+            blocks: [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: '🚨 Grafana alert' },
+              },
+              {
+                type: 'section',
+                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+              },
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
+                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+                  },
+                ],
+              },
+            ],
+            metadata: {
+              event_type: 'grafana_alert',
+              event_payload: {
+                fingerprint: 'fp-second',
+                starts_at: INCIDENT_START,
+                task_id: '00000000-0000-4000-8000-000000000009',
+                task_number: 9,
+              },
+            },
+          },
+        ],
+      ],
+      updateCalls: [],
+    })
+  })
+
+  it('returns a Slack history lookup failure without creating tasks or messages', async () => {
+    const notifier = createNotifier()
+    notifier.findMessageByMetadata.mockReturnValue(
+      errAsync(new SlackApiError('history unavailable')),
+    )
+    const tqClient = createTqClient()
+    const result = await dispatch(createContext(notifier, tqClient), {
+      alerts: [ALERT],
+    })
+
+    expect(
+      observeDispatch(
+        result.match(
+          (outcome) => ({ outcome }),
+          (error) => ({ error: error.name, message: error.message }),
+        ),
+        {
+          taskCalls: tqClient.createTask.mock.calls,
+          postCalls: notifier.postMessage.mock.calls,
+          updateCalls: notifier.updateMessage.mock.calls,
+        },
+      ),
+    ).toEqual({
+      outcome: { error: 'SlackApiError', message: 'history unavailable' },
+      taskCalls: [],
+      postCalls: [],
+      updateCalls: [],
     })
   })
 })
