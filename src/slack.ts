@@ -35,7 +35,7 @@ export interface SlackMessageMetadata {
 
 export type SlackBlock = HeaderBlock | SectionBlock | ContextBlock | ImageBlock
 
-export interface SlackImageUpload {
+interface SlackImageUpload {
   data: Buffer
   filename: string
   altText: string

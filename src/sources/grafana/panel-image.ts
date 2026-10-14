@@ -23,7 +23,7 @@ const buildRenderUrl = Result.fromThrowable(
     new GrafanaPanelImageError('failed to build Grafana render URL', caughtErr),
 )
 
-export interface GrafanaPanelImage {
+interface GrafanaPanelImage {
   buffer: Buffer
   panelId: string
 }
