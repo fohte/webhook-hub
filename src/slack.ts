@@ -301,23 +301,21 @@ export const createSlackNotifier = (
       )
     },
     uploadImage(image) {
-      return resolveChannelId(defaultChannel).andThen((channelId) =>
-        wrapSlackApi(
-          client.filesUploadV2({
-            file: image.data,
-            filename: image.filename,
-            title: image.filename,
-            alt_text: image.altText,
-            channel_id: channelId,
-          }),
-          'failed to upload Slack image',
-        ).andThen((res) => {
-          const fileId = res.files[0]?.files?.[0]?.id
-          return fileId === undefined
-            ? err(new SlackApiError('Slack upload did not return a file ID'))
-            : ok(fileId)
+      // Slack posts a file as a separate message when `channel_id` is provided.
+      return wrapSlackApi(
+        client.filesUploadV2({
+          file: image.data,
+          filename: image.filename,
+          title: image.filename,
+          alt_text: image.altText,
         }),
-      )
+        'failed to upload Slack image',
+      ).andThen((res) => {
+        const fileId = res.files[0]?.files?.[0]?.id
+        return fileId === undefined
+          ? err(new SlackApiError('Slack upload did not return a file ID'))
+          : ok(fileId)
+      })
     },
     checkScopes() {
       return wrapSlackApi(

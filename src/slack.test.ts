@@ -48,12 +48,7 @@ const LIST_CALL_ARGS = {
   limit: 1000,
 }
 
-const observeHistory = <TResult, TCalls>(result: TResult, calls: TCalls) => ({
-  result,
-  calls,
-})
-
-const observeCalls = <TResult, TCalls>(result: TResult, calls: TCalls) => ({
+const observe = <TResult, TCalls>(result: TResult, calls: TCalls) => ({
   result,
   calls,
 })
@@ -197,7 +192,7 @@ describe('findMessageByMetadata', () => {
         () => null,
       )
 
-    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
       result: {
         ref: { channel: 'CDEFAULT', ts: 'message-ts' },
         eventPayload: { fingerprint: 'fp-match', task_number: 9 },
@@ -251,7 +246,7 @@ describe('findMessageByMetadata', () => {
         () => null,
       )
 
-    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
       result: {
         ref: { channel: 'CDEFAULT', ts: 'older-ts' },
         eventPayload: { fingerprint: 'fp-match', task_number: 9 },
@@ -297,7 +292,7 @@ describe('findMessageByMetadata', () => {
         () => null,
       )
 
-    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
       result: null,
       calls: [
         [
@@ -394,7 +389,7 @@ describe('buildPayload', () => {
 })
 
 describe('uploadImage', () => {
-  it('uploads and shares a PNG in the notifier default channel', async () => {
+  it('uploads a private PNG for use in a Slack image block', async () => {
     const notifier = createSlackNotifier('token', '#default-channel')
     const image = Buffer.from('png-data')
     const fileId = await notifier
@@ -408,7 +403,7 @@ describe('uploadImage', () => {
         () => null,
       )
 
-    expect(observeCalls(fileId, filesUploadV2.mock.calls)).toEqual({
+    expect(observe(fileId, filesUploadV2.mock.calls)).toEqual({
       result: 'FIMAGE',
       calls: [
         [
@@ -417,7 +412,6 @@ describe('uploadImage', () => {
             filename: 'grafana-panel-17.png',
             title: 'grafana-panel-17.png',
             alt_text: 'Grafana panel 17',
-            channel_id: 'CDEFAULT',
           },
         ],
       ],
@@ -433,7 +427,7 @@ describe('checkScopes', () => {
       (error) => error.message,
     )
 
-    expect(observeCalls(result, authTest.mock.calls)).toEqual({
+    expect(observe(result, authTest.mock.calls)).toEqual({
       result: 'ok',
       calls: [[]],
     })
@@ -464,7 +458,7 @@ describe('checkScopes', () => {
       }),
     )
 
-    expect(observeCalls(result, authTest.mock.calls)).toEqual({
+    expect(observe(result, authTest.mock.calls)).toEqual({
       result: {
         kind: 'error',
         name: 'SlackMissingScopesError',

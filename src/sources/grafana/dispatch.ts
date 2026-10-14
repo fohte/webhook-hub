@@ -5,6 +5,7 @@ import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
 import { type TqClient, type TqTaskRef } from '#plugins/tq/tq-client'
 import type {
   SlackHistorySearchOptions,
+  SlackMessageContent,
   SlackMessageMetadata,
   SlackNotifier,
 } from '#slack'
@@ -13,10 +14,7 @@ import {
   buildGrafanaAlertNotification,
   type GrafanaAlert,
 } from '#sources/grafana/handlers/alert'
-import {
-  GrafanaPanelImageError,
-  type GrafanaPanelImageRenderer,
-} from '#sources/grafana/panel-image'
+import type { GrafanaPanelImageRenderer } from '#sources/grafana/panel-image'
 import type { DispatchOutcome } from '#webhook-source'
 
 export interface DispatchContext {
@@ -77,14 +75,25 @@ const readTaskRef = (payload: Record<string, unknown>): TqTaskRef | null => {
 const buildMetadata = (
   alert: GrafanaAlert,
   task: TqTaskRef | null,
+  panelImageFileId?: string,
 ): SlackMessageMetadata => ({
   event_type: 'grafana_alert',
   event_payload: {
     fingerprint: alert.fingerprint,
     starts_at: alert.startsAt,
+    ...(panelImageFileId === undefined
+      ? {}
+      : { panel_image_file_id: panelImageFileId }),
     ...(task === null ? {} : { task_id: task.id, task_number: task.number }),
   },
 })
+
+const readPanelImageFileId = (
+  eventPayload: Record<string, unknown> | undefined,
+): string | undefined => {
+  const fileId = eventPayload?.['panel_image_file_id']
+  return typeof fileId === 'string' && fileId !== '' ? fileId : undefined
+}
 
 const historySearchOptions = (startsAt: string): SlackHistorySearchOptions => {
   const timestamp = Date.parse(startsAt)
@@ -117,50 +126,62 @@ const reportPanelImageFailure = (
 const addPanelImage = (
   ctx: DispatchContext,
   alert: GrafanaAlert,
-  content: ReturnType<typeof buildGrafanaAlertNotification>['content'],
+  content: SlackMessageContent,
+  existingPanelImageFileId?: string,
 ): ResultAsync<typeof content, never> => {
+  const addImageBlock = (
+    fileId: string,
+    panelId: string,
+  ): SlackMessageContent => ({
+    ...content,
+    ...(content.metadata === undefined
+      ? {}
+      : {
+          metadata: {
+            ...content.metadata,
+            event_payload: {
+              ...content.metadata.event_payload,
+              panel_image_file_id: fileId,
+            },
+          },
+        }),
+    blocks: [
+      ...(content.blocks ?? []),
+      {
+        type: 'image' as const,
+        slack_file: { id: fileId },
+        alt_text: `Grafana panel ${panelId}`,
+      },
+    ],
+  })
+
+  if (existingPanelImageFileId !== undefined) {
+    return okAsync(
+      addImageBlock(
+        existingPanelImageFileId,
+        alert.annotations['__panelId__'] ?? 'image',
+      ),
+    )
+  }
+
   const renderer = ctx.panelImageRenderer
   if (renderer === undefined) return okAsync(content)
 
-  const rendered = ResultAsync.fromPromise(
-    (async () => await renderer.render(alert))(),
-    (caughtErr) =>
-      new GrafanaPanelImageError(
-        'failed to render Grafana panel image',
-        caughtErr,
-      ),
-  ).andThen((result) => result)
-
-  return rendered
-    .andThen((image) => {
-      const uploaded = ResultAsync.fromPromise(
-        (async () =>
-          await ctx.notifier.uploadImage({
-            data: image.buffer,
-            filename: `grafana-panel-${image.panelId}.png`,
-            altText: `Grafana panel ${image.panelId}`,
-          }))(),
-        (caughtErr) =>
-          new SlackApiError('failed to upload Grafana panel image', caughtErr),
-      ).andThen((result) => result)
-
-      return uploaded
-        .map((fileId) => ({
-          ...content,
-          blocks: [
-            ...(content.blocks ?? []),
-            {
-              type: 'image' as const,
-              slack_file: { id: fileId },
-              alt_text: `Grafana panel ${image.panelId}`,
-            },
-          ],
-        }))
+  return renderer
+    .render(alert)
+    .andThen((image) =>
+      ctx.notifier
+        .uploadImage({
+          data: image.buffer,
+          filename: `grafana-panel-${image.panelId}.png`,
+          altText: `Grafana panel ${image.panelId}`,
+        })
+        .map((fileId) => addImageBlock(fileId, image.panelId))
         .orElse((error) => {
           reportPanelImageFailure(alert, error, 'upload')
           return okAsync(content)
-        })
-    })
+        }),
+    )
     .orElse((error) => {
       reportPanelImageFailure(alert, error, 'render')
       return okAsync(content)
@@ -193,13 +214,16 @@ const dispatchAlert = (
           : okAsync(readTaskRef(existing.eventPayload))
 
       return createOrReuseTask.andThen((task) => {
+        const panelImageFileId = readPanelImageFileId(
+          existing === null ? undefined : existing.eventPayload,
+        )
         const content = addTqTaskStatus(
           note.content,
           task,
           ctx.tqWebUrl,
-          buildMetadata(alert, task),
+          buildMetadata(alert, task, panelImageFileId),
         )
-        return addPanelImage(ctx, alert, content).andThen(
+        return addPanelImage(ctx, alert, content, panelImageFileId).andThen(
           (notificationContent) => {
             const notification =
               existing === null

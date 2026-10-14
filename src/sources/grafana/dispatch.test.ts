@@ -82,11 +82,6 @@ const observeDispatch = <TOutcome, TObservations>(
   observations: TObservations,
 ) => ({ outcome, ...observations })
 
-const observeImageDispatch = <TOutcome, TObservations>(
-  outcome: TOutcome,
-  observations: TObservations,
-) => ({ outcome, ...observations })
-
 const expectedAlertContent = (imageFileId?: string) => ({
   text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
   color: '#d73a49',
@@ -126,6 +121,9 @@ const expectedAlertContent = (imageFileId?: string) => ({
       starts_at: INCIDENT_START,
       task_id: '00000000-0000-4000-8000-000000000009',
       task_number: 9,
+      ...(imageFileId === undefined
+        ? {}
+        : { panel_image_file_id: imageFileId }),
     },
   },
 })
@@ -236,7 +234,7 @@ describe('dispatch', () => {
     )
 
     expect(
-      observeImageDispatch(outcome, {
+      observeDispatch(outcome, {
         renderCalls: panelImageRenderer.render.mock.calls,
         uploadCalls: notifier.uploadImage.mock.calls,
         postCalls: notifier.postMessage.mock.calls,
@@ -270,7 +268,7 @@ describe('dispatch', () => {
     )
 
     expect(
-      observeImageDispatch(outcome, {
+      observeDispatch(outcome, {
         renderCalls: panelImageRenderer.render.mock.calls,
         uploadCalls: notifier.uploadImage.mock.calls,
         postCalls: notifier.postMessage.mock.calls,
@@ -300,7 +298,7 @@ describe('dispatch', () => {
     )
 
     expect(
-      observeImageDispatch(outcome, {
+      observeDispatch(outcome, {
         uploadCalls: notifier.uploadImage.mock.calls,
         postCalls: notifier.postMessage.mock.calls,
       }),
@@ -403,6 +401,58 @@ describe('dispatch', () => {
               },
             },
           },
+        ],
+      ],
+    })
+  })
+
+  it('reuses an existing panel image when updating an alert', async () => {
+    const notifier = createNotifier()
+    notifier.findMessageByMetadata.mockReturnValue(
+      okAsync({
+        ref: { channel: 'C9', ts: 'existing-ts' },
+        eventPayload: {
+          fingerprint: 'fp-queue',
+          starts_at: INCIDENT_START,
+          task_id: TQ_TASK_REF.id,
+          task_number: TQ_TASK_REF.number,
+          panel_image_file_id: 'FEXISTING',
+        },
+      }),
+    )
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(
+          okAsync({ buffer: Buffer.from('png-data'), panelId: '13' }),
+        ),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      {
+        alerts: [
+          {
+            ...ALERT,
+            annotations: { ...ALERT.annotations, __panelId__: '13' },
+          },
+        ],
+      },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        renderCalls: panelImageRenderer.render.mock.calls,
+        uploadCalls: notifier.uploadImage.mock.calls,
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      renderCalls: [],
+      uploadCalls: [],
+      updateCalls: [
+        [
+          { channel: 'C9', ts: 'existing-ts' },
+          expectedAlertContent('FEXISTING'),
         ],
       ],
     })

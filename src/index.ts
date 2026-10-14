@@ -39,7 +39,10 @@ const main = (): void => {
   const panelImageRenderer =
     config.grafanaApiToken === ''
       ? undefined
-      : createGrafanaPanelImageRenderer(config.grafanaApiToken)
+      : createGrafanaPanelImageRenderer(
+          config.grafanaApiToken,
+          config.grafanaUrl,
+        )
   if (panelImageRenderer === undefined) {
     logger.warn({}, 'grafana_panel_images_disabled')
   }

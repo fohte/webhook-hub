@@ -32,6 +32,7 @@ CI, Sentry, and Grafana alert notifications include an `未対応` status and a 
 | `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                                                |
 | `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
 | `GRAFANA_WEBHOOK_SECRET` | Yes      | —                                        | Shared secret for `X-Grafana-Alerting-Signature` verification.                                                |
+| `GRAFANA_URL`            | No       | `https://fohte.grafana.net`              | Grafana base URL used to render panel images.                                                                 |
 | `GRAFANA_API_TOKEN`      | No       | —                                        | Grafana service account token with dashboard read access; enables panel images on Grafana alerts.             |
 | `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                                             |
 | `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
@@ -55,6 +56,7 @@ To run the service against real deliveries, these things need to be wired up.
      -e GITHUB_WEBHOOK_SECRET=... \
      -e SENTRY_WEBHOOK_SECRET=... \
      -e GRAFANA_WEBHOOK_SECRET=... \
+     -e GRAFANA_API_TOKEN=... \
      -e SLACK_BOT_TOKEN=xoxb-... \
      -e SLACK_CHANNEL=#your-channel \
      -e TQ_API_URL=http://tq-api.example.test:3001 \
@@ -83,6 +85,7 @@ To run the service against real deliveries, these things need to be wired up.
    - Enable HMAC signature and use the same value as `GRAFANA_WEBHOOK_SECRET`
    - Keep the signature header as `X-Grafana-Alerting-Signature`
    - Leave the optional timestamp header unset
+   - To include panel images, set `GRAFANA_API_TOKEN` to a service account token with dashboard read access. Set `GRAFANA_URL` if the alerts come from a different Grafana instance than the default. Link each alert rule to its dashboard panel, and make sure the instance provides the `/render/d-solo` image rendering API.
 
 5. **Provision octo-sts.** The CI-failure notification calls the GitHub REST API (PR lookup, failed job/step) via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. This requires an octo-sts trust policy that grants the deploying identity read-only `pull_requests` and `actions` permissions, and a Kubernetes ServiceAccount token projected into the container at the path configured by `OCTO_STS_SA_TOKEN_PATH`. The `OCTO_STS_*` variables above point the service at the octo-sts endpoint and the trust policy identity/scope to assume.
 

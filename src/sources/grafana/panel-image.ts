@@ -1,11 +1,27 @@
-import { err, errAsync, ok, type Result, ResultAsync } from 'neverthrow'
+import { err, errAsync, ok, Result, ResultAsync } from 'neverthrow'
 
 import type { GrafanaAlert } from '#sources/grafana/handlers/alert'
 
-const GRAFANA_BASE_URL = 'https://fohte.grafana.net'
 const IMAGE_WIDTH = 1200
 const IMAGE_HEIGHT = 600
 const REQUEST_TIMEOUT_MS = 15_000
+
+const buildRenderUrl = Result.fromThrowable(
+  (baseUrl: string, dashboardUid: string, panelId: string): URL => {
+    const url = new URL(
+      `/render/d-solo/${encodeURIComponent(dashboardUid)}`,
+      baseUrl,
+    )
+    url.searchParams.set('panelId', panelId)
+    url.searchParams.set('width', String(IMAGE_WIDTH))
+    url.searchParams.set('height', String(IMAGE_HEIGHT))
+    url.searchParams.set('from', 'now-1h')
+    url.searchParams.set('to', 'now')
+    return url
+  },
+  (caughtErr) =>
+    new GrafanaPanelImageError('failed to build Grafana render URL', caughtErr),
+)
 
 export interface GrafanaPanelImage {
   buffer: Buffer
@@ -50,29 +66,18 @@ const readPanelIdentity = (
 
 export const createGrafanaPanelImageRenderer = (
   token: string,
+  baseUrl: string,
 ): GrafanaPanelImageRenderer => ({
   render(alert) {
     const identity = readPanelIdentity(alert)
     if (identity.isErr()) return errAsync(identity.error)
-    if (token === '') {
-      return errAsync(
-        new GrafanaPanelImageError('GRAFANA_API_TOKEN is not configured'),
-      )
-    }
 
     const { dashboardUid, panelId } = identity.value
-    const url = new URL(
-      `/render/d-solo/${encodeURIComponent(dashboardUid)}`,
-      GRAFANA_BASE_URL,
-    )
-    url.searchParams.set('panelId', panelId)
-    url.searchParams.set('width', String(IMAGE_WIDTH))
-    url.searchParams.set('height', String(IMAGE_HEIGHT))
-    url.searchParams.set('from', 'now-1h')
-    url.searchParams.set('to', 'now')
+    const url = buildRenderUrl(baseUrl, dashboardUid, panelId)
+    if (url.isErr()) return errAsync(url.error)
 
     return ResultAsync.fromPromise(
-      fetch(url, {
+      fetch(url.value, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }),

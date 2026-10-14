@@ -29,7 +29,10 @@ describe('createGrafanaPanelImageRenderer', () => {
       }),
     )
     vi.stubGlobal('fetch', fetchMock)
-    const renderer = createGrafanaPanelImageRenderer('service-token')
+    const renderer = createGrafanaPanelImageRenderer(
+      'service-token',
+      'https://grafana.example.test',
+    )
     const result = await renderer.render(ALERT).match(
       (image) => ({
         kind: 'image',
@@ -51,19 +54,22 @@ describe('createGrafanaPanelImageRenderer', () => {
       result: { kind: 'image', panelId: '13', bytes: [80, 78, 71] },
       requests: [
         {
-          url: 'https://fohte.grafana.net/render/d-solo/queue-board?panelId=13&width=1200&height=600&from=now-1h&to=now',
+          url: 'https://grafana.example.test/render/d-solo/queue-board?panelId=13&width=1200&height=600&from=now-1h&to=now',
           headers: { Authorization: 'Bearer service-token' },
         },
       ],
     })
   })
 
-  it('returns an error when Grafana does not return a PNG', async () => {
+  it('returns the HTTP error when Grafana rejects the render request', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response('missing', { status: 404 }))
     vi.stubGlobal('fetch', fetchMock)
-    const result = await createGrafanaPanelImageRenderer('service-token')
+    const result = await createGrafanaPanelImageRenderer(
+      'service-token',
+      'https://grafana.example.test',
+    )
       .render(ALERT)
       .match(
         (image) => ({ kind: 'image', panelId: image.panelId }),
@@ -73,6 +79,46 @@ describe('createGrafanaPanelImageRenderer', () => {
     expect(result).toEqual({
       kind: 'error',
       message: 'Grafana render API returned HTTP 404',
+    })
+  })
+
+  it('returns an error when Grafana responds with a non-PNG body', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response('<html>login</html>', {
+        headers: { 'content-type': 'text/html' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await createGrafanaPanelImageRenderer(
+      'service-token',
+      'https://grafana.example.test',
+    )
+      .render(ALERT)
+      .match(
+        (image) => ({ kind: 'image', panelId: image.panelId }),
+        (error) => ({ kind: 'error', message: error.message }),
+      )
+
+    expect(result).toEqual({
+      kind: 'error',
+      message: 'Grafana render API did not return a PNG image',
+    })
+  })
+
+  it('returns an error when the Grafana URL is invalid', async () => {
+    const result = await createGrafanaPanelImageRenderer(
+      'service-token',
+      'invalid-url',
+    )
+      .render(ALERT)
+      .match(
+        (image) => ({ kind: 'image', panelId: image.panelId }),
+        (error) => ({ kind: 'error', message: error.message }),
+      )
+
+    expect(result).toEqual({
+      kind: 'error',
+      message: 'failed to build Grafana render URL',
     })
   })
 })
