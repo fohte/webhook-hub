@@ -255,6 +255,33 @@ describe('dispatch', () => {
     })
   })
 
+  it('retries a new notification without the panel image when posting it fails', async () => {
+    const notifier = createNotifier()
+    notifier.postMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('invalid image block')))
+      .mockReturnValueOnce(okAsync({ channel: 'C1', ts: '1' }))
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(
+          okAsync({ buffer: Buffer.from('png-data'), panelId: '13' }),
+        ),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      { alerts: [ALERT] },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        postCalls: notifier.postMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      postCalls: [[expectedAlertContent('FIMAGE')], [expectedAlertContent()]],
+    })
+  })
+
   it('posts the notification body when panel image rendering fails', async () => {
     const notifier = createNotifier()
     const panelImageRenderer = {
@@ -454,6 +481,48 @@ describe('dispatch', () => {
           { channel: 'C9', ts: 'existing-ts' },
           expectedAlertContent('FEXISTING'),
         ],
+      ],
+    })
+  })
+
+  it('retries an alert update without the panel image when updating it fails', async () => {
+    const notifier = createNotifier()
+    notifier.findMessageByMetadata.mockReturnValue(
+      okAsync({
+        ref: { channel: 'C9', ts: 'existing-ts' },
+        eventPayload: {
+          fingerprint: 'fp-queue',
+          starts_at: INCIDENT_START,
+          task_id: TQ_TASK_REF.id,
+          task_number: TQ_TASK_REF.number,
+          panel_image_file_id: 'FEXISTING',
+        },
+      }),
+    )
+    notifier.updateMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('invalid image block')))
+      .mockReturnValueOnce(okAsync(undefined))
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      alerts: [
+        {
+          ...ALERT,
+          annotations: { ...ALERT.annotations, __panelId__: '13' },
+        },
+      ],
+    })
+
+    expect(
+      observeDispatch(outcome, {
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      updateCalls: [
+        [
+          { channel: 'C9', ts: 'existing-ts' },
+          expectedAlertContent('FEXISTING'),
+        ],
+        [{ channel: 'C9', ts: 'existing-ts' }, expectedAlertContent()],
       ],
     })
   })

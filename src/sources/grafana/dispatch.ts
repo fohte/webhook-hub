@@ -1,4 +1,11 @@
-import { err, ok, okAsync, type Result, ResultAsync } from 'neverthrow'
+import {
+  err,
+  errAsync,
+  ok,
+  okAsync,
+  type Result,
+  ResultAsync,
+} from 'neverthrow'
 
 import { logger } from '#logger'
 import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
@@ -110,7 +117,7 @@ const historySearchOptions = (startsAt: string): SlackHistorySearchOptions => {
 const reportPanelImageFailure = (
   alert: GrafanaAlert,
   error: Error,
-  phase: 'render' | 'upload',
+  phase: 'render' | 'upload' | 'post' | 'update',
 ): void => {
   logger.warn(
     {
@@ -121,6 +128,20 @@ const reportPanelImageFailure = (
     },
     'grafana_panel_image_failed',
   )
+}
+
+const withoutPanelImageMetadata = (
+  content: SlackMessageContent,
+): SlackMessageContent => {
+  if (content.metadata === undefined) return content
+
+  const eventPayload = { ...content.metadata.event_payload }
+  delete eventPayload['panel_image_file_id']
+
+  return {
+    ...content,
+    metadata: { ...content.metadata, event_payload: eventPayload },
+  }
 }
 
 const addPanelImage = (
@@ -225,12 +246,24 @@ const dispatchAlert = (
         )
         return addPanelImage(ctx, alert, content, panelImageFileId).andThen(
           (notificationContent) => {
-            const notification =
+            const notify = (messageContent: SlackMessageContent) =>
               existing === null
-                ? ctx.notifier
-                    .postMessage(notificationContent)
-                    .map(() => undefined)
-                : ctx.notifier.updateMessage(existing.ref, notificationContent)
+                ? ctx.notifier.postMessage(messageContent).map(() => undefined)
+                : ctx.notifier.updateMessage(existing.ref, messageContent)
+
+            const notification = notify(notificationContent).orElse((error) => {
+              const panelImageFileId = readPanelImageFileId(
+                notificationContent.metadata?.event_payload,
+              )
+              if (panelImageFileId === undefined) return errAsync(error)
+
+              reportPanelImageFailure(
+                alert,
+                error,
+                existing === null ? 'post' : 'update',
+              )
+              return notify(withoutPanelImageMetadata(content))
+            })
 
             return notification.map((): DispatchOutcome => {
               logger.info(
