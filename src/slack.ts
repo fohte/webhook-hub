@@ -1,4 +1,9 @@
-import type { ContextBlock, HeaderBlock, SectionBlock } from '@slack/types'
+import type {
+  ContextBlock,
+  HeaderBlock,
+  ImageBlock,
+  SectionBlock,
+} from '@slack/types'
 import { WebClient } from '@slack/web-api'
 import { err, ok, type Result, ResultAsync } from 'neverthrow'
 
@@ -11,12 +16,30 @@ export class SlackApiError extends Error {
   }
 }
 
+export class SlackMissingScopesError extends SlackApiError {
+  constructor(
+    readonly missingScopes: string[],
+    readonly grantedScopes: string[],
+  ) {
+    super(
+      `Slack bot token is missing required scopes: ${missingScopes.join(', ')}`,
+    )
+    this.name = 'SlackMissingScopesError'
+  }
+}
+
 export interface SlackMessageMetadata {
   event_type: string
   event_payload: Record<string, string | number | boolean>
 }
 
-export type SlackBlock = HeaderBlock | SectionBlock | ContextBlock
+export type SlackBlock = HeaderBlock | SectionBlock | ContextBlock | ImageBlock
+
+export interface SlackImageUpload {
+  data: Buffer
+  filename: string
+  altText: string
+}
 
 export interface SlackMessageContent {
   text: string
@@ -60,7 +83,14 @@ export interface SlackNotifier {
     payloadMatcher: (payload: Record<string, unknown>) => boolean,
     options?: SlackHistorySearchOptions,
   ): ResultAsync<SlackMessageMatch | null, SlackApiError>
+  uploadImage(image: SlackImageUpload): ResultAsync<string, SlackApiError>
 }
+
+export interface SlackScopeChecker {
+  checkScopes(): ResultAsync<void, SlackApiError>
+}
+
+export type ManagedSlackNotifier = SlackNotifier & SlackScopeChecker
 
 type SlackAttachment =
   | { color: string; text: string; mrkdwn_in: ['text']; fallback: string }
@@ -137,7 +167,7 @@ export const buildPayload = (content: SlackMessageContent): MessagePayload => {
 export const createSlackNotifier = (
   token: string,
   defaultChannel: string,
-): SlackNotifier => {
+): ManagedSlackNotifier => {
   const client = new WebClient(token)
   const channelIdCache = new Map<string, ResultAsync<string, SlackApiError>>()
 
@@ -269,6 +299,57 @@ export const createSlackNotifier = (
       return resolveChannelId(defaultChannel).andThen((channelId) =>
         findMessageInHistory(channelId, eventType, payloadMatcher, options),
       )
+    },
+    uploadImage(image) {
+      return resolveChannelId(defaultChannel).andThen((channelId) =>
+        wrapSlackApi(
+          client.filesUploadV2({
+            file: image.data,
+            filename: image.filename,
+            title: image.filename,
+            alt_text: image.altText,
+            channel_id: channelId,
+          }),
+          'failed to upload Slack image',
+        ).andThen((res) => {
+          const fileId = res.files[0]?.files?.[0]?.id
+          return fileId === undefined
+            ? err(new SlackApiError('Slack upload did not return a file ID'))
+            : ok(fileId)
+        }),
+      )
+    },
+    checkScopes() {
+      return wrapSlackApi(
+        client.auth.test(),
+        'failed to check Slack scopes',
+      ).andThen((res) => {
+        const grantedScopes = res.response_metadata?.scopes
+        if (grantedScopes === undefined) {
+          return err(new SlackMissingScopesError(['x-oauth-scopes'], []))
+        }
+
+        const granted = new Set(grantedScopes)
+        const missingScopes = [
+          'chat:write',
+          'chat:write.customize',
+          'metadata.message:read',
+          'files:write',
+        ].filter((scope) => !granted.has(scope))
+        const hasPublicChannelScopes =
+          granted.has('channels:history') && granted.has('channels:read')
+        const hasPrivateChannelScopes =
+          granted.has('groups:history') && granted.has('groups:read')
+        if (!hasPublicChannelScopes && !hasPrivateChannelScopes) {
+          missingScopes.push(
+            'channels:history + channels:read or groups:history + groups:read',
+          )
+        }
+
+        return missingScopes.length === 0
+          ? ok(undefined)
+          : err(new SlackMissingScopesError(missingScopes, grantedScopes))
+      })
     },
   }
 }

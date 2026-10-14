@@ -19,6 +19,7 @@ describe('loadConfig', () => {
       githubWebhookSecret: 'github-secret',
       sentryWebhookSecret: 'sentry-secret',
       grafanaWebhookSecret: 'grafana-secret',
+      grafanaApiToken: '',
       slackBotToken: 'xoxb-example-token',
       slackChannel: '#infra_alert',
       slackActivityChannel: '#activity',

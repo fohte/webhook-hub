@@ -32,6 +32,7 @@ CI, Sentry, and Grafana alert notifications include an `未対応` status and a 
 | `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                                                |
 | `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
 | `GRAFANA_WEBHOOK_SECRET` | Yes      | —                                        | Shared secret for `X-Grafana-Alerting-Signature` verification.                                                |
+| `GRAFANA_API_TOKEN`      | No       | —                                        | Grafana service account token with dashboard read access; enables panel images on Grafana alerts.             |
 | `SLACK_BOT_TOKEN`        | Yes      | —                                        | Slack bot token. Required scopes are listed in the Setup section.                                             |
 | `SLACK_CHANNEL`          | No       | `#infra_alert`                           | Slack channel ID or name to post to.                                                                          |
 | `SLACK_ACTIVITY_CHANNEL` | No       | `#activity`                              | Slack channel ID or name reserved for upcoming GitHub activity notifications; not sent to by any handler yet. |
@@ -88,9 +89,9 @@ To run the service against real deliveries, these things need to be wired up.
 6. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
    - `chat:write` — post and edit messages
    - `chat:write.customize` — post CI-failure notifications under a custom username/icon
-   - `channels:history` (public channel) or `groups:history` (private channel) — look up messages to update on alert redelivery or PR close
+   - `channels:history` and `channels:read` (public channel) or `groups:history` and `groups:read` (private channel) — look up messages and resolve the channel name
    - `metadata.message:read` — read embedded alert fingerprints, task references, and PR identifiers on history items
-   - `channels:read` and/or `groups:read` — resolve `SLACK_CHANNEL` name (`#foo`) to a channel ID
+   - `files:write` — upload Grafana panel images
 
    Adding a scope to an existing app requires reinstalling it to the workspace.
 

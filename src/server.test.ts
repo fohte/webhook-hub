@@ -16,6 +16,7 @@ const createNotifier = (): SlackNotifier => ({
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
   findMessageByMetadata: vi.fn(),
+  uploadImage: vi.fn(),
 })
 
 const defaultExtractContext: WebhookSource['extractContext'] = (headers) => {

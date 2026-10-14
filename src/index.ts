@@ -17,8 +17,10 @@ import { logger } from '#logger'
 import { createTqClient } from '#plugins/tq/tq-client'
 import { createApp } from '#server'
 import { createSlackNotifier } from '#slack'
+import { checkSlackScopesAtStartup } from '#slack-startup'
 import { createGithubSource } from '#sources/github/index'
 import { createGrafanaSource } from '#sources/grafana/index'
+import { createGrafanaPanelImageRenderer } from '#sources/grafana/panel-image'
 import { createSentrySource } from '#sources/sentry/index'
 
 const main = (): void => {
@@ -33,6 +35,14 @@ const main = (): void => {
     config.slackBotToken,
     config.slackChannel,
   )
+  void checkSlackScopesAtStartup(notifier)
+  const panelImageRenderer =
+    config.grafanaApiToken === ''
+      ? undefined
+      : createGrafanaPanelImageRenderer(config.grafanaApiToken)
+  if (panelImageRenderer === undefined) {
+    logger.warn({}, 'grafana_panel_images_disabled')
+  }
   const octoStsTokenCache = createOctoStsTokenCache(config.octoSts)
   const githubClient = createGitHubClient(octoStsTokenCache)
   const tqClient = createTqClient(config.tqApiUrl)
@@ -50,6 +60,7 @@ const main = (): void => {
         config.grafanaWebhookSecret,
         tqClient,
         config.tqWebUrl,
+        panelImageRenderer,
       ),
     ],
     notifier,

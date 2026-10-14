@@ -13,6 +13,7 @@ export interface Config {
   githubWebhookSecret: string
   sentryWebhookSecret: string
   grafanaWebhookSecret: string
+  grafanaApiToken: string
   slackBotToken: string
   slackChannel: string
   slackActivityChannel: string
@@ -29,6 +30,7 @@ export const loadConfig = (
     githubWebhookSecret: requireString(env, 'GITHUB_WEBHOOK_SECRET'),
     sentryWebhookSecret: requireString(env, 'SENTRY_WEBHOOK_SECRET'),
     grafanaWebhookSecret: requireString(env, 'GRAFANA_WEBHOOK_SECRET'),
+    grafanaApiToken: optionalString(env, 'GRAFANA_API_TOKEN', ''),
     slackBotToken: requireString(env, 'SLACK_BOT_TOKEN'),
     slackChannel: optionalString(env, 'SLACK_CHANNEL', '#infra_alert'),
     slackActivityChannel: optionalString(
@@ -51,6 +53,7 @@ export const loadConfig = (
     githubWebhookSecret: f.githubWebhookSecret,
     sentryWebhookSecret: f.sentryWebhookSecret,
     grafanaWebhookSecret: f.grafanaWebhookSecret,
+    grafanaApiToken: f.grafanaApiToken,
     slackBotToken: f.slackBotToken,
     slackChannel: f.slackChannel,
     slackActivityChannel: f.slackActivityChannel,

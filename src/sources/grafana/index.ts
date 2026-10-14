@@ -1,5 +1,6 @@
 import type { TqClient } from '#plugins/tq/tq-client'
 import { dispatch } from '#sources/grafana/dispatch'
+import type { GrafanaPanelImageRenderer } from '#sources/grafana/panel-image'
 import {
   extractGrafanaContext,
   verifyGrafanaSignature,
@@ -10,6 +11,7 @@ export const createGrafanaSource = (
   webhookSecret: string,
   tqClient: TqClient,
   tqWebUrl: string,
+  panelImageRenderer?: GrafanaPanelImageRenderer,
 ): WebhookSource => ({
   name: 'grafana',
   path: '/grafana',
@@ -22,6 +24,7 @@ export const createGrafanaSource = (
         deliveryId: context.deliveryId,
         eventName: context.eventName,
         notifier,
+        ...(panelImageRenderer === undefined ? {} : { panelImageRenderer }),
         tqClient,
         tqWebUrl,
       },

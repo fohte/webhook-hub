@@ -13,12 +13,17 @@ import {
   buildGrafanaAlertNotification,
   type GrafanaAlert,
 } from '#sources/grafana/handlers/alert'
+import {
+  GrafanaPanelImageError,
+  type GrafanaPanelImageRenderer,
+} from '#sources/grafana/panel-image'
 import type { DispatchOutcome } from '#webhook-source'
 
 export interface DispatchContext {
   deliveryId: string
   eventName: string
   notifier: SlackNotifier
+  panelImageRenderer?: GrafanaPanelImageRenderer
   tqClient: TqClient
   tqWebUrl: string
 }
@@ -93,6 +98,75 @@ const historySearchOptions = (startsAt: string): SlackHistorySearchOptions => {
   }
 }
 
+const reportPanelImageFailure = (
+  alert: GrafanaAlert,
+  error: Error,
+  phase: 'render' | 'upload',
+): void => {
+  logger.warn(
+    {
+      fingerprint: alert.fingerprint,
+      panel_id: alert.annotations['__panelId__'],
+      phase,
+      error: error.message,
+    },
+    'grafana_panel_image_failed',
+  )
+}
+
+const addPanelImage = (
+  ctx: DispatchContext,
+  alert: GrafanaAlert,
+  content: ReturnType<typeof buildGrafanaAlertNotification>['content'],
+): ResultAsync<typeof content, never> => {
+  const renderer = ctx.panelImageRenderer
+  if (renderer === undefined) return okAsync(content)
+
+  const rendered = ResultAsync.fromPromise(
+    (async () => await renderer.render(alert))(),
+    (caughtErr) =>
+      new GrafanaPanelImageError(
+        'failed to render Grafana panel image',
+        caughtErr,
+      ),
+  ).andThen((result) => result)
+
+  return rendered
+    .andThen((image) => {
+      const uploaded = ResultAsync.fromPromise(
+        (async () =>
+          await ctx.notifier.uploadImage({
+            data: image.buffer,
+            filename: `grafana-panel-${image.panelId}.png`,
+            altText: `Grafana panel ${image.panelId}`,
+          }))(),
+        (caughtErr) =>
+          new SlackApiError('failed to upload Grafana panel image', caughtErr),
+      ).andThen((result) => result)
+
+      return uploaded
+        .map((fileId) => ({
+          ...content,
+          blocks: [
+            ...(content.blocks ?? []),
+            {
+              type: 'image' as const,
+              slack_file: { id: fileId },
+              alt_text: `Grafana panel ${image.panelId}`,
+            },
+          ],
+        }))
+        .orElse((error) => {
+          reportPanelImageFailure(alert, error, 'upload')
+          return okAsync(content)
+        })
+    })
+    .orElse((error) => {
+      reportPanelImageFailure(alert, error, 'render')
+      return okAsync(content)
+    })
+}
+
 const dispatchAlert = (
   ctx: DispatchContext,
   alert: GrafanaAlert,
@@ -125,25 +199,31 @@ const dispatchAlert = (
           ctx.tqWebUrl,
           buildMetadata(alert, task),
         )
-        const notification =
-          existing === null
-            ? ctx.notifier.postMessage(content).map(() => undefined)
-            : ctx.notifier.updateMessage(existing.ref, content)
+        return addPanelImage(ctx, alert, content).andThen(
+          (notificationContent) => {
+            const notification =
+              existing === null
+                ? ctx.notifier
+                    .postMessage(notificationContent)
+                    .map(() => undefined)
+                : ctx.notifier.updateMessage(existing.ref, notificationContent)
 
-        return notification.map((): DispatchOutcome => {
-          logger.info(
-            {
-              delivery_id: ctx.deliveryId,
-              event: ctx.eventName,
-              fingerprint: alert.fingerprint,
-              starts_at: alert.startsAt,
-              title: note.alertName,
-              status: note.status,
-            },
-            'slack_notified',
-          )
-          return 'notified'
-        })
+            return notification.map((): DispatchOutcome => {
+              logger.info(
+                {
+                  delivery_id: ctx.deliveryId,
+                  event: ctx.eventName,
+                  fingerprint: alert.fingerprint,
+                  starts_at: alert.startsAt,
+                  title: note.alertName,
+                  status: note.status,
+                },
+                'slack_notified',
+              )
+              return 'notified'
+            })
+          },
+        )
       })
     })
 }

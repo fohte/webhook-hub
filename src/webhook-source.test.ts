@@ -18,6 +18,7 @@ const createNotifier = (): SlackNotifier => ({
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
   findMessageByMetadata: vi.fn(),
+  uploadImage: vi.fn(),
 })
 
 // Returns the verify/dispatch mocks alongside the source so tests can assert
