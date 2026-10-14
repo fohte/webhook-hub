@@ -1,10 +1,18 @@
-import { err, ok, okAsync, type Result, ResultAsync } from 'neverthrow'
+import {
+  err,
+  errAsync,
+  ok,
+  okAsync,
+  type Result,
+  ResultAsync,
+} from 'neverthrow'
 
 import { logger } from '#logger'
 import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
 import { type TqClient, type TqTaskRef } from '#plugins/tq/tq-client'
 import type {
   SlackHistorySearchOptions,
+  SlackMessageContent,
   SlackMessageMetadata,
   SlackNotifier,
 } from '#slack'
@@ -13,12 +21,14 @@ import {
   buildGrafanaAlertNotification,
   type GrafanaAlert,
 } from '#sources/grafana/handlers/alert'
+import type { GrafanaPanelImageRenderer } from '#sources/grafana/panel-image'
 import type { DispatchOutcome } from '#webhook-source'
 
 export interface DispatchContext {
   deliveryId: string
   eventName: string
   notifier: SlackNotifier
+  panelImageRenderer?: GrafanaPanelImageRenderer
   tqClient: TqClient
   tqWebUrl: string
 }
@@ -81,6 +91,13 @@ const buildMetadata = (
   },
 })
 
+const readPanelImageFileId = (
+  eventPayload: Record<string, unknown> | undefined,
+): string | undefined => {
+  const fileId = eventPayload?.['panel_image_file_id']
+  return typeof fileId === 'string' && fileId !== '' ? fileId : undefined
+}
+
 const historySearchOptions = (startsAt: string): SlackHistorySearchOptions => {
   const timestamp = Date.parse(startsAt)
   if (!Number.isFinite(timestamp)) return { maxPages: 5 }
@@ -91,6 +108,87 @@ const historySearchOptions = (startsAt: string): SlackHistorySearchOptions => {
     latest: String(startSecond + 86_400),
     maxPages: 5,
   }
+}
+
+const reportPanelImageFailure = (
+  alert: GrafanaAlert,
+  error: Error,
+  phase: 'render' | 'upload' | 'post' | 'update',
+): void => {
+  logger.warn(
+    {
+      fingerprint: alert.fingerprint,
+      panel_id: alert.annotations['__panelId__'],
+      phase,
+      err: error,
+    },
+    'grafana_panel_image_failed',
+  )
+}
+
+const addPanelImage = (
+  ctx: DispatchContext,
+  alert: GrafanaAlert,
+  content: SlackMessageContent,
+  existingPanelImageFileId?: string,
+): ResultAsync<typeof content, never> => {
+  const addImageBlock = (
+    fileId: string,
+    panelId: string,
+  ): SlackMessageContent => ({
+    ...content,
+    ...(content.metadata === undefined
+      ? {}
+      : {
+          metadata: {
+            ...content.metadata,
+            event_payload: {
+              ...content.metadata.event_payload,
+              panel_image_file_id: fileId,
+            },
+          },
+        }),
+    blocks: [
+      ...(content.blocks ?? []),
+      {
+        type: 'image' as const,
+        slack_file: { id: fileId },
+        alt_text: `Grafana panel ${panelId}`,
+      },
+    ],
+  })
+
+  if (existingPanelImageFileId !== undefined) {
+    return okAsync(
+      addImageBlock(
+        existingPanelImageFileId,
+        alert.annotations['__panelId__'] ?? 'image',
+      ),
+    )
+  }
+
+  const renderer = ctx.panelImageRenderer
+  if (renderer === undefined) return okAsync(content)
+
+  return renderer
+    .render(alert)
+    .andThen((image) =>
+      ctx.notifier
+        .uploadImage({
+          data: image.buffer,
+          filename: `grafana-panel-${image.panelId}.png`,
+          altText: `Grafana panel ${image.panelId}`,
+        })
+        .map((fileId) => addImageBlock(fileId, image.panelId))
+        .orElse((error) => {
+          reportPanelImageFailure(alert, error, 'upload')
+          return okAsync(content)
+        }),
+    )
+    .orElse((error) => {
+      reportPanelImageFailure(alert, error, 'render')
+      return okAsync(content)
+    })
 }
 
 const dispatchAlert = (
@@ -119,31 +217,52 @@ const dispatchAlert = (
           : okAsync(readTaskRef(existing.eventPayload))
 
       return createOrReuseTask.andThen((task) => {
+        const panelImageFileId = readPanelImageFileId(
+          existing === null ? undefined : existing.eventPayload,
+        )
         const content = addTqTaskStatus(
           note.content,
           task,
           ctx.tqWebUrl,
           buildMetadata(alert, task),
         )
-        const notification =
-          existing === null
-            ? ctx.notifier.postMessage(content).map(() => undefined)
-            : ctx.notifier.updateMessage(existing.ref, content)
+        return addPanelImage(ctx, alert, content, panelImageFileId).andThen(
+          (notificationContent) => {
+            const notify = (messageContent: SlackMessageContent) =>
+              existing === null
+                ? ctx.notifier.postMessage(messageContent).map(() => undefined)
+                : ctx.notifier.updateMessage(existing.ref, messageContent)
 
-        return notification.map((): DispatchOutcome => {
-          logger.info(
-            {
-              delivery_id: ctx.deliveryId,
-              event: ctx.eventName,
-              fingerprint: alert.fingerprint,
-              starts_at: alert.startsAt,
-              title: note.alertName,
-              status: note.status,
-            },
-            'slack_notified',
-          )
-          return 'notified'
-        })
+            const notification = notify(notificationContent).orElse((error) => {
+              const attachedFileId = readPanelImageFileId(
+                notificationContent.metadata?.event_payload,
+              )
+              if (attachedFileId === undefined) return errAsync(error)
+
+              reportPanelImageFailure(
+                alert,
+                error,
+                existing === null ? 'post' : 'update',
+              )
+              return notify(content)
+            })
+
+            return notification.map((): DispatchOutcome => {
+              logger.info(
+                {
+                  delivery_id: ctx.deliveryId,
+                  event: ctx.eventName,
+                  fingerprint: alert.fingerprint,
+                  starts_at: alert.startsAt,
+                  title: note.alertName,
+                  status: note.status,
+                },
+                'slack_notified',
+              )
+              return 'notified'
+            })
+          },
+        )
       })
     })
 }

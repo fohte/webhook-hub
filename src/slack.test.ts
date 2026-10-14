@@ -6,15 +6,22 @@ import {
   SlackApiError,
   type SlackBlock,
   type SlackMessageContent,
+  SlackMissingScopesError,
 } from '#slack'
 
-const { conversationsList, conversationsHistory, chatPostMessage } = vi.hoisted(
-  () => ({
-    conversationsList: vi.fn(),
-    conversationsHistory: vi.fn(),
-    chatPostMessage: vi.fn(),
-  }),
-)
+const {
+  conversationsList,
+  conversationsHistory,
+  chatPostMessage,
+  filesUploadV2,
+  authTest,
+} = vi.hoisted(() => ({
+  conversationsList: vi.fn(),
+  conversationsHistory: vi.fn(),
+  chatPostMessage: vi.fn(),
+  filesUploadV2: vi.fn(),
+  authTest: vi.fn(),
+}))
 
 vi.mock('@slack/web-api', () => ({
   WebClient: vi.fn().mockImplementation(function WebClient() {
@@ -24,6 +31,8 @@ vi.mock('@slack/web-api', () => ({
         history: conversationsHistory,
       },
       chat: { postMessage: chatPostMessage },
+      filesUploadV2,
+      auth: { test: authTest },
     }
   }),
 }))
@@ -39,7 +48,7 @@ const LIST_CALL_ARGS = {
   limit: 1000,
 }
 
-const observeHistory = <TResult, TCalls>(result: TResult, calls: TCalls) => ({
+const observe = <TResult, TCalls>(result: TResult, calls: TCalls) => ({
   result,
   calls,
 })
@@ -48,11 +57,30 @@ beforeEach(() => {
   conversationsList.mockReset()
   conversationsHistory.mockReset()
   chatPostMessage.mockReset()
+  filesUploadV2.mockReset()
+  authTest.mockReset()
   conversationsList.mockResolvedValue({
     channels: CHANNELS,
     response_metadata: { next_cursor: '' },
   })
   chatPostMessage.mockResolvedValue({ ok: true, ts: '1', channel: 'C1' })
+  filesUploadV2.mockResolvedValue({
+    ok: true,
+    files: [{ ok: true, files: [{ id: 'FIMAGE' }] }],
+  })
+  authTest.mockResolvedValue({
+    ok: true,
+    response_metadata: {
+      scopes: [
+        'chat:write',
+        'chat:write.customize',
+        'metadata.message:read',
+        'files:write',
+        'channels:history',
+        'channels:read',
+      ],
+    },
+  })
 })
 
 describe('postMessage', () => {
@@ -164,7 +192,7 @@ describe('findMessageByMetadata', () => {
         () => null,
       )
 
-    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
       result: {
         ref: { channel: 'CDEFAULT', ts: 'message-ts' },
         eventPayload: { fingerprint: 'fp-match', task_number: 9 },
@@ -218,7 +246,7 @@ describe('findMessageByMetadata', () => {
         () => null,
       )
 
-    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
       result: {
         ref: { channel: 'CDEFAULT', ts: 'older-ts' },
         eventPayload: { fingerprint: 'fp-match', task_number: 9 },
@@ -264,7 +292,7 @@ describe('findMessageByMetadata', () => {
         () => null,
       )
 
-    expect(observeHistory(result, conversationsHistory.mock.calls)).toEqual({
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
       result: null,
       calls: [
         [
@@ -356,6 +384,88 @@ describe('buildPayload', () => {
         event_type: 'security_pr',
         event_payload: { pr_url: 'https://example.com' },
       },
+    })
+  })
+})
+
+describe('uploadImage', () => {
+  it('uploads a private PNG for use in a Slack image block', async () => {
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const image = Buffer.from('png-data')
+    const fileId = await notifier
+      .uploadImage({
+        data: image,
+        filename: 'grafana-panel-17.png',
+        altText: 'Grafana panel 17',
+      })
+      .match(
+        (value) => value,
+        () => null,
+      )
+
+    expect(observe(fileId, filesUploadV2.mock.calls)).toEqual({
+      result: 'FIMAGE',
+      calls: [
+        [
+          {
+            file: image,
+            filename: 'grafana-panel-17.png',
+            title: 'grafana-panel-17.png',
+            alt_text: 'Grafana panel 17',
+          },
+        ],
+      ],
+    })
+  })
+})
+
+describe('checkScopes', () => {
+  it('accepts the required public-channel scopes from auth.test response metadata', async () => {
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier.checkScopes().match(
+      () => 'ok',
+      (error) => error.message,
+    )
+
+    expect(observe(result, authTest.mock.calls)).toEqual({
+      result: 'ok',
+      calls: [[]],
+    })
+  })
+
+  it('reports the missing files:write scope without rejecting other valid scopes', async () => {
+    authTest.mockResolvedValueOnce({
+      ok: true,
+      response_metadata: {
+        scopes: [
+          'chat:write',
+          'chat:write.customize',
+          'metadata.message:read',
+          'groups:history',
+          'groups:read',
+        ],
+      },
+    })
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier.checkScopes().match(
+      () => ({ kind: 'ok' }),
+      (error) => ({
+        kind: 'error',
+        name: error.name,
+        message: error.message,
+        missingScopes:
+          error instanceof SlackMissingScopesError ? error.missingScopes : [],
+      }),
+    )
+
+    expect(observe(result, authTest.mock.calls)).toEqual({
+      result: {
+        kind: 'error',
+        name: 'SlackMissingScopesError',
+        message: 'Slack bot token is missing required scopes: files:write',
+        missingScopes: ['files:write'],
+      },
+      calls: [[]],
     })
   })
 })

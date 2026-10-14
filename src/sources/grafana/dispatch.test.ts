@@ -5,6 +5,7 @@ import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import { SlackApiError, type SlackNotifier } from '#slack'
 import type { DispatchContext } from '#sources/grafana/dispatch'
 import { dispatch } from '#sources/grafana/dispatch'
+import { GrafanaPanelImageError } from '#sources/grafana/panel-image'
 import type { DispatchOutcome } from '#webhook-source'
 
 vi.mock('@fohte/service-kit/observability', () => ({
@@ -35,7 +36,10 @@ const createNotifier = () => {
   const findMessageByMetadata = vi
     .fn<SlackNotifier['findMessageByMetadata']>()
     .mockReturnValue(okAsync(null))
-  return { postMessage, updateMessage, findMessageByMetadata }
+  const uploadImage = vi
+    .fn<SlackNotifier['uploadImage']>()
+    .mockReturnValue(okAsync('FIMAGE'))
+  return { postMessage, updateMessage, findMessageByMetadata, uploadImage }
 }
 
 const createTqClient = (
@@ -47,10 +51,12 @@ const createTqClient = (
 const createContext = (
   notifier: DispatchContext['notifier'],
   tqClient = createTqClient(),
+  panelImageRenderer?: DispatchContext['panelImageRenderer'],
 ): DispatchContext => ({
   deliveryId: 'grafana',
   eventName: 'alerting',
   notifier,
+  ...(panelImageRenderer === undefined ? {} : { panelImageRenderer }),
   tqClient,
   tqWebUrl: TQ_WEB_URL,
 })
@@ -75,6 +81,52 @@ const observeDispatch = <TOutcome, TObservations>(
   outcome: TOutcome,
   observations: TObservations,
 ) => ({ outcome, ...observations })
+
+const expectedAlertContent = (imageFileId?: string) => ({
+  text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+  color: '#d73a49',
+  blocks: [
+    { type: 'header', text: { type: 'plain_text', text: '🚨 Queue depth' } },
+    {
+      type: 'section',
+      fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+    },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+        },
+      ],
+    },
+    ...(imageFileId === undefined
+      ? []
+      : [
+          {
+            type: 'image' as const,
+            slack_file: { id: imageFileId },
+            alt_text: 'Grafana panel 13',
+          },
+        ]),
+  ],
+  metadata: {
+    event_type: 'grafana_alert',
+    event_payload: {
+      fingerprint: 'fp-queue',
+      starts_at: INCIDENT_START,
+      task_id: '00000000-0000-4000-8000-000000000009',
+      task_number: 9,
+      ...(imageFileId === undefined
+        ? {}
+        : { panel_image_file_id: imageFileId }),
+    },
+  },
+})
 
 describe('dispatch', () => {
   it('creates one tq task and posts one notification for a new fingerprint', async () => {
@@ -168,6 +220,130 @@ describe('dispatch', () => {
     })
   })
 
+  it('adds an uploaded panel image to the Slack alert blocks', async () => {
+    const notifier = createNotifier()
+    const imageBuffer = Buffer.from('png-data')
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(okAsync({ buffer: imageBuffer, panelId: '13' })),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      { alerts: [ALERT] },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        renderCalls: panelImageRenderer.render.mock.calls,
+        uploadCalls: notifier.uploadImage.mock.calls,
+        postCalls: notifier.postMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      renderCalls: [[ALERT]],
+      uploadCalls: [
+        [
+          {
+            data: imageBuffer,
+            filename: 'grafana-panel-13.png',
+            altText: 'Grafana panel 13',
+          },
+        ],
+      ],
+      postCalls: [[expectedAlertContent('FIMAGE')]],
+    })
+  })
+
+  it('retries a new notification without the panel image when posting it fails', async () => {
+    const notifier = createNotifier()
+    notifier.postMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('invalid image block')))
+      .mockReturnValueOnce(okAsync({ channel: 'C1', ts: '1' }))
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(
+          okAsync({ buffer: Buffer.from('png-data'), panelId: '13' }),
+        ),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      { alerts: [ALERT] },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        postCalls: notifier.postMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      postCalls: [[expectedAlertContent('FIMAGE')], [expectedAlertContent()]],
+    })
+  })
+
+  it('posts the notification body when panel image rendering fails', async () => {
+    const notifier = createNotifier()
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(errAsync(new GrafanaPanelImageError('render failed'))),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      { alerts: [ALERT] },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        renderCalls: panelImageRenderer.render.mock.calls,
+        uploadCalls: notifier.uploadImage.mock.calls,
+        postCalls: notifier.postMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      renderCalls: [[ALERT]],
+      uploadCalls: [],
+      postCalls: [[expectedAlertContent()]],
+    })
+  })
+
+  it('posts the notification body when Slack image upload fails', async () => {
+    const notifier = createNotifier()
+    notifier.uploadImage.mockReturnValue(
+      errAsync(new SlackApiError('upload failed')),
+    )
+    const imageBuffer = Buffer.from('png-data')
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(okAsync({ buffer: imageBuffer, panelId: '13' })),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      { alerts: [ALERT] },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        uploadCalls: notifier.uploadImage.mock.calls,
+        postCalls: notifier.postMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      uploadCalls: [
+        [
+          {
+            data: imageBuffer,
+            filename: 'grafana-panel-13.png',
+            altText: 'Grafana panel 13',
+          },
+        ],
+      ],
+      postCalls: [[expectedAlertContent()]],
+    })
+  })
+
   it('updates a repeated fingerprint without creating another task or message', async () => {
     const notifier = createNotifier()
     notifier.findMessageByMetadata.mockReturnValue(
@@ -254,6 +430,131 @@ describe('dispatch', () => {
           },
         ],
       ],
+    })
+  })
+
+  it('reuses an existing panel image when updating an alert', async () => {
+    const notifier = createNotifier()
+    notifier.findMessageByMetadata.mockReturnValue(
+      okAsync({
+        ref: { channel: 'C9', ts: 'existing-ts' },
+        eventPayload: {
+          fingerprint: 'fp-queue',
+          starts_at: INCIDENT_START,
+          task_id: TQ_TASK_REF.id,
+          task_number: TQ_TASK_REF.number,
+          panel_image_file_id: 'FEXISTING',
+        },
+      }),
+    )
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(
+          okAsync({ buffer: Buffer.from('png-data'), panelId: '13' }),
+        ),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      {
+        alerts: [
+          {
+            ...ALERT,
+            annotations: { ...ALERT.annotations, __panelId__: '13' },
+          },
+        ],
+      },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        renderCalls: panelImageRenderer.render.mock.calls,
+        uploadCalls: notifier.uploadImage.mock.calls,
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      renderCalls: [],
+      uploadCalls: [],
+      updateCalls: [
+        [
+          { channel: 'C9', ts: 'existing-ts' },
+          expectedAlertContent('FEXISTING'),
+        ],
+      ],
+    })
+  })
+
+  it('retries an alert update without the panel image when updating it fails', async () => {
+    const notifier = createNotifier()
+    notifier.findMessageByMetadata.mockReturnValue(
+      okAsync({
+        ref: { channel: 'C9', ts: 'existing-ts' },
+        eventPayload: {
+          fingerprint: 'fp-queue',
+          starts_at: INCIDENT_START,
+          task_id: TQ_TASK_REF.id,
+          task_number: TQ_TASK_REF.number,
+          panel_image_file_id: 'FEXISTING',
+        },
+      }),
+    )
+    notifier.updateMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('invalid image block')))
+      .mockReturnValueOnce(okAsync(undefined))
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      alerts: [
+        {
+          ...ALERT,
+          annotations: { ...ALERT.annotations, __panelId__: '13' },
+        },
+      ],
+    })
+
+    expect(
+      observeDispatch(outcome, {
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      updateCalls: [
+        [
+          { channel: 'C9', ts: 'existing-ts' },
+          expectedAlertContent('FEXISTING'),
+        ],
+        [{ channel: 'C9', ts: 'existing-ts' }, expectedAlertContent()],
+      ],
+    })
+  })
+
+  it('returns the body-only retry error when both notification attempts fail', async () => {
+    const notifier = createNotifier()
+    notifier.postMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('invalid image block')))
+      .mockReturnValueOnce(errAsync(new SlackApiError('Slack unavailable')))
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(
+          okAsync({ buffer: Buffer.from('png-data'), panelId: '13' }),
+        ),
+    }
+    const result = await dispatch(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      { alerts: [ALERT] },
+    )
+
+    expect(
+      observeDispatch(
+        result.match(
+          (outcome) => ({ outcome }),
+          (error) => ({ error: error.name, message: error.message }),
+        ),
+        { postCalls: notifier.postMessage.mock.calls },
+      ),
+    ).toEqual({
+      outcome: { error: 'SlackApiError', message: 'Slack unavailable' },
+      postCalls: [[expectedAlertContent('FIMAGE')], [expectedAlertContent()]],
     })
   })
 
