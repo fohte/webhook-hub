@@ -82,15 +82,11 @@ const readTaskRef = (payload: Record<string, unknown>): TqTaskRef | null => {
 const buildMetadata = (
   alert: GrafanaAlert,
   task: TqTaskRef | null,
-  panelImageFileId?: string,
 ): SlackMessageMetadata => ({
   event_type: 'grafana_alert',
   event_payload: {
     fingerprint: alert.fingerprint,
     starts_at: alert.startsAt,
-    ...(panelImageFileId === undefined
-      ? {}
-      : { panel_image_file_id: panelImageFileId }),
     ...(task === null ? {} : { task_id: task.id, task_number: task.number }),
   },
 })
@@ -124,24 +120,10 @@ const reportPanelImageFailure = (
       fingerprint: alert.fingerprint,
       panel_id: alert.annotations['__panelId__'],
       phase,
-      error: error.message,
+      err: error,
     },
     'grafana_panel_image_failed',
   )
-}
-
-const withoutPanelImageMetadata = (
-  content: SlackMessageContent,
-): SlackMessageContent => {
-  if (content.metadata === undefined) return content
-
-  const eventPayload = { ...content.metadata.event_payload }
-  delete eventPayload['panel_image_file_id']
-
-  return {
-    ...content,
-    metadata: { ...content.metadata, event_payload: eventPayload },
-  }
 }
 
 const addPanelImage = (
@@ -242,7 +224,7 @@ const dispatchAlert = (
           note.content,
           task,
           ctx.tqWebUrl,
-          buildMetadata(alert, task, panelImageFileId),
+          buildMetadata(alert, task),
         )
         return addPanelImage(ctx, alert, content, panelImageFileId).andThen(
           (notificationContent) => {
@@ -252,17 +234,17 @@ const dispatchAlert = (
                 : ctx.notifier.updateMessage(existing.ref, messageContent)
 
             const notification = notify(notificationContent).orElse((error) => {
-              const panelImageFileId = readPanelImageFileId(
+              const attachedFileId = readPanelImageFileId(
                 notificationContent.metadata?.event_payload,
               )
-              if (panelImageFileId === undefined) return errAsync(error)
+              if (attachedFileId === undefined) return errAsync(error)
 
               reportPanelImageFailure(
                 alert,
                 error,
                 existing === null ? 'post' : 'update',
               )
-              return notify(withoutPanelImageMetadata(content))
+              return notify(content)
             })
 
             return notification.map((): DispatchOutcome => {

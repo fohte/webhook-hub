@@ -527,6 +527,37 @@ describe('dispatch', () => {
     })
   })
 
+  it('returns the body-only retry error when both notification attempts fail', async () => {
+    const notifier = createNotifier()
+    notifier.postMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('invalid image block')))
+      .mockReturnValueOnce(errAsync(new SlackApiError('Slack unavailable')))
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(
+          okAsync({ buffer: Buffer.from('png-data'), panelId: '13' }),
+        ),
+    }
+    const result = await dispatch(
+      createContext(notifier, createTqClient(), panelImageRenderer),
+      { alerts: [ALERT] },
+    )
+
+    expect(
+      observeDispatch(
+        result.match(
+          (outcome) => ({ outcome }),
+          (error) => ({ error: error.name, message: error.message }),
+        ),
+        { postCalls: notifier.postMessage.mock.calls },
+      ),
+    ).toEqual({
+      outcome: { error: 'SlackApiError', message: 'Slack unavailable' },
+      postCalls: [[expectedAlertContent('FIMAGE')], [expectedAlertContent()]],
+    })
+  })
+
   it('creates a new task and message for a later incident with the same fingerprint', async () => {
     const notifier = createNotifier()
     const earlierIncident = {
