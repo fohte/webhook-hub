@@ -14,18 +14,21 @@ import {
   readTqTaskStatusState,
 } from '#plugins/tq/alert-task'
 import { type TqClient, type TqTaskRef } from '#plugins/tq/tq-client'
-import type {
-  SlackHistorySearchOptions,
-  SlackMessageContent,
-  SlackMessageMetadata,
-  SlackNotifier,
+import {
+  SlackApiError,
+  type SlackHistorySearchOptions,
+  type SlackMessageContent,
+  type SlackMessageMetadata,
+  type SlackNotifier,
 } from '#slack'
-import { SlackApiError } from '#slack'
 import {
   buildGrafanaAlertNotification,
   type GrafanaAlert,
 } from '#sources/grafana/handlers/alert'
-import type { GrafanaPanelImageRenderer } from '#sources/grafana/panel-image'
+import {
+  type GrafanaPanelImageRenderer,
+  readPanelId,
+} from '#sources/grafana/panel-image'
 import type { DispatchOutcome } from '#webhook-source'
 
 export interface DispatchContext {
@@ -123,7 +126,7 @@ const reportPanelImageFailure = (
   logger.warn(
     {
       fingerprint: alert.fingerprint,
-      panel_id: alert.annotations['__panelId__'],
+      panel_id: readPanelId(alert),
       phase,
       err: error,
     },
@@ -165,10 +168,7 @@ const addPanelImage = (
 
   if (existingPanelImageFileId !== undefined) {
     return okAsync(
-      addImageBlock(
-        existingPanelImageFileId,
-        alert.annotations['__panelId__'] ?? 'image',
-      ),
+      addImageBlock(existingPanelImageFileId, readPanelId(alert) ?? 'image'),
     )
   }
 

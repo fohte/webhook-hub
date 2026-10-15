@@ -41,12 +41,35 @@ export class GrafanaPanelImageError extends Error {
   }
 }
 
-const readPanelIdentity = (
+type GrafanaPanelIdentity = { dashboardUid: string; panelId: string }
+
+const readPanelUrlIdentity = Result.fromThrowable(
+  (panelURL: string): GrafanaPanelIdentity | undefined => {
+    const url = new URL(panelURL)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+
+    const [route, encodedDashboardUid] = url.pathname.split('/').slice(1)
+    const panelId = url.searchParams.get('viewPanel')
+    if (
+      route !== 'd' ||
+      encodedDashboardUid === undefined ||
+      encodedDashboardUid === '' ||
+      panelId === null ||
+      !/^\d+$/.test(panelId)
+    ) {
+      return undefined
+    }
+
+    const dashboardUid = decodeURIComponent(encodedDashboardUid)
+    return dashboardUid === '' ? undefined : { dashboardUid, panelId }
+  },
+  (caughtErr) =>
+    new GrafanaPanelImageError('failed to parse Grafana panel URL', caughtErr),
+)
+
+const readAnnotationPanelIdentity = (
   alert: GrafanaAlert,
-): Result<
-  { dashboardUid: string; panelId: string },
-  GrafanaPanelImageError
-> => {
+): Result<GrafanaPanelIdentity, GrafanaPanelImageError> => {
   const dashboardUid = alert.annotations['__dashboardUid__']
   const panelId = alert.annotations['__panelId__']
   if (
@@ -63,6 +86,30 @@ const readPanelIdentity = (
   }
   return ok({ dashboardUid, panelId })
 }
+
+export const readPanelIdentity = (
+  alert: GrafanaAlert,
+): Result<GrafanaPanelIdentity, GrafanaPanelImageError> => {
+  if (alert.panelURL !== undefined) {
+    const panelUrlIdentity = readPanelUrlIdentity(alert.panelURL)
+    if (panelUrlIdentity.isOk() && panelUrlIdentity.value !== undefined) {
+      return ok(panelUrlIdentity.value)
+    }
+  }
+
+  return readAnnotationPanelIdentity(alert)
+}
+
+export const readPanelId = (alert: GrafanaAlert): string | undefined =>
+  readPanelIdentity(alert).match(
+    ({ panelId }) => panelId,
+    () => {
+      const panelId = alert.annotations['__panelId__']
+      return panelId !== undefined && /^\d+$/.test(panelId)
+        ? panelId
+        : undefined
+    },
+  )
 
 export const createGrafanaPanelImageRenderer = (
   token: string,
