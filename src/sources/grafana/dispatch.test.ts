@@ -131,6 +131,8 @@ const expectedTodoGrafanaContent = (options: {
   summary?: string
   task?: typeof TQ_TASK_REF | null
   imageFileId?: string
+  panelId?: string
+  panelURL?: string
 }) => {
   const task = options.task === undefined ? TQ_TASK_REF : options.task
   const status =
@@ -158,6 +160,19 @@ const expectedTodoGrafanaContent = (options: {
               },
             },
           ]),
+      ...(options.panelURL === undefined
+        ? []
+        : [
+            {
+              type: 'context' as const,
+              elements: [
+                {
+                  type: 'mrkdwn' as const,
+                  text: `<${options.panelURL}|Panel>`,
+                },
+              ],
+            },
+          ]),
       {
         type: 'context' as const,
         elements: [
@@ -170,7 +185,7 @@ const expectedTodoGrafanaContent = (options: {
             {
               type: 'image' as const,
               slack_file: { id: options.imageFileId },
-              alt_text: 'Grafana panel 13',
+              alt_text: `Grafana panel ${options.panelId ?? '13'}`,
             },
           ]),
     ],
@@ -196,12 +211,16 @@ const expectedTodoGrafanaContent = (options: {
   }
 }
 
-const expectedAlertContent = (imageFileId?: string) =>
+const expectedAlertContent = (
+  imageFileId?: string,
+  options: { panelId?: string; panelURL?: string } = {},
+) =>
   expectedTodoGrafanaContent({
     alertName: 'Queue depth',
     fingerprint: 'fp-queue',
     startsAt: INCIDENT_START,
     summary: 'Queue is growing',
+    ...options,
     ...(imageFileId === undefined ? {} : { imageFileId }),
   })
 
@@ -530,7 +549,7 @@ describe('dispatch', () => {
         alerts: [
           {
             ...ALERT,
-            annotations: { ...ALERT.annotations, __panelId__: '13' },
+            panelURL: 'https://grafana.example.test/d/url-board?viewPanel=23',
           },
         ],
       },
@@ -549,7 +568,10 @@ describe('dispatch', () => {
       updateCalls: [
         [
           { channel: 'C9', ts: 'existing-ts' },
-          expectedAlertContent('FEXISTING'),
+          expectedAlertContent('FEXISTING', {
+            panelId: '23',
+            panelURL: 'https://grafana.example.test/d/url-board?viewPanel=23',
+          }),
         ],
       ],
     })
