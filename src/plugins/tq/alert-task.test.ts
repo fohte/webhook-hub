@@ -122,7 +122,7 @@ const legacyGrafanaContent: SlackMessageContent = {
     {
       type: 'section',
       fields: [
-        { type: 'mrkdwn', text: '*状態*\n解決' },
+        { type: 'mrkdwn', text: '*Grafana 上*\nresolved' },
         { type: 'mrkdwn', text: '*Severity*\ncritical' },
         { type: 'mrkdwn', text: '*instance*\nworker-3' },
       ],
@@ -567,7 +567,7 @@ describe('updateTqTaskStatus', () => {
           {
             type: 'section',
             fields: [
-              { type: 'mrkdwn', text: '*状態*\n解決' },
+              { type: 'mrkdwn', text: '*Grafana 上*\nresolved' },
               { type: 'mrkdwn', text: '*Severity*\ncritical' },
               { type: 'mrkdwn', text: '*instance*\nworker-3' },
             ],
@@ -836,7 +836,7 @@ describe('updateTqTaskStatus', () => {
     })
   })
 
-  it('keeps a corrupt snapshot unchanged and warns when a compact alert changes state', () => {
+  it('keeps a corrupt snapshot unchanged and updates compact status when reopening', () => {
     const completed = updateTqTaskStatus(
       ciContent,
       formatTqTaskStatus(completedInfo, TQ_WEB_URL),
@@ -856,24 +856,47 @@ describe('updateTqTaskStatus', () => {
         },
       },
     }
-    const duplicateInfo: TqTaskStatusInfo = {
+    const todoInfo: TqTaskStatusInfo = {
       ...completedInfo,
-      statusReason: 'duplicate',
-      duplicateOfTask: { id: 'task-target', number: 202 },
+      status: 'todo',
+      statusReason: null,
     }
     const warnSpy = vi.spyOn(logger, 'warn')
     warnSpy.mockClear()
     const expected = {
       content: {
         ...corruptContent,
+        text: [
+          '*🚨 CI failed*',
+          'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
+          `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+        ].join('\n'),
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: '*🚨 CI failed*' },
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: 'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
+              },
+              {
+                type: 'mrkdwn',
+                text: `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+              },
+            ],
+          },
+        ],
         metadata: {
           ...corruptContent.metadata,
           event_payload: {
             task_id: TASK.id,
-            tq_task_status: 'completed',
-            tq_task_status_reason: 'duplicate',
-            tq_duplicate_task_id: 'task-target',
-            tq_duplicate_task_number: 202,
+            tq_task_status: 'todo',
+            tq_task_status_reason: 'none',
             [TQ_ORIGINAL_CONTENT_KEY]: 'broken-snapshot',
           },
         },
@@ -884,8 +907,8 @@ describe('updateTqTaskStatus', () => {
     const updateAndObserve = () => {
       const updated = updateTqTaskStatus(
         corruptContent,
-        formatTqTaskStatus(duplicateInfo, TQ_WEB_URL),
-        duplicateInfo,
+        formatTqTaskStatus(todoInfo, TQ_WEB_URL),
+        todoInfo,
       )
       return {
         content: normalizeTqOriginalContentSnapshot(updated),

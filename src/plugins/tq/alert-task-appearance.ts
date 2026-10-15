@@ -6,6 +6,7 @@ import type {
   SlackMessageMetadata,
 } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 const COMPLETED_COLOR = '#2da44e'
@@ -69,7 +70,11 @@ const formatPrimaryContext = (
 
   if (readGrafanaStatus(metadata, content) !== undefined) {
     const grafanaFields = [...fields.entries()]
-      .filter(([label]) => label !== ALERT_FIELD_LABELS.grafanaLegacyStatus)
+      .filter(
+        ([label]) =>
+          label !== ALERT_FIELD_LABELS.grafanaLegacyStatus &&
+          label !== ALERT_FIELD_LABELS.grafanaStatus,
+      )
       .slice(0, 2)
     if (grafanaFields.length > 0) {
       return grafanaFields
@@ -142,6 +147,78 @@ export const isCompactedAppearance = (content: SlackMessageContent): boolean =>
   content.blocks[0].text?.type === 'mrkdwn' &&
   /^\*(?:✅|⏭️|🔁) ~/u.test(content.blocks[0].text.text)
 
+export const updateCompactedAppearance = (
+  content: SlackMessageContent,
+  status: string,
+  info: TqTaskStatusInfo,
+  metadata?: SlackMessageMetadata,
+): SlackMessageContent => {
+  const currentHeading = content.blocks?.[0]
+  if (
+    currentHeading?.type !== 'section' ||
+    currentHeading.text?.type !== 'mrkdwn'
+  ) {
+    return content
+  }
+
+  const titleMatch = /^\*(?:✅|⏭️|🔁) ~([\s\S]*)~\*$/u.exec(
+    currentHeading.text.text,
+  )
+  if (titleMatch === null) return content
+
+  const title = titleMatch[1] ?? ''
+  const icon =
+    info.status === 'todo'
+      ? metadata?.event_type === 'grafana_alert'
+        ? '🔥'
+        : '🚨'
+      : info.statusReason === 'not_planned'
+        ? '⏭️'
+        : info.statusReason === 'duplicate'
+          ? '🔁'
+          : '✅'
+  const heading =
+    info.status === 'todo' ? `*${icon} ${title}*` : `*${icon} ~${title}~*`
+  const contextBlock = content.blocks?.[1]
+  const context =
+    contextBlock?.type === 'context'
+      ? contextBlock.elements.find((element) => element.type === 'mrkdwn')?.text
+      : undefined
+  const blocks = (content.blocks ?? []).map((block, index) => {
+    if (
+      index === 0 &&
+      block.type === 'section' &&
+      block.text?.type === 'mrkdwn'
+    ) {
+      return { ...block, text: { ...block.text, text: heading } }
+    }
+    if (index === 1 && block.type === 'context') {
+      return {
+        ...block,
+        elements: block.elements.map((element, elementIndex) =>
+          element.type === 'mrkdwn' && elementIndex === 1
+            ? { ...element, text: status }
+            : element,
+        ),
+      }
+    }
+    return block
+  })
+  const color =
+    info.status === 'todo'
+      ? TODO_ALERT_COLOR
+      : info.statusReason === 'completed' || info.statusReason === null
+        ? COMPLETED_COLOR
+        : DISMISSED_COLOR
+
+  return {
+    ...content,
+    text: [heading, context ?? '', status].join('\n'),
+    color,
+    blocks,
+  }
+}
+
 export const readGrafanaStatus = (
   metadata: SlackMessageMetadata | undefined,
   content?: TqOriginalContent,
@@ -152,9 +229,13 @@ export const readGrafanaStatus = (
     return undefined
   }
 
-  const legacyStatus = readFields(content.blocks ?? []).get(
-    ALERT_FIELD_LABELS.grafanaLegacyStatus,
-  )
+  const fields = readFields(content.blocks ?? [])
+  const grafanaStatus = fields.get(ALERT_FIELD_LABELS.grafanaStatus)
+  if (grafanaStatus === 'firing' || grafanaStatus === 'resolved') {
+    return grafanaStatus
+  }
+
+  const legacyStatus = fields.get(ALERT_FIELD_LABELS.grafanaLegacyStatus)
   return legacyStatus === '発生中'
     ? 'firing'
     : legacyStatus === '解決'

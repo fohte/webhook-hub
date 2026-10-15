@@ -6,6 +6,7 @@ import {
   compactAppearance,
   isCompactedAppearance,
   readGrafanaStatus,
+  updateCompactedAppearance,
 } from '#plugins/tq/alert-task-appearance'
 import {
   decodeOriginalContent,
@@ -22,6 +23,7 @@ import {
   type SlackMessageMetadata,
 } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 export { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
@@ -165,8 +167,17 @@ const restoreTodoColor = (
   metadata: SlackMessageMetadata | undefined,
 ): TqOriginalContent =>
   info?.status === 'todo' && readGrafanaStatus(metadata, content) === 'resolved'
-    ? { ...content, color: '#d73a49' }
+    ? { ...content, color: TODO_ALERT_COLOR }
     : content
+
+const withTqStatus = (
+  content: TqOriginalContent,
+  status: string,
+): TqOriginalContent => ({
+  ...content,
+  text: replaceTqStatusLine(content.text, status),
+  blocks: addStatusBlock(content.blocks ?? [], status),
+})
 
 const updateTaskStatusMetadata = (
   metadata: SlackMessageMetadata,
@@ -235,24 +246,17 @@ export const updateTqTaskStatus = (
       metadata === undefined || info === undefined
         ? metadata
         : updateTaskStatusMetadata(metadata, info, storedOriginalSnapshot)
-    const cannotRecoverFoldedContent =
-      isCompactedAppearance(content) &&
-      (isCorruptSnapshot || isLegacyFoldedContent)
+    const cannotRecoverFoldedContent = isCompactedAppearance(content)
     const originalContent = restoreTodoColor(
       stripTqStatus(content),
       info,
       metadata,
     )
     const updatedContent = cannotRecoverFoldedContent
-      ? content
-      : {
-          ...originalContent,
-          text: replaceTqStatusLine(originalContent.text, statusWithSource),
-          blocks: addStatusBlock(
-            originalContent.blocks ?? [],
-            statusWithSource,
-          ),
-        }
+      ? info === undefined
+        ? content
+        : updateCompactedAppearance(content, statusWithSource, info, metadata)
+      : withTqStatus(originalContent, statusWithSource)
     return {
       ...content,
       ...updatedContent,
@@ -277,11 +281,7 @@ export const updateTqTaskStatus = (
   const updatedMetadata =
     metadata === undefined || info === undefined
       ? metadata
-      : updateTaskStatusMetadata(
-          metadata,
-          info,
-          info.status === 'completed' ? snapshot : previousSnapshot,
-        )
+      : updateTaskStatusMetadata(metadata, info, snapshot)
   const snapshotExceedsLimit =
     info?.status === 'completed' &&
     updatedMetadata !== undefined &&
@@ -307,18 +307,10 @@ export const updateTqTaskStatus = (
         },
         'tq_original_content_snapshot_too_large',
       )
-      updatedContent = {
-        ...originalContent,
-        text: replaceTqStatusLine(originalContent.text, statusWithSource),
-        blocks: addStatusBlock(originalContent.blocks ?? [], statusWithSource),
-      }
+      updatedContent = withTqStatus(originalContent, statusWithSource)
     }
   } else {
-    updatedContent = {
-      ...originalContent,
-      text: replaceTqStatusLine(originalContent.text, statusWithSource),
-      blocks: addStatusBlock(originalContent.blocks ?? [], statusWithSource),
-    }
+    updatedContent = withTqStatus(originalContent, statusWithSource)
   }
 
   const finalMetadata =

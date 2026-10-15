@@ -1,6 +1,7 @@
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 
 export interface GrafanaAlert {
   status: 'firing' | 'resolved'
@@ -20,8 +21,6 @@ export interface GrafanaAlertNotification {
   task: CreateTaskRequest
   status: GrafanaAlert['status']
 }
-
-const TODO_ALERT_COLOR = '#d73a49'
 
 const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
