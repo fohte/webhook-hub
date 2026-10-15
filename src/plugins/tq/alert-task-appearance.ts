@@ -71,7 +71,7 @@ const readHeader = (content: TqOriginalContent): string => {
 }
 
 const stripLeadingIcon = (header: string): string =>
-  header.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')
+  header.replace(/^(?:\p{Extended_Pictographic}\uFE0F?|:[\w+-]+:)\s*/u, '')
 
 const formatPrimaryContext = (
   content: TqOriginalContent,

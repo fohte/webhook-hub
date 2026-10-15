@@ -8,6 +8,7 @@ import {
   type TqTaskStatusInfo,
   updateTqTaskStatus,
 } from '#plugins/tq/alert-task'
+import { compactAppearance } from '#plugins/tq/alert-task-appearance'
 import {
   expectedTqOriginalContentSnapshot,
   normalizeTqOriginalContentSnapshot,
@@ -142,6 +143,76 @@ const completedInfo: TqTaskStatusInfo = {
 
 const normalizeUpdates = (...contents: SlackMessageContent[]) =>
   contents.map(normalizeTqOriginalContentSnapshot)
+
+describe('compactAppearance', () => {
+  it('strips a leading Slack emoji shortcode from the heading', () => {
+    const header = ':satellite: Signal unavailable'
+
+    expect(
+      compactAppearance(
+        {
+          text: header,
+          blocks: [
+            { type: 'header', text: { type: 'plain_text', text: header } },
+          ],
+        },
+        '対応済み',
+        completedInfo,
+      ),
+    ).toEqual({
+      text: '*✅ ~Signal unavailable~*\nSignal unavailable\n対応済み',
+      color: '#2da44e',
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*✅ ~Signal unavailable~*' },
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: 'Signal unavailable' }],
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '対応済み' }],
+        },
+      ],
+    })
+  })
+
+  it('keeps a leading non-emoji label in the heading', () => {
+    const header = '[prod] Signal unavailable'
+
+    expect(
+      compactAppearance(
+        {
+          text: header,
+          blocks: [
+            { type: 'header', text: { type: 'plain_text', text: header } },
+          ],
+        },
+        '対応済み',
+        completedInfo,
+      ),
+    ).toEqual({
+      text: '*✅ ~[prod] Signal unavailable~*\n[prod] Signal unavailable\n対応済み',
+      color: '#2da44e',
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*✅ ~[prod] Signal unavailable~*' },
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '[prod] Signal unavailable' }],
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '対応済み' }],
+        },
+      ],
+    })
+  })
+})
 
 describe('updateTqTaskStatus', () => {
   it('compacts a completed CI alert and changes its color', () => {
