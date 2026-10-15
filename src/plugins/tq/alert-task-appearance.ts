@@ -11,6 +11,23 @@ import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 const COMPLETED_COLOR = '#2da44e'
 const DISMISSED_COLOR = '#8b949e'
+const COMPACT_BLOCK_INDEX = {
+  heading: 0,
+  primaryContext: 1,
+  status: 2,
+} as const
+
+type CompactBlocks = [SlackBlock, SlackBlock, SlackBlock]
+
+const compactBlocks = (
+  heading: string,
+  context: string,
+  status: string,
+): CompactBlocks => [
+  { type: 'section', text: { type: 'mrkdwn', text: heading } },
+  { type: 'context', elements: [{ type: 'mrkdwn', text: context }] },
+  { type: 'context', elements: [{ type: 'mrkdwn', text: status }] },
+]
 
 const parseField = (text: string): [string, string] | null => {
   const newline = text.indexOf('\n')
@@ -129,24 +146,20 @@ export const compactAppearance = (
       info.statusReason === 'completed' || info.statusReason === null
         ? COMPLETED_COLOR
         : DISMISSED_COLOR,
-    blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: heading } },
-      {
-        type: 'context',
-        elements: [{ type: 'mrkdwn', text: context }],
-      },
-      {
-        type: 'context',
-        elements: [{ type: 'mrkdwn', text: status }],
-      },
-    ],
+    blocks: compactBlocks(heading, context, status),
   }
 }
 
-export const isCompactedAppearance = (content: SlackMessageContent): boolean =>
-  content.blocks?.[0]?.type === 'section' &&
-  content.blocks[0].text?.type === 'mrkdwn' &&
-  /^\*(?:✅|⏭️|🔁) ~/u.test(content.blocks[0].text.text)
+export const isCompactedAppearance = (
+  content: SlackMessageContent,
+): boolean => {
+  const heading = content.blocks?.[COMPACT_BLOCK_INDEX.heading]
+  return (
+    heading?.type === 'section' &&
+    heading.text?.type === 'mrkdwn' &&
+    /^\*(?:✅|⏭️|🔁) ~/u.test(heading.text.text)
+  )
+}
 
 export const updateCompactedAppearance = (
   content: SlackMessageContent,
@@ -154,7 +167,7 @@ export const updateCompactedAppearance = (
   info: TqTaskStatusInfo,
   metadata?: SlackMessageMetadata,
 ): SlackMessageContent => {
-  const currentHeading = content.blocks?.[0]
+  const currentHeading = content.blocks?.[COMPACT_BLOCK_INDEX.heading]
   if (
     currentHeading?.type !== 'section' ||
     currentHeading.text?.type !== 'mrkdwn'
@@ -180,31 +193,11 @@ export const updateCompactedAppearance = (
           : '✅'
   const heading =
     info.status === 'todo' ? `*${icon} ${title}*` : `*${icon} ~${title}~*`
-  const contextBlock = content.blocks?.[1]
+  const contextBlock = content.blocks?.[COMPACT_BLOCK_INDEX.primaryContext]
   const context =
     contextBlock?.type === 'context'
       ? contextBlock.elements.find((element) => element.type === 'mrkdwn')?.text
       : undefined
-  const blocks = (content.blocks ?? []).map((block, index) => {
-    if (
-      index === 0 &&
-      block.type === 'section' &&
-      block.text?.type === 'mrkdwn'
-    ) {
-      return { ...block, text: { ...block.text, text: heading } }
-    }
-    if (index === 2 && block.type === 'context') {
-      return {
-        ...block,
-        elements: block.elements.map((element, elementIndex) =>
-          element.type === 'mrkdwn' && elementIndex === 0
-            ? { ...element, text: status }
-            : element,
-        ),
-      }
-    }
-    return block
-  })
   const color =
     info.status === 'todo'
       ? TODO_ALERT_COLOR
@@ -216,7 +209,7 @@ export const updateCompactedAppearance = (
     ...content,
     text: [heading, context ?? '', status].join('\n'),
     color,
-    blocks,
+    blocks: compactBlocks(heading, context ?? '', status),
   }
 }
 

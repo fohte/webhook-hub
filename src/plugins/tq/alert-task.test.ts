@@ -964,6 +964,88 @@ describe('updateTqTaskStatus', () => {
     expect(updateAndObserve()).toEqual(expected)
   })
 
+  it('updates task status in the previous compact layout when its snapshot is corrupt', () => {
+    const status = `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`
+    const context =
+      'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>'
+    const legacyContent: SlackMessageContent = {
+      text: ['*✅ ~CI failed~*', context, status].join('\n'),
+      color: '#2da44e',
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*✅ ~CI failed~*' },
+        },
+        {
+          type: 'context',
+          elements: [
+            { type: 'mrkdwn', text: context },
+            { type: 'mrkdwn', text: status },
+          ],
+        },
+      ],
+      metadata: {
+        event_type: 'alert_task',
+        event_payload: {
+          task_id: TASK.id,
+          tq_task_status: 'completed',
+          tq_task_status_reason: 'completed',
+          [TQ_ORIGINAL_CONTENT_KEY]: 'broken-snapshot',
+        },
+      },
+    }
+    const todoInfo: TqTaskStatusInfo = {
+      ...completedInfo,
+      status: 'todo',
+      statusReason: null,
+    }
+
+    expect(
+      normalizeTqOriginalContentSnapshot(
+        updateTqTaskStatus(
+          legacyContent,
+          formatTqTaskStatus(todoInfo, TQ_WEB_URL),
+          todoInfo,
+        ),
+      ),
+    ).toEqual({
+      text: [
+        '*🚨 CI failed*',
+        context,
+        `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+      ].join('\n'),
+      color: '#d73a49',
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*🚨 CI failed*' },
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: context }],
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+            },
+          ],
+        },
+      ],
+      metadata: {
+        event_type: 'alert_task',
+        event_payload: {
+          task_id: TASK.id,
+          tq_task_status: 'todo',
+          tq_task_status_reason: 'none',
+          [TQ_ORIGINAL_CONTENT_KEY]: 'broken-snapshot',
+        },
+      },
+    })
+  })
+
   it('keeps the full alert when the original-content snapshot exceeds Slack metadata size', () => {
     let state = 1
     const highEntropyText = Array.from({ length: 9000 }, () => {
