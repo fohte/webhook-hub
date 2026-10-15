@@ -28,7 +28,12 @@ describe('extractTqStatusContext', () => {
       headersFrom({ 'X-Tq-Signature-256': signatureFor(BODY, SECRET) }),
     )
 
-    expect(context?.eventName).toEqual('task.status_changed')
+    expect(
+      context === null ? null : { ...context, deliveryId: 'request-id' },
+    ).toEqual({
+      deliveryId: 'request-id',
+      eventName: 'task.status_changed',
+    })
   })
 })
 

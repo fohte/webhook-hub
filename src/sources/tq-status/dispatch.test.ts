@@ -10,6 +10,8 @@ import { dispatchTqTaskStatusChanged } from '#sources/tq-status/dispatch'
 
 const TASK_ID = 'task-example-id'
 const TASK_NUMBER = 101
+const DUPLICATE_TASK_ID = 'task-duplicate-id'
+const DUPLICATE_TASK_NUMBER = 202
 const TQ_WEB_URL = 'https://tasks.example.test'
 const REF: SlackMessageRef = { channel: 'CEXAMPLE', ts: '123.456' }
 
@@ -20,6 +22,15 @@ const originalContent: SlackMessageContent = {
     {
       type: 'header',
       text: { type: 'plain_text', text: 'Alert details' },
+    },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: '*Summary*\nExample alert details' },
+    },
+    {
+      type: 'image',
+      slack_file: { id: 'FEXAMPLE' },
+      alt_text: 'Example panel',
     },
     {
       type: 'context',
@@ -39,7 +50,7 @@ const originalContent: SlackMessageContent = {
 
 const createMessage = (content: SlackMessageContent = originalContent) => ({
   ref: REF,
-  eventPayload: { task_id: TASK_ID },
+  eventPayload: content.metadata?.event_payload ?? { task_id: TASK_ID },
   content,
 })
 
@@ -48,8 +59,19 @@ const createNotifier = (
 ) => {
   const findMessageByMetadata = vi
     .fn<SlackNotifier['findMessageByMetadata']>()
-    .mockReturnValueOnce(okAsync(firstMessage))
-    .mockReturnValue(okAsync(null))
+    .mockImplementation((eventTypes, payloadMatcher) => {
+      const allowedEventTypes =
+        typeof eventTypes === 'string' ? [eventTypes] : eventTypes
+      const eventType = firstMessage?.content.metadata?.event_type
+      return okAsync(
+        firstMessage !== null &&
+          eventType !== undefined &&
+          allowedEventTypes.includes(eventType) &&
+          payloadMatcher(firstMessage.eventPayload)
+          ? firstMessage
+          : null,
+      )
+    })
   const updateMessage = vi
     .fn<SlackNotifier['updateMessage']>()
     .mockReturnValue(okAsync(undefined))
@@ -76,7 +98,7 @@ const eventFor = (task: Record<string, unknown>) => ({
 
 const observeDispatch = (
   result: string,
-  lookups: string[],
+  lookups: unknown[],
   updates: unknown,
 ) => ({ result, lookups, updates })
 
@@ -103,12 +125,12 @@ describe('dispatchTqTaskStatusChanged', () => {
         status: 'completed',
         statusReason: 'duplicate',
         duplicateOfTask: {
-          id: 'task-duplicate-id',
-          number: 202,
+          id: DUPLICATE_TASK_ID,
+          number: DUPLICATE_TASK_NUMBER,
           title: 'Example task',
         },
       },
-      status: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/task-duplicate-id|tq #202>`,
+      status: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #${String(DUPLICATE_TASK_NUMBER)}>`,
     },
   ])('updates the status display for $name', async ({ task, status }) => {
     const { notifier, findMessageByMetadata, updateMessage } = createNotifier()
@@ -130,7 +152,7 @@ describe('dispatchTqTaskStatusChanged', () => {
       ),
     ).toEqual({
       result: 'notified',
-      lookups: ['alert_task'],
+      lookups: [['alert_task', 'grafana_alert']],
       updates: [
         [
           REF,
@@ -143,10 +165,36 @@ describe('dispatchTqTaskStatusChanged', () => {
                 text: { type: 'plain_text', text: 'Alert details' },
               },
               {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: '*Summary*\nExample alert details',
+                },
+              },
+              {
+                type: 'image',
+                slack_file: { id: 'FEXAMPLE' },
+                alt_text: 'Example panel',
+              },
+              {
                 type: 'context',
                 elements: [{ type: 'mrkdwn', text: `*状態*\n${status}` }],
               },
             ],
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: {
+                task_id: TASK_ID,
+                tq_task_status: task.status,
+                tq_task_status_reason: task.statusReason ?? 'none',
+                ...(task.duplicateOfTask === undefined
+                  ? {}
+                  : {
+                      tq_duplicate_task_id: task.duplicateOfTask.id,
+                      tq_duplicate_task_number: task.duplicateOfTask.number,
+                    }),
+              },
+            },
           },
         ],
       ],
@@ -166,19 +214,8 @@ describe('dispatchTqTaskStatusChanged', () => {
         },
       },
     })
-    const findMessageByMetadata = vi
-      .fn<SlackNotifier['findMessageByMetadata']>()
-      .mockReturnValueOnce(okAsync(null))
-      .mockReturnValueOnce(okAsync(grafanaMessage))
-    const updateMessage = vi
-      .fn<SlackNotifier['updateMessage']>()
-      .mockReturnValue(okAsync(undefined))
-    const notifier: SlackNotifier = {
-      postMessage: vi.fn(),
-      updateMessage,
-      findMessageByMetadata,
-      uploadImage: vi.fn(),
-    }
+    const { notifier, findMessageByMetadata, updateMessage } =
+      createNotifier(grafanaMessage)
 
     const result = await dispatchTqTaskStatusChanged(
       notifier,
@@ -197,7 +234,7 @@ describe('dispatchTqTaskStatusChanged', () => {
       ),
     ).toEqual({
       result: 'notified',
-      lookups: ['alert_task', 'grafana_alert'],
+      lookups: [['alert_task', 'grafana_alert']],
       updates: [
         [
           REF,
@@ -210,6 +247,18 @@ describe('dispatchTqTaskStatusChanged', () => {
                 text: { type: 'plain_text', text: 'Alert details' },
               },
               {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: '*Summary*\nExample alert details',
+                },
+              },
+              {
+                type: 'image',
+                slack_file: { id: 'FEXAMPLE' },
+                alt_text: 'Example panel',
+              },
+              {
                 type: 'context',
                 elements: [
                   {
@@ -219,6 +268,121 @@ describe('dispatchTqTaskStatusChanged', () => {
                 ],
               },
             ],
+            metadata: {
+              event_type: 'grafana_alert',
+              event_payload: {
+                fingerprint: 'fingerprint-example',
+                starts_at: '2026-01-02T03:04:05Z',
+                task_id: TASK_ID,
+                task_number: TASK_NUMBER,
+                tq_task_status: 'completed',
+                tq_task_status_reason: 'completed',
+              },
+            },
+          },
+        ],
+      ],
+    })
+  })
+
+  it('clears duplicate metadata when a task returns to todo', async () => {
+    const duplicateStatus = `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #${String(DUPLICATE_TASK_NUMBER)}>`
+    const duplicateContent: SlackMessageContent = {
+      ...originalContent,
+      text: `Alert details\n${duplicateStatus}`,
+      blocks: [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: 'Alert details' },
+        },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*Summary*\nExample alert details' },
+        },
+        {
+          type: 'image',
+          slack_file: { id: 'FEXAMPLE' },
+          alt_text: 'Example panel',
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: `*状態*\n${duplicateStatus}` }],
+        },
+      ],
+      metadata: {
+        event_type: 'alert_task',
+        event_payload: {
+          task_id: TASK_ID,
+          tq_task_status: 'completed',
+          tq_task_status_reason: 'duplicate',
+          tq_duplicate_task_id: DUPLICATE_TASK_ID,
+          tq_duplicate_task_number: DUPLICATE_TASK_NUMBER,
+        },
+      },
+    }
+    const { notifier, findMessageByMetadata, updateMessage } = createNotifier(
+      createMessage(duplicateContent),
+    )
+
+    const result = await dispatchTqTaskStatusChanged(
+      notifier,
+      TQ_WEB_URL,
+      eventFor({ status: 'todo', statusReason: null }),
+    ).match(
+      (outcome) => outcome,
+      () => 'error',
+    )
+
+    expect(
+      observeDispatch(
+        result,
+        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
+        updateMessage.mock.calls,
+      ),
+    ).toEqual({
+      result: 'notified',
+      lookups: [['alert_task', 'grafana_alert']],
+      updates: [
+        [
+          REF,
+          {
+            ...duplicateContent,
+            text: `Alert details\n未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
+            blocks: [
+              {
+                type: 'header',
+                text: { type: 'plain_text', text: 'Alert details' },
+              },
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: '*Summary*\nExample alert details',
+                },
+              },
+              {
+                type: 'image',
+                slack_file: { id: 'FEXAMPLE' },
+                alt_text: 'Example panel',
+              },
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
+                    text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
+                  },
+                ],
+              },
+            ],
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: {
+                task_id: TASK_ID,
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
+              },
+            },
           },
         ],
       ],
@@ -246,7 +410,7 @@ describe('dispatchTqTaskStatusChanged', () => {
       ),
     ).toEqual({
       result: 'ignored',
-      lookups: ['alert_task', 'grafana_alert'],
+      lookups: [['alert_task', 'grafana_alert']],
       updates: [],
     })
   })
@@ -268,5 +432,38 @@ describe('dispatchTqTaskStatusChanged', () => {
         updateMessage.mock.calls,
       ),
     ).toEqual({ result: 'ignored', lookups: [], updates: [] })
+  })
+
+  it('ignores a notification with a different task ID', async () => {
+    const message = createMessage({
+      ...originalContent,
+      metadata: {
+        event_type: 'alert_task',
+        event_payload: { task_id: 'another-task-id' },
+      },
+    })
+    const { notifier, findMessageByMetadata, updateMessage } =
+      createNotifier(message)
+
+    const result = await dispatchTqTaskStatusChanged(
+      notifier,
+      TQ_WEB_URL,
+      eventFor({ status: 'completed', statusReason: 'completed' }),
+    ).match(
+      (outcome) => outcome,
+      () => 'error',
+    )
+
+    expect(
+      observeDispatch(
+        result,
+        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
+        updateMessage.mock.calls,
+      ),
+    ).toEqual({
+      result: 'ignored',
+      lookups: [['alert_task', 'grafana_alert']],
+      updates: [],
+    })
   })
 })

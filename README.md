@@ -13,7 +13,7 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
 - **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`.
 - **Grafana alerts** — each firing or resolved alert is posted separately. Redeliveries with the same fingerprint and `startsAt` update the existing Slack message without creating another tq task; a later incident with the same fingerprint gets its own message and task.
-- **tq task status changes** — `task.status_changed` webhooks update the matching alert notification to `未対応`, `対応済み`, `対応不要`, or `重複`; duplicate notifications link to the target task.
+- **tq task status changes** — `task.status_changed` webhooks update the matching alert notification to `未対応`, `対応済み`, `対応不要`, or `重複`; duplicate notifications link to the target task. The lookup searches the most recent 1,000 Slack channel messages.
 
 CI, Sentry, and Grafana alert notifications include an `未対応` status and a [tq task](https://github.com/fohte/tq) link. Task creation is best-effort: if the tq API is unavailable, the Slack notification still posts without a task link.
 
@@ -24,7 +24,7 @@ CI, Sentry, and Grafana alert notifications include an `未対応` status and a 
 | `POST` | `/github`  | GitHub webhook receiver. Verifies `x-hub-signature-256`; rejects invalid signatures with `401`. Handler errors return `200` to suppress GitHub's redelivery.            |
 | `POST` | `/sentry`  | Sentry webhook receiver. Verifies `Sentry-Hook-Signature`; rejects invalid signatures with `401`. Handler errors return `200` to suppress Sentry's redelivery.          |
 | `POST` | `/grafana` | Grafana webhook receiver. Verifies `X-Grafana-Alerting-Signature`; rejects invalid signatures with `401`. Handler errors return `200` to suppress Grafana's redelivery. |
-| `POST` | `/tq`      | tq status webhook receiver. Verifies `X-Tq-Signature-256`; updates a matching alert notification.                                                                       |
+| `POST` | `/tq`      | tq status webhook receiver. Verifies `X-Tq-Signature-256`; rejects invalid signatures with `401`. Handler errors return `200` to suppress tq's redelivery.              |
 | `GET`  | `/healthz` | Liveness probe; returns `ok`.                                                                                                                                           |
 
 ## Configuration
@@ -91,7 +91,7 @@ To run the service against real deliveries, these things need to be wired up.
    - Leave the optional timestamp header unset
    - To include panel images, set `GRAFANA_API_TOKEN` to a service account token with dashboard read access. Set `GRAFANA_URL` if the alerts come from a different Grafana instance than the default. Link each alert rule to its dashboard panel, and make sure the instance provides the `/render/d-solo` image rendering API.
 
-5. **Register the tq status webhook**:
+5. **Register a webhook in tq for task status changes**:
    - Webhook URL: `https://<your-host>/tq`
    - Secret: same value as `TQ_WEBHOOK_SECRET`
    - Subscribe to `task.status_changed`

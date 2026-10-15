@@ -2,11 +2,11 @@
 
 ## Overview
 
-webhook-hub is a single Hono HTTP service that receives webhooks from multiple sources (GitHub, Sentry, Grafana), applies a small set of filters, and posts matching events to Slack.
+webhook-hub is a single Hono HTTP service that receives webhooks from multiple sources (GitHub, Sentry, Grafana, tq), applies a small set of filters, and posts matching events to Slack.
 
 ```mermaid
 sequenceDiagram
-  participant SRC as Webhook source (GitHub / Sentry / Grafana)
+  participant SRC as Webhook source (GitHub / Sentry / Grafana / tq)
   participant POD as webhook-hub
   participant TQ as tq API
   participant SLACK as Slack
@@ -24,6 +24,13 @@ sequenceDiagram
     end
     SLACK-->>POD: ok
   end
+  TQ->>POD: POST /tq (task.status_changed + signature)
+  POD->>POD: find alert notification by task ID
+  alt alert notification found
+    POD->>SLACK: chat.update status and metadata
+  else no matching notification
+    POD->>POD: ignore event
+  end
   POD-->>SRC: 200
 ```
 
@@ -31,7 +38,7 @@ sequenceDiagram
 
 Each registered `WebhookSource` (`src/webhook-source.ts`) is mounted at its own path and runs the same pipeline (`src/server.ts`):
 
-1. `extractContext()` pulls source-specific delivery context from the request. Missing required headers return `400`; Grafana and tq assign request IDs because their webhooks have no delivery ID header.
+1. `extractContext()` pulls source-specific delivery context from the request. Missing required headers return `400`; Grafana and tq generate random request IDs instead of reading a delivery ID header.
 2. `verify()` checks the request's signature against the source's shared secret. Failure returns `401`.
 3. The raw body is parsed as JSON. Parse failure returns `400`.
 4. `dispatch()` runs the source-specific handler for the event.
@@ -54,7 +61,7 @@ The Slack notification includes alert labels, summary and description annotation
 
 ### tq (`POST /tq`)
 
-Header: `X-Tq-Signature-256` in `sha256=<hex>` form. The signature is an HMAC-SHA256 of the raw body against `TQ_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/tq-status/verify.ts`). `task.status_changed` updates the matching CI, Sentry, or Grafana notification by its tq task ID. Events without a matching alert notification are ignored.
+Header: `X-Tq-Signature-256` in `sha256=<hex>` form. The signature is an HMAC-SHA256 of the raw body against `TQ_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/tq-status/verify.ts`). `task.status_changed` updates the matching CI, Sentry, or Grafana notification by its tq task ID. The lookup searches the most recent 1,000 Slack channel messages; events without a matching alert notification in that history are ignored.
 
 ## Notification rules
 

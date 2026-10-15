@@ -44,7 +44,7 @@ const createNotifier = () => {
 
 const observeRoute = (
   responses: { status: number; body: unknown }[],
-  lookups: string[],
+  lookups: unknown[],
   updates: unknown,
 ) => ({ responses, lookups, updates })
 
@@ -84,7 +84,7 @@ describe('tq status webhook source', () => {
         { status: 200, body: { ok: true, outcome: 'ignored' } },
         { status: 401, body: { error: 'invalid signature' } },
       ],
-      lookups: ['alert_task', 'grafana_alert'],
+      lookups: [['alert_task', 'grafana_alert']],
       updates: [],
     })
   })

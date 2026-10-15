@@ -180,23 +180,34 @@ describe('findMessageByMetadata', () => {
               fingerprint: 'fp-match',
               task_number: 9,
               task_id: 'task-example-id',
+              tq_task_status: 'completed',
+              tq_task_status_reason: 'completed',
             },
           },
           attachments: [
             {
               color: '#d73a49',
-              fallback: 'Alert details\n未対応 · tq #9',
+              fallback: 'Alert details\n対応済み · tq #9',
               blocks: [
                 {
                   type: 'header',
                   text: { type: 'plain_text', text: 'Alert details' },
                 },
                 {
+                  type: 'section',
+                  text: { type: 'mrkdwn', text: '*Summary*\nExample details' },
+                },
+                {
+                  type: 'image',
+                  slack_file: { id: 'FEXAMPLE' },
+                  alt_text: 'Example panel',
+                },
+                {
                   type: 'context',
                   elements: [
                     {
                       type: 'mrkdwn',
-                      text: '*状態*\n未対応 · <https://tasks.example.test/tasks/task-example-id|tq #9>',
+                      text: '*状態*\n対応済み · <https://tasks.example.test/tasks/task-example-id|tq #9>',
                     },
                   ],
                 },
@@ -209,8 +220,8 @@ describe('findMessageByMetadata', () => {
     const notifier = createSlackNotifier('token', '#default-channel')
     const result = await notifier
       .findMessageByMetadata(
-        'grafana_alert',
-        (payload) => payload['fingerprint'] === 'fp-match',
+        ['alert_task', 'grafana_alert'],
+        (payload) => payload['task_id'] === 'task-example-id',
       )
       .match(
         (match) => match,
@@ -224,9 +235,11 @@ describe('findMessageByMetadata', () => {
           fingerprint: 'fp-match',
           task_number: 9,
           task_id: 'task-example-id',
+          tq_task_status: 'completed',
+          tq_task_status_reason: 'completed',
         },
         content: {
-          text: 'Alert details\n未対応 · tq #9',
+          text: 'Alert details\n対応済み · tq #9',
           color: '#d73a49',
           blocks: [
             {
@@ -234,11 +247,20 @@ describe('findMessageByMetadata', () => {
               text: { type: 'plain_text', text: 'Alert details' },
             },
             {
+              type: 'section',
+              text: { type: 'mrkdwn', text: '*Summary*\nExample details' },
+            },
+            {
+              type: 'image',
+              slack_file: { id: 'FEXAMPLE' },
+              alt_text: 'Example panel',
+            },
+            {
               type: 'context',
               elements: [
                 {
                   type: 'mrkdwn',
-                  text: '*状態*\n未対応 · <https://tasks.example.test/tasks/task-example-id|tq #9>',
+                  text: '*状態*\n対応済み · <https://tasks.example.test/tasks/task-example-id|tq #9>',
                 },
               ],
             },
@@ -249,6 +271,8 @@ describe('findMessageByMetadata', () => {
               fingerprint: 'fp-match',
               task_number: 9,
               task_id: 'task-example-id',
+              tq_task_status: 'completed',
+              tq_task_status_reason: 'completed',
             },
           },
         },

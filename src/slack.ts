@@ -80,7 +80,7 @@ export interface SlackNotifier {
     content: SlackMessageContent,
   ): ResultAsync<void, SlackApiError>
   findMessageByMetadata(
-    eventType: string,
+    eventType: string | readonly string[],
     payloadMatcher: (payload: Record<string, unknown>) => boolean,
     options?: SlackHistorySearchOptions,
   ): ResultAsync<SlackMessageMatch | null, SlackApiError>
@@ -288,7 +288,7 @@ export const createSlackNotifier = (
 
   const findMessageInHistory = (
     channelId: string,
-    eventType: string,
+    eventType: string | readonly string[],
     payloadMatcher: (payload: Record<string, unknown>) => boolean,
     options: SlackHistorySearchOptions,
     cursor = '',
@@ -310,7 +310,9 @@ export const createSlackNotifier = (
         if (
           message.ts === undefined ||
           metadata === null ||
-          metadata.event_type !== eventType ||
+          (typeof eventType === 'string'
+            ? metadata.event_type !== eventType
+            : !eventType.includes(metadata.event_type)) ||
           !payloadMatcher(metadata.event_payload)
         ) {
           return []
