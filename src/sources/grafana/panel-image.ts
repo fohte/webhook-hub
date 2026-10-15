@@ -94,7 +94,7 @@ const readAnnotationPanelIdentity = (
   return ok({ dashboardUid, panelId })
 }
 
-export const readPanelIdentity = (
+const readPanelIdentity = (
   alert: GrafanaAlert,
 ): Result<GrafanaPanelIdentity, GrafanaPanelImageError> => {
   if (alert.panelURL !== undefined) {
