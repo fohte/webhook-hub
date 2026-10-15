@@ -6,6 +6,7 @@ const ENV = {
   GITHUB_WEBHOOK_SECRET: 'github-secret',
   SENTRY_WEBHOOK_SECRET: 'sentry-secret',
   GRAFANA_WEBHOOK_SECRET: 'grafana-secret',
+  TQ_WEBHOOK_SECRET: 'tq-secret',
   SLACK_BOT_TOKEN: 'xoxb-example-token',
   TQ_API_URL: 'https://tasks.example.test',
   OCTO_STS_URL: 'https://octo.example.test',
@@ -20,6 +21,7 @@ const expectedConfig = (
   githubWebhookSecret: 'github-secret',
   sentryWebhookSecret: 'sentry-secret',
   grafanaWebhookSecret: 'grafana-secret',
+  tqWebhookSecret: 'tq-secret',
   grafanaUrl,
   grafanaApiToken,
   slackBotToken: 'xoxb-example-token',
@@ -56,6 +58,13 @@ describe('loadConfig', () => {
   it('requires GRAFANA_WEBHOOK_SECRET', () => {
     const env = Object.fromEntries(
       Object.entries(ENV).filter(([name]) => name !== 'GRAFANA_WEBHOOK_SECRET'),
+    )
+    expect(loadConfig(env).isErr()).toBe(true)
+  })
+
+  it('requires TQ_WEBHOOK_SECRET', () => {
+    const env = Object.fromEntries(
+      Object.entries(ENV).filter(([name]) => name !== 'TQ_WEBHOOK_SECRET'),
     )
     expect(loadConfig(env).isErr()).toBe(true)
   })

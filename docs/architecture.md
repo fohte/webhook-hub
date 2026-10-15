@@ -31,7 +31,7 @@ sequenceDiagram
 
 Each registered `WebhookSource` (`src/webhook-source.ts`) is mounted at its own path and runs the same pipeline (`src/server.ts`):
 
-1. `extractContext()` pulls source-specific delivery context from the request. Missing required headers return `400`; Grafana assigns a request ID because its webhook has no delivery ID header.
+1. `extractContext()` pulls source-specific delivery context from the request. Missing required headers return `400`; Grafana and tq assign request IDs because their webhooks have no delivery ID header.
 2. `verify()` checks the request's signature against the source's shared secret. Failure returns `401`.
 3. The raw body is parsed as JSON. Parse failure returns `400`.
 4. `dispatch()` runs the source-specific handler for the event.
@@ -51,6 +51,10 @@ Headers: `Request-ID`, `Sentry-Hook-Resource`, `Sentry-Hook-Signature`. The sign
 Header: `X-Grafana-Alerting-Signature`. The signature is an HMAC-SHA256 of the raw body against `GRAFANA_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/grafana/verify.ts`); the optional timestamp header is not configured. Each firing or resolved alert with a non-empty fingerprint and valid `startsAt` is dispatched separately. Slack metadata stores the fingerprint, `startsAt`, and tq task reference. Redeliveries for the same incident update its message and reuse its task; a later incident with the same fingerprint creates a new message and task. History lookup is bounded to five pages within one day of the incident start.
 
 The Slack notification includes alert labels, summary and description annotations, and available panel, dashboard, rule, and runbook links. It uses mrkdwn links for destinations because Slack interactive buttons require a separate request endpoint.
+
+### tq (`POST /tq`)
+
+Header: `X-Tq-Signature-256` in `sha256=<hex>` form. The signature is an HMAC-SHA256 of the raw body against `TQ_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/tq-status/verify.ts`). `task.status_changed` updates the matching CI, Sentry, or Grafana notification by its tq task ID. Events without a matching alert notification are ignored.
 
 ## Notification rules
 

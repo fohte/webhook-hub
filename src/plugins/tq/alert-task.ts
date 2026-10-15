@@ -9,6 +9,37 @@ import type { SlackMessageContent, SlackMessageMetadata } from '#slack'
 const TQ_TASK_CREATION_FAILURE_FINGERPRINT =
   'webhook-hub.tq-task-creation-failed'
 
+export interface TqTaskStatusInfo {
+  task: TqTaskRef
+  status: 'todo' | 'completed'
+  statusReason: 'completed' | 'not_planned' | 'duplicate' | null
+  duplicateOfTask?: Pick<TqTaskRef, 'id' | 'number'>
+}
+
+export const formatTqTaskStatus = (
+  info: TqTaskStatusInfo,
+  tqWebUrl: string,
+): string => {
+  const baseUrl = tqWebUrl.replace(/\/+$/, '')
+  const taskLink = `<${baseUrl}/tasks/${info.task.id}|tq #${String(info.task.number)}>`
+  const state =
+    info.status === 'todo'
+      ? '未対応'
+      : info.statusReason === 'not_planned'
+        ? '対応不要'
+        : info.statusReason === 'duplicate'
+          ? '重複'
+          : '対応済み'
+  const duplicateLink =
+    info.status === 'completed' &&
+    info.statusReason === 'duplicate' &&
+    info.duplicateOfTask !== undefined
+      ? ` → <${baseUrl}/tasks/${info.duplicateOfTask.id}|tq #${String(info.duplicateOfTask.number)}>`
+      : ''
+
+  return `${state} · ${taskLink}${duplicateLink}`
+}
+
 export const createAlertTask = (
   tqClient: TqClient,
   request: CreateTaskRequest,
@@ -28,11 +59,13 @@ export const addTqTaskStatus = (
   tqWebUrl: string,
   metadata?: SlackMessageMetadata,
 ): SlackMessageContent => {
-  const taskLink =
+  const status =
     task === null
-      ? null
-      : `<${tqWebUrl.replace(/\/+$/, '')}/tasks/${task.id}|tq #${String(task.number)}>`
-  const status = `未対応${taskLink === null ? '' : ` · ${taskLink}`}`
+      ? '未対応'
+      : formatTqTaskStatus(
+          { task, status: 'todo', statusReason: null },
+          tqWebUrl,
+        )
   const resolvedMetadata =
     metadata ??
     (task === null

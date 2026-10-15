@@ -62,6 +62,7 @@ export interface SlackMessageRef {
 interface SlackMessageMatch {
   ref: SlackMessageRef
   eventPayload: Record<string, unknown>
+  content?: SlackMessageContent
 }
 
 export interface SlackHistorySearchOptions {
@@ -97,12 +98,49 @@ type SlackAttachment =
   | { color: string; blocks: SlackBlock[]; fallback: string }
 
 type MessagePayload = { metadata?: SlackMessageMetadata } & (
-  | { text: string; attachments?: never }
+  | { text: string; attachments?: never; blocks?: SlackBlock[] }
   | { attachments: SlackAttachment[]; text?: never }
 )
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isTextObject = (value: unknown): boolean =>
+  isRecord(value) &&
+  (value['type'] === 'mrkdwn' || value['type'] === 'plain_text') &&
+  typeof value['text'] === 'string'
+
+const isSlackBlock = (value: unknown): value is SlackBlock => {
+  if (!isRecord(value)) return false
+  switch (value['type']) {
+    case 'header':
+      return (
+        isRecord(value['text']) &&
+        value['text']['type'] === 'plain_text' &&
+        typeof value['text']['text'] === 'string'
+      )
+    case 'section':
+      return (
+        (value['text'] === undefined || isTextObject(value['text'])) &&
+        (value['fields'] === undefined ||
+          (Array.isArray(value['fields']) &&
+            value['fields'].every(isTextObject)))
+      )
+    case 'context':
+      return (
+        Array.isArray(value['elements']) &&
+        value['elements'].every(isTextObject)
+      )
+    case 'image':
+      return (
+        typeof value['alt_text'] === 'string' &&
+        isRecord(value['slack_file']) &&
+        typeof value['slack_file']['id'] === 'string'
+      )
+    default:
+      return false
+  }
+}
 
 const readMessageMetadata = (message: unknown): SlackMessageMetadata | null => {
   if (!isRecord(message)) return null
@@ -123,6 +161,40 @@ const readMessageMetadata = (message: unknown): SlackMessageMetadata | null => {
     normalizedPayload[key] = value
   }
   return { event_type: eventType, event_payload: normalizedPayload }
+}
+
+const readMessageContent = (message: unknown): SlackMessageContent | null => {
+  if (!isRecord(message)) return null
+  const attachment = Array.isArray(message['attachments'])
+    ? message['attachments'].find(isRecord)
+    : undefined
+  const rawBlocks = attachment?.['blocks'] ?? message['blocks']
+  if (rawBlocks !== undefined && !Array.isArray(rawBlocks)) return null
+  const blocks = Array.isArray(rawBlocks)
+    ? rawBlocks.every(isSlackBlock)
+      ? rawBlocks
+      : null
+    : undefined
+  if (blocks === null) return null
+
+  const text =
+    (typeof attachment?.['fallback'] === 'string'
+      ? attachment['fallback']
+      : undefined) ??
+    (typeof attachment?.['text'] === 'string'
+      ? attachment['text']
+      : undefined) ??
+    (typeof message['text'] === 'string' ? message['text'] : undefined)
+  if (text === undefined) return null
+
+  const color = attachment?.['color']
+  const metadata = readMessageMetadata(message)
+  return {
+    text,
+    ...(typeof color === 'string' ? { color } : {}),
+    ...(blocks === undefined ? {} : { blocks }),
+    ...(metadata === null ? {} : { metadata }),
+  }
 }
 
 const wrapSlackApi = <T>(
@@ -159,9 +231,13 @@ export const buildPayload = (content: SlackMessageContent): MessagePayload => {
           ],
         }
       : { text: content.text }
+  const withBlocks =
+    content.color === undefined && content.blocks !== undefined
+      ? { ...base, blocks: content.blocks }
+      : base
   return content.metadata !== undefined
-    ? { ...base, metadata: content.metadata }
-    : base
+    ? { ...withBlocks, metadata: content.metadata }
+    : withBlocks
 }
 
 export const createSlackNotifier = (
@@ -231,17 +307,22 @@ export const createSlackNotifier = (
     ).andThen((res) => {
       const match = res.messages?.flatMap((message) => {
         const metadata = readMessageMetadata(message)
-        return message.ts !== undefined &&
-          metadata !== null &&
-          metadata.event_type === eventType &&
-          payloadMatcher(metadata.event_payload)
-          ? [
-              {
-                ref: { channel: channelId, ts: message.ts },
-                eventPayload: metadata.event_payload,
-              },
-            ]
-          : []
+        if (
+          message.ts === undefined ||
+          metadata === null ||
+          metadata.event_type !== eventType ||
+          !payloadMatcher(metadata.event_payload)
+        ) {
+          return []
+        }
+        const content = readMessageContent(message)
+        return [
+          {
+            ref: { channel: channelId, ts: message.ts },
+            eventPayload: metadata.event_payload,
+            ...(content === null ? {} : { content }),
+          },
+        ]
       })[0]
       if (match !== undefined) return ok(match)
 
