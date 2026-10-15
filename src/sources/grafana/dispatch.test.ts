@@ -121,6 +121,8 @@ const expectedAlertContent = (imageFileId?: string) => ({
       starts_at: INCIDENT_START,
       task_id: '00000000-0000-4000-8000-000000000009',
       task_number: 9,
+      tq_task_status: 'todo',
+      tq_task_status_reason: 'none',
       ...(imageFileId === undefined
         ? {}
         : { panel_image_file_id: imageFileId }),
@@ -211,6 +213,8 @@ describe('dispatch', () => {
                 starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
               },
             },
           },
@@ -354,6 +358,8 @@ describe('dispatch', () => {
           starts_at: INCIDENT_START,
           task_id: TQ_TASK_REF.id,
           task_number: TQ_TASK_REF.number,
+          tq_task_status: 'completed',
+          tq_task_status_reason: 'completed',
         },
       }),
     )
@@ -393,7 +399,7 @@ describe('dispatch', () => {
         [
           { channel: 'C9', ts: 'existing-ts' },
           {
-            text: '✅ Queue depth (解決)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+            text: '✅ Queue depth (解決)\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
             color: '#2da44e',
             blocks: [
               {
@@ -413,7 +419,7 @@ describe('dispatch', () => {
                 elements: [
                   {
                     type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+                    text: '*状態*\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
                   },
                 ],
               },
@@ -425,6 +431,8 @@ describe('dispatch', () => {
                 starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
+                tq_task_status: 'completed',
+                tq_task_status_reason: 'completed',
               },
             },
           },
@@ -655,6 +663,8 @@ describe('dispatch', () => {
                 starts_at: nextIncidentStart,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
               },
             },
           },
@@ -718,6 +728,8 @@ describe('dispatch', () => {
           starts_at: INCIDENT_START,
           task_id: '00000000-0000-4000-8000-000000000009',
           task_number: 9,
+          tq_task_status: 'todo',
+          tq_task_status_reason: 'none',
         },
       },
     }
@@ -836,6 +848,8 @@ describe('dispatch', () => {
                 starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
               },
             },
           },
@@ -870,6 +884,8 @@ describe('dispatch', () => {
                 starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
               },
             },
           },
@@ -1059,6 +1075,8 @@ describe('dispatch', () => {
                 starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
               },
             },
           },
@@ -1093,6 +1111,8 @@ describe('dispatch', () => {
                 starts_at: INCIDENT_START,
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
               },
             },
           },

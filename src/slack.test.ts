@@ -176,16 +176,52 @@ describe('findMessageByMetadata', () => {
           ts: 'message-ts',
           metadata: {
             event_type: 'grafana_alert',
-            event_payload: { fingerprint: 'fp-match', task_number: 9 },
+            event_payload: {
+              fingerprint: 'fp-match',
+              task_number: 9,
+              task_id: 'task-example-id',
+              tq_task_status: 'completed',
+              tq_task_status_reason: 'completed',
+            },
           },
+          attachments: [
+            {
+              color: '#d73a49',
+              fallback: 'Alert details\n対応済み · tq #9',
+              blocks: [
+                {
+                  type: 'header',
+                  text: { type: 'plain_text', text: 'Alert details' },
+                },
+                {
+                  type: 'section',
+                  text: { type: 'mrkdwn', text: '*Summary*\nExample details' },
+                },
+                {
+                  type: 'image',
+                  slack_file: { id: 'FEXAMPLE' },
+                  alt_text: 'Example panel',
+                },
+                {
+                  type: 'context',
+                  elements: [
+                    {
+                      type: 'mrkdwn',
+                      text: '*状態*\n対応済み · <https://tasks.example.test/tasks/task-example-id|tq #9>',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
         },
       ],
     })
     const notifier = createSlackNotifier('token', '#default-channel')
     const result = await notifier
       .findMessageByMetadata(
-        'grafana_alert',
-        (payload) => payload['fingerprint'] === 'fp-match',
+        ['alert_task', 'grafana_alert'],
+        (payload) => payload['task_id'] === 'task-example-id',
       )
       .match(
         (match) => match,
@@ -195,7 +231,51 @@ describe('findMessageByMetadata', () => {
     expect(observe(result, conversationsHistory.mock.calls)).toEqual({
       result: {
         ref: { channel: 'CDEFAULT', ts: 'message-ts' },
-        eventPayload: { fingerprint: 'fp-match', task_number: 9 },
+        eventPayload: {
+          fingerprint: 'fp-match',
+          task_number: 9,
+          task_id: 'task-example-id',
+          tq_task_status: 'completed',
+          tq_task_status_reason: 'completed',
+        },
+        content: {
+          text: 'Alert details\n対応済み · tq #9',
+          color: '#d73a49',
+          blocks: [
+            {
+              type: 'header',
+              text: { type: 'plain_text', text: 'Alert details' },
+            },
+            {
+              type: 'section',
+              text: { type: 'mrkdwn', text: '*Summary*\nExample details' },
+            },
+            {
+              type: 'image',
+              slack_file: { id: 'FEXAMPLE' },
+              alt_text: 'Example panel',
+            },
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: '*状態*\n対応済み · <https://tasks.example.test/tasks/task-example-id|tq #9>',
+                },
+              ],
+            },
+          ],
+          metadata: {
+            event_type: 'grafana_alert',
+            event_payload: {
+              fingerprint: 'fp-match',
+              task_number: 9,
+              task_id: 'task-example-id',
+              tq_task_status: 'completed',
+              tq_task_status_reason: 'completed',
+            },
+          },
+        },
       },
       calls: [
         [
@@ -323,6 +403,15 @@ describe('buildPayload', () => {
   it('returns a plain text payload when no color is set', () => {
     const content: SlackMessageContent = { text: 'hello' }
     expect(buildPayload(content)).toEqual({ text: 'hello' })
+  })
+
+  it('keeps blocks on an uncoloured message', () => {
+    const blocks: SlackBlock[] = [
+      { type: 'header', text: { type: 'plain_text', text: 'title' } },
+    ]
+    const content: SlackMessageContent = { text: 'fallback', blocks }
+
+    expect(buildPayload(content)).toEqual({ text: 'fallback', blocks })
   })
 
   it('wraps text in a coloured attachment when color is set', () => {

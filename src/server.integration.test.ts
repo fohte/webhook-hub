@@ -133,7 +133,11 @@ const githubWorkflowRunFailureContent = {
   ],
   metadata: {
     event_type: 'alert_task',
-    event_payload: { task_id: '00000000-0000-4000-8000-000000000001' },
+    event_payload: {
+      task_id: '00000000-0000-4000-8000-000000000001',
+      tq_task_status: 'todo',
+      tq_task_status_reason: 'none',
+    },
   },
   username: 'GitHub CI',
   iconUrl: 'https://avatars.githubusercontent.com/in/15368',
@@ -194,7 +198,11 @@ const sentryIssueAlertTriggeredContent = {
   ],
   metadata: {
     event_type: 'alert_task',
-    event_payload: { task_id: '00000000-0000-4000-8000-000000000001' },
+    event_payload: {
+      task_id: '00000000-0000-4000-8000-000000000001',
+      tq_task_status: 'todo',
+      tq_task_status_reason: 'none',
+    },
   },
 }
 

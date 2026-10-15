@@ -8,7 +8,11 @@ import {
 } from 'neverthrow'
 
 import { logger } from '#logger'
-import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
+import {
+  addTqTaskStatus,
+  createAlertTask,
+  readTqTaskStatusState,
+} from '#plugins/tq/alert-task'
 import { type TqClient, type TqTaskRef } from '#plugins/tq/tq-client'
 import type {
   SlackHistorySearchOptions,
@@ -225,6 +229,9 @@ const dispatchAlert = (
           task,
           ctx.tqWebUrl,
           buildMetadata(alert, task),
+          readTqTaskStatusState(
+            existing === null ? undefined : existing.eventPayload,
+          ),
         )
         return addPanelImage(ctx, alert, content, panelImageFileId).andThen(
           (notificationContent) => {

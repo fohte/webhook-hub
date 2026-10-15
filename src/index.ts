@@ -22,6 +22,7 @@ import { createGithubSource } from '#sources/github/index'
 import { createGrafanaSource } from '#sources/grafana/index'
 import { createGrafanaPanelImageRenderer } from '#sources/grafana/panel-image'
 import { createSentrySource } from '#sources/sentry/index'
+import { createTqStatusSource } from '#sources/tq-status/index'
 
 const main = (): void => {
   const configResult = loadConfig()
@@ -65,6 +66,7 @@ const main = (): void => {
         config.tqWebUrl,
         panelImageRenderer,
       ),
+      createTqStatusSource(config.tqWebhookSecret, config.tqWebUrl),
     ],
     notifier,
   })
