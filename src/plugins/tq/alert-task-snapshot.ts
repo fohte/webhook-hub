@@ -11,7 +11,7 @@ import {
 
 export const TQ_ORIGINAL_CONTENT_KEY = 'tq_original_content_v1'
 // The metadata limit is unpublished, so this is a conservative local cap.
-export const MAX_SLACK_METADATA_BYTES = 4_000
+const MAX_SLACK_METADATA_BYTES = 4_000
 
 export interface TqOriginalContent {
   text: string
