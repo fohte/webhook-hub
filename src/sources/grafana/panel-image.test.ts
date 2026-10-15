@@ -77,7 +77,13 @@ describe('createGrafanaPanelImageRenderer', () => {
     },
   )
 
-  it('uses annotations when panelURL is absent', async () => {
+  it.each([
+    { urlState: 'absent', panelURL: undefined },
+    {
+      urlState: 'missing a viewPanel ID',
+      panelURL: 'https://grafana.example.test/d/url-board?orgId=9',
+    },
+  ])('uses annotations when panelURL is $urlState', async ({ panelURL }) => {
     const imageData = Buffer.from([80, 78, 71])
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(imageData, {
@@ -89,14 +95,16 @@ describe('createGrafanaPanelImageRenderer', () => {
       'service-token',
       'https://grafana.example.test',
     )
-    const result = await renderer.render(ALERT).match(
-      (image) => ({
-        kind: 'image',
-        panelId: image.panelId,
-        bytes: [...image.buffer],
-      }),
-      (error) => ({ kind: 'error', message: error.message }),
-    )
+    const result = await renderer
+      .render({ ...ALERT, ...(panelURL === undefined ? {} : { panelURL }) })
+      .match(
+        (image) => ({
+          kind: 'image',
+          panelId: image.panelId,
+          bytes: [...image.buffer],
+        }),
+        (error) => ({ kind: 'error', message: error.message }),
+      )
 
     expect(
       observeRender(

@@ -5,6 +5,7 @@ import type { GrafanaAlert } from '#sources/grafana/handlers/alert'
 const IMAGE_WIDTH = 1200
 const IMAGE_HEIGHT = 600
 const REQUEST_TIMEOUT_MS = 15_000
+const PANEL_ID_PATTERN = /^\d+$/
 
 const buildRenderUrl = Result.fromThrowable(
   (baseUrl: string, dashboardUid: string, panelId: string): URL => {
@@ -55,7 +56,7 @@ const readPanelUrlIdentity = Result.fromThrowable(
       encodedDashboardUid === undefined ||
       encodedDashboardUid === '' ||
       panelId === null ||
-      !/^\d+$/.test(panelId)
+      !PANEL_ID_PATTERN.test(panelId)
     ) {
       return undefined
     }
@@ -67,16 +68,22 @@ const readPanelUrlIdentity = Result.fromThrowable(
     new GrafanaPanelImageError('failed to parse Grafana panel URL', caughtErr),
 )
 
+const readAnnotationPanelId = (alert: GrafanaAlert): string | undefined => {
+  const panelId = alert.annotations['__panelId__']
+  return panelId !== undefined && PANEL_ID_PATTERN.test(panelId)
+    ? panelId
+    : undefined
+}
+
 const readAnnotationPanelIdentity = (
   alert: GrafanaAlert,
 ): Result<GrafanaPanelIdentity, GrafanaPanelImageError> => {
   const dashboardUid = alert.annotations['__dashboardUid__']
-  const panelId = alert.annotations['__panelId__']
+  const panelId = readAnnotationPanelId(alert)
   if (
     dashboardUid === undefined ||
     dashboardUid === '' ||
-    panelId === undefined ||
-    !/^\d+$/.test(panelId)
+    panelId === undefined
   ) {
     return err(
       new GrafanaPanelImageError(
@@ -103,12 +110,7 @@ export const readPanelIdentity = (
 export const readPanelId = (alert: GrafanaAlert): string | undefined =>
   readPanelIdentity(alert).match(
     ({ panelId }) => panelId,
-    () => {
-      const panelId = alert.annotations['__panelId__']
-      return panelId !== undefined && /^\d+$/.test(panelId)
-        ? panelId
-        : undefined
-    },
+    () => readAnnotationPanelId(alert),
   )
 
 export const createGrafanaPanelImageRenderer = (
