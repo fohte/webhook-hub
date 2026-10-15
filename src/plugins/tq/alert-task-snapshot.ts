@@ -10,8 +10,7 @@ import {
 } from '#slack'
 
 export const TQ_ORIGINAL_CONTENT_KEY = 'tq_original_content_v1'
-// Slack does not publish a metadata-specific byte limit, so this applies its
-// 4 KB message guidance conservatively.
+// The metadata limit is unpublished, so this is a conservative local cap.
 export const MAX_SLACK_METADATA_BYTES = 4_000
 
 export interface TqOriginalContent {

@@ -453,8 +453,11 @@ describe('dispatch', () => {
               },
               {
                 type: 'context',
+                elements: [{ type: 'mrkdwn', text: 'Queue depth' }],
+              },
+              {
+                type: 'context',
                 elements: [
-                  { type: 'mrkdwn', text: 'Queue depth' },
                   {
                     type: 'mrkdwn',
                     text: '対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9> · Grafana 上: resolved',

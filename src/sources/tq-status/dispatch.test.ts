@@ -153,8 +153,11 @@ describe('dispatchTqTaskStatusChanged', () => {
                 },
                 {
                   type: 'context',
+                  elements: [{ type: 'mrkdwn', text: 'Alert details' }],
+                },
+                {
+                  type: 'context',
                   elements: [
-                    { type: 'mrkdwn', text: 'Alert details' },
                     {
                       type: 'mrkdwn',
                       text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
@@ -200,8 +203,11 @@ describe('dispatchTqTaskStatusChanged', () => {
                 },
                 {
                   type: 'context',
+                  elements: [{ type: 'mrkdwn', text: 'Alert details' }],
+                },
+                {
+                  type: 'context',
                   elements: [
-                    { type: 'mrkdwn', text: 'Alert details' },
                     {
                       type: 'mrkdwn',
                       text: `対応不要 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
@@ -255,8 +261,11 @@ describe('dispatchTqTaskStatusChanged', () => {
                 },
                 {
                   type: 'context',
+                  elements: [{ type: 'mrkdwn', text: 'Alert details' }],
+                },
+                {
+                  type: 'context',
                   elements: [
-                    { type: 'mrkdwn', text: 'Alert details' },
                     {
                       type: 'mrkdwn',
                       text: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #${String(DUPLICATE_TASK_NUMBER)} Example task> で対応`,
@@ -361,8 +370,11 @@ describe('dispatchTqTaskStatusChanged', () => {
               },
               {
                 type: 'context',
+                elements: [{ type: 'mrkdwn', text: 'Alert details' }],
+              },
+              {
+                type: 'context',
                 elements: [
-                  { type: 'mrkdwn', text: 'Alert details' },
                   {
                     type: 'mrkdwn',
                     text: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #202 Example task> で対応`,
@@ -437,8 +449,11 @@ describe('dispatchTqTaskStatusChanged', () => {
               },
               {
                 type: 'context',
+                elements: [{ type: 'mrkdwn', text: 'Alert details' }],
+              },
+              {
+                type: 'context',
                 elements: [
-                  { type: 'mrkdwn', text: 'Alert details' },
                   {
                     type: 'mrkdwn',
                     text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,

@@ -170,6 +170,11 @@ describe('updateTqTaskStatus', () => {
               type: 'mrkdwn',
               text: 'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
             },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
             {
               type: 'mrkdwn',
               text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
@@ -231,6 +236,11 @@ describe('updateTqTaskStatus', () => {
           type: 'context',
           elements: [
             { type: 'mrkdwn', text: 'example/service · 起点の PR なし' },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
             {
               type: 'mrkdwn',
               text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
@@ -290,6 +300,11 @@ describe('updateTqTaskStatus', () => {
           type: 'context',
           elements: [
             { type: 'mrkdwn', text: '[# (Queue) *critical* _state_ `value`' },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
             {
               type: 'mrkdwn',
               text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
@@ -367,6 +382,11 @@ describe('updateTqTaskStatus', () => {
               type: 'mrkdwn',
               text: 'api · <https://sentry.example.test/issue/7|View issue>',
             },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
             {
               type: 'mrkdwn',
               text: `対応不要 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
@@ -412,6 +432,11 @@ describe('updateTqTaskStatus', () => {
               type: 'mrkdwn',
               text: 'api · <https://sentry.example.test/issue/7|View issue>',
             },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
             {
               type: 'mrkdwn',
               text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
@@ -474,6 +499,11 @@ describe('updateTqTaskStatus', () => {
                 type: 'mrkdwn',
                 text: 'Severity: critical · instance: service-a',
               },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
               {
                 type: 'mrkdwn',
                 text: `${state} · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
@@ -532,6 +562,11 @@ describe('updateTqTaskStatus', () => {
                 type: 'mrkdwn',
                 text: 'Severity: critical · instance: worker-3',
               },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
               {
                 type: 'mrkdwn',
                 text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
@@ -655,6 +690,11 @@ describe('updateTqTaskStatus', () => {
               type: 'mrkdwn',
               text: 'Severity: critical · instance: service-a',
             },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
             {
               type: 'mrkdwn',
               text: `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> → <${TQ_WEB_URL}/tasks/task-target|tq #202 Existing alert> で対応 · Grafana 上: firing`,
@@ -884,6 +924,11 @@ describe('updateTqTaskStatus', () => {
                 type: 'mrkdwn',
                 text: 'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
               },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
               {
                 type: 'mrkdwn',
                 text: `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
@@ -1000,6 +1045,11 @@ describe('updateTqTaskStatus', () => {
               type: 'mrkdwn',
               text: 'api · <https://sentry.example.test/issue/7|View issue>',
             },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
             {
               type: 'mrkdwn',
               text: `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,

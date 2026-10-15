@@ -133,10 +133,11 @@ export const compactAppearance = (
       { type: 'section', text: { type: 'mrkdwn', text: heading } },
       {
         type: 'context',
-        elements: [
-          { type: 'mrkdwn', text: context },
-          { type: 'mrkdwn', text: status },
-        ],
+        elements: [{ type: 'mrkdwn', text: context }],
+      },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: status }],
       },
     ],
   }
@@ -192,11 +193,11 @@ export const updateCompactedAppearance = (
     ) {
       return { ...block, text: { ...block.text, text: heading } }
     }
-    if (index === 1 && block.type === 'context') {
+    if (index === 2 && block.type === 'context') {
       return {
         ...block,
         elements: block.elements.map((element, elementIndex) =>
-          element.type === 'mrkdwn' && elementIndex === 1
+          element.type === 'mrkdwn' && elementIndex === 0
             ? { ...element, text: status }
             : element,
         ),
