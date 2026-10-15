@@ -145,9 +145,23 @@ const normalizeUpdates = (...contents: SlackMessageContent[]) =>
   contents.map(normalizeTqOriginalContentSnapshot)
 
 describe('compactAppearance', () => {
-  it('strips a leading Slack emoji shortcode from the heading', () => {
-    const header = ':satellite: Signal unavailable'
-
+  it.each([
+    {
+      name: 'strips a leading Slack emoji shortcode',
+      header: ':satellite: Signal unavailable',
+      title: 'Signal unavailable',
+    },
+    {
+      name: 'strips a leading Unicode emoji',
+      header: '🚨 Signal unavailable',
+      title: 'Signal unavailable',
+    },
+    {
+      name: 'keeps a leading non-emoji label',
+      header: '[prod] Signal unavailable',
+      title: '[prod] Signal unavailable',
+    },
+  ])('$name', ({ header, title }) => {
     expect(
       compactAppearance(
         {
@@ -160,50 +174,16 @@ describe('compactAppearance', () => {
         completedInfo,
       ),
     ).toEqual({
-      text: '*✅ ~Signal unavailable~*\nSignal unavailable\n対応済み',
+      text: `*✅ ~${title}~*\n${title}\n対応済み`,
       color: '#2da44e',
       blocks: [
         {
           type: 'section',
-          text: { type: 'mrkdwn', text: '*✅ ~Signal unavailable~*' },
+          text: { type: 'mrkdwn', text: `*✅ ~${title}~*` },
         },
         {
           type: 'context',
-          elements: [{ type: 'mrkdwn', text: 'Signal unavailable' }],
-        },
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: '対応済み' }],
-        },
-      ],
-    })
-  })
-
-  it('keeps a leading non-emoji label in the heading', () => {
-    const header = '[prod] Signal unavailable'
-
-    expect(
-      compactAppearance(
-        {
-          text: header,
-          blocks: [
-            { type: 'header', text: { type: 'plain_text', text: header } },
-          ],
-        },
-        '対応済み',
-        completedInfo,
-      ),
-    ).toEqual({
-      text: '*✅ ~[prod] Signal unavailable~*\n[prod] Signal unavailable\n対応済み',
-      color: '#2da44e',
-      blocks: [
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*✅ ~[prod] Signal unavailable~*' },
-        },
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: '[prod] Signal unavailable' }],
+          elements: [{ type: 'mrkdwn', text: title }],
         },
         {
           type: 'context',
