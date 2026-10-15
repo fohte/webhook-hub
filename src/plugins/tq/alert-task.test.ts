@@ -8,6 +8,7 @@ import {
   type TqTaskStatusInfo,
   updateTqTaskStatus,
 } from '#plugins/tq/alert-task'
+import { compactAppearance } from '#plugins/tq/alert-task-appearance'
 import {
   expectedTqOriginalContentSnapshot,
   normalizeTqOriginalContentSnapshot,
@@ -142,6 +143,56 @@ const completedInfo: TqTaskStatusInfo = {
 
 const normalizeUpdates = (...contents: SlackMessageContent[]) =>
   contents.map(normalizeTqOriginalContentSnapshot)
+
+describe('compactAppearance', () => {
+  it.each([
+    {
+      name: 'strips a leading Slack emoji shortcode',
+      header: ':satellite: Signal unavailable',
+      title: 'Signal unavailable',
+    },
+    {
+      name: 'strips a leading Unicode emoji',
+      header: '🚨 Signal unavailable',
+      title: 'Signal unavailable',
+    },
+    {
+      name: 'keeps a leading non-emoji label',
+      header: '[prod] Signal unavailable',
+      title: '[prod] Signal unavailable',
+    },
+  ])('$name', ({ header, title }) => {
+    expect(
+      compactAppearance(
+        {
+          text: header,
+          blocks: [
+            { type: 'header', text: { type: 'plain_text', text: header } },
+          ],
+        },
+        '対応済み',
+        completedInfo,
+      ),
+    ).toEqual({
+      text: `*✅ ~${title}~*\n${title}\n対応済み`,
+      color: '#2da44e',
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `*✅ ~${title}~*` },
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: title }],
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '対応済み' }],
+        },
+      ],
+    })
+  })
+})
 
 describe('updateTqTaskStatus', () => {
   it('compacts a completed CI alert and changes its color', () => {
