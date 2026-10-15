@@ -1,20 +1,24 @@
-import { gunzipSync, gzipSync } from 'node:zlib'
-
 import { captureWithFingerprint } from '@fohte/service-kit/observability'
-import { err, ok, okAsync, Result, type ResultAsync } from 'neverthrow'
+import { okAsync, type ResultAsync } from 'neverthrow'
 
 import { logger } from '#logger'
+import {
+  decodeOriginalContent,
+  encodeOriginalContent,
+  TQ_ORIGINAL_CONTENT_KEY,
+  type TqOriginalContent,
+} from '#plugins/tq/alert-task-snapshot'
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import {
-  isRecord,
-  isSlackBlock,
   type SlackBlock,
   type SlackMessageContent,
   type SlackMessageMetadata,
 } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
+
+export { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
 
 const TQ_TASK_CREATION_FAILURE_FINGERPRINT =
   'webhook-hub.tq-task-creation-failed'
@@ -29,15 +33,8 @@ export interface TqTaskStatusInfo {
 export type TqTaskStatusState = Omit<TqTaskStatusInfo, 'task'>
 
 const TQ_STATUS_PREFIX = '*状態*\n'
-export const TQ_ORIGINAL_CONTENT_KEY = 'tq_original_content_v1'
 const COMPLETED_COLOR = '#2da44e'
 const DISMISSED_COLOR = '#8b949e'
-
-interface TqOriginalContent {
-  text: string
-  color?: string
-  blocks?: SlackBlock[]
-}
 
 const isTqStatusLine = (line: string): boolean =>
   /^(未対応|対応済み|対応不要|重複)(?:\s|$)/.test(line)
@@ -80,61 +77,6 @@ const stripTqStatus = (content: SlackMessageContent): TqOriginalContent => ({
     ? {}
     : { blocks: content.blocks.filter((block) => !hasTqStatusBlock(block)) }),
 })
-
-const encodeOriginalContent = (content: TqOriginalContent): string =>
-  gzipSync(
-    Buffer.from(
-      JSON.stringify({
-        text: content.text,
-        color: content.color ?? null,
-        blocks: content.blocks ?? null,
-      }),
-    ),
-  ).toString('base64')
-
-const decodeOriginalContent = (value: unknown): TqOriginalContent | null => {
-  if (typeof value !== 'string') return null
-
-  const parsed = Result.fromThrowable(
-    (): unknown =>
-      JSON.parse(
-        gunzipSync(Buffer.from(value, 'base64')).toString('utf8'),
-      ) as unknown,
-    (cause) => cause,
-  )()
-
-  return parsed
-    .andThen((candidate) => {
-      if (
-        !isRecord(candidate) ||
-        typeof candidate['text'] !== 'string' ||
-        (candidate['color'] !== undefined &&
-          candidate['color'] !== null &&
-          typeof candidate['color'] !== 'string') ||
-        (candidate['blocks'] !== undefined &&
-          candidate['blocks'] !== null &&
-          (!Array.isArray(candidate['blocks']) ||
-            !candidate['blocks'].every(isSlackBlock)))
-      ) {
-        return err('invalid original Slack content')
-      }
-
-      const blocks = candidate['blocks']
-      return ok({
-        text: candidate['text'],
-        ...(typeof candidate['color'] === 'string'
-          ? { color: candidate['color'] }
-          : {}),
-        ...(Array.isArray(blocks)
-          ? { blocks: blocks.filter(isSlackBlock) }
-          : {}),
-      })
-    })
-    .match(
-      (content) => content,
-      () => null,
-    )
-}
 
 const parseField = (text: string): [string, string] | null => {
   const newline = text.indexOf('\n')
