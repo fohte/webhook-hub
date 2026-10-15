@@ -99,16 +99,34 @@ const eventFor = (task: Record<string, unknown>) => ({
 const observeDispatch = (
   result: string,
   lookups: unknown[],
-  updates: unknown,
-) => ({ result, lookups, updates })
+  updates: [SlackMessageRef, SlackMessageContent][],
+) => ({
+  result,
+  lookups,
+  updates: updates.map(([ref, content]) => {
+    const metadata = content.metadata
+    if (metadata === undefined) return [ref, content]
+    const snapshot = metadata.event_payload['tq_original_content_v1']
+    return [
+      ref,
+      typeof snapshot !== 'string'
+        ? content
+        : {
+            ...content,
+            metadata: {
+              ...metadata,
+              event_payload: {
+                ...metadata.event_payload,
+                tq_original_content_v1: '<compressed original content>',
+              },
+            },
+          },
+    ]
+  }),
+})
 
 describe('dispatchTqTaskStatusChanged', () => {
   it.each([
-    {
-      name: 'todo',
-      task: { status: 'todo', statusReason: null },
-      status: `未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-    },
     {
       name: 'completed',
       task: { status: 'completed', statusReason: 'completed' },
@@ -130,7 +148,7 @@ describe('dispatchTqTaskStatusChanged', () => {
           title: 'Example task',
         },
       },
-      status: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #${String(DUPLICATE_TASK_NUMBER)}>`,
+      status: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #${String(DUPLICATE_TASK_NUMBER)} Example task>`,
     },
   ])('updates the status display for $name', async ({ task, status }) => {
     const { notifier, findMessageByMetadata, updateMessage } = createNotifier()
@@ -157,28 +175,39 @@ describe('dispatchTqTaskStatusChanged', () => {
         [
           REF,
           {
-            ...originalContent,
-            text: `Alert details\n${status}`,
+            text: [
+              task.statusReason === 'not_planned'
+                ? '*⏭️ ~Alert details~*'
+                : task.statusReason === 'duplicate'
+                  ? '*🔁 ~Alert details~*'
+                  : '*✅ ~Alert details~*',
+              'Alert details',
+              status,
+            ].join('\n'),
+            color:
+              task.statusReason === 'not_planned' ||
+              task.statusReason === 'duplicate'
+                ? '#8b949e'
+                : '#2da44e',
             blocks: [
               {
-                type: 'header',
-                text: { type: 'plain_text', text: 'Alert details' },
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text:
+                    task.statusReason === 'not_planned'
+                      ? '*⏭️ ~Alert details~*'
+                      : task.statusReason === 'duplicate'
+                        ? '*🔁 ~Alert details~*'
+                        : '*✅ ~Alert details~*',
+                },
               },
               {
                 type: 'section',
                 text: {
                   type: 'mrkdwn',
-                  text: '*Summary*\nExample alert details',
+                  text: `Alert details\n${status}`,
                 },
-              },
-              {
-                type: 'image',
-                slack_file: { id: 'FEXAMPLE' },
-                alt_text: 'Example panel',
-              },
-              {
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: `*状態*\n${status}` }],
               },
             ],
             metadata: {
@@ -186,13 +215,15 @@ describe('dispatchTqTaskStatusChanged', () => {
               event_payload: {
                 task_id: TASK_ID,
                 tq_task_status: task.status,
-                tq_task_status_reason: task.statusReason ?? 'none',
+                tq_task_status_reason: task.statusReason,
                 ...(task.duplicateOfTask === undefined
                   ? {}
                   : {
                       tq_duplicate_task_id: task.duplicateOfTask.id,
                       tq_duplicate_task_number: task.duplicateOfTask.number,
+                      tq_duplicate_task_title: task.duplicateOfTask.title,
                     }),
+                tq_original_content_v1: '<compressed original content>',
               },
             },
           },
@@ -240,32 +271,19 @@ describe('dispatchTqTaskStatusChanged', () => {
           REF,
           {
             ...grafanaMessage.content,
-            text: `Alert details\n対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
+            text: `*✅ ~Alert details~*\nAlert details\n対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
+            color: '#2da44e',
             blocks: [
               {
-                type: 'header',
-                text: { type: 'plain_text', text: 'Alert details' },
+                type: 'section',
+                text: { type: 'mrkdwn', text: '*✅ ~Alert details~*' },
               },
               {
                 type: 'section',
                 text: {
                   type: 'mrkdwn',
-                  text: '*Summary*\nExample alert details',
+                  text: `Alert details\n対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
                 },
-              },
-              {
-                type: 'image',
-                slack_file: { id: 'FEXAMPLE' },
-                alt_text: 'Example panel',
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*状態*\n対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-                  },
-                ],
               },
             ],
             metadata: {
@@ -277,6 +295,7 @@ describe('dispatchTqTaskStatusChanged', () => {
                 task_number: TASK_NUMBER,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
+                tq_original_content_v1: '<compressed original content>',
               },
             },
           },
@@ -361,11 +380,6 @@ describe('dispatchTqTaskStatusChanged', () => {
                 },
               },
               {
-                type: 'image',
-                slack_file: { id: 'FEXAMPLE' },
-                alt_text: 'Example panel',
-              },
-              {
                 type: 'context',
                 elements: [
                   {
@@ -373,6 +387,11 @@ describe('dispatchTqTaskStatusChanged', () => {
                     text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
                   },
                 ],
+              },
+              {
+                type: 'image',
+                slack_file: { id: 'FEXAMPLE' },
+                alt_text: 'Example panel',
               },
             ],
             metadata: {

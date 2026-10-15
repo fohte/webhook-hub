@@ -110,7 +110,7 @@ const isTextObject = (value: unknown): boolean =>
   (value['type'] === 'mrkdwn' || value['type'] === 'plain_text') &&
   typeof value['text'] === 'string'
 
-const isSlackBlock = (value: unknown): value is SlackBlock => {
+export const isSlackBlock = (value: unknown): value is SlackBlock => {
   if (!isRecord(value)) return false
   switch (value['type']) {
     case 'header':

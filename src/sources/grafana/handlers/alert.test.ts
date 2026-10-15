@@ -36,7 +36,7 @@ describe('buildGrafanaAlertNotification', () => {
           {
             type: 'section',
             fields: [
-              { type: 'mrkdwn', text: '*状態*\n発生中' },
+              { type: 'mrkdwn', text: '*Grafana 上*\nfiring' },
               { type: 'mrkdwn', text: '*Severity*\ncritical' },
               { type: 'mrkdwn', text: '*instance*\nnode-a' },
             ],
@@ -117,7 +117,7 @@ describe('buildGrafanaAlertNotification', () => {
           },
           {
             type: 'section',
-            fields: [{ type: 'mrkdwn', text: '*状態*\n解決' }],
+            fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nresolved' }],
           },
           {
             type: 'section',

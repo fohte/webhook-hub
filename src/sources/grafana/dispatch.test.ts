@@ -2,7 +2,12 @@ import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
-import { SlackApiError, type SlackNotifier } from '#slack'
+import {
+  SlackApiError,
+  type SlackMessageContent,
+  type SlackMessageRef,
+  type SlackNotifier,
+} from '#slack'
 import type { DispatchContext } from '#sources/grafana/dispatch'
 import { dispatch } from '#sources/grafana/dispatch'
 import { GrafanaPanelImageError } from '#sources/grafana/panel-image'
@@ -77,10 +82,54 @@ const matcherCalls = (
     options,
   ])
 
-const observeDispatch = <TOutcome, TObservations>(
+type DispatchObservations = {
+  postCalls?: [SlackMessageContent][]
+  updateCalls?: [SlackMessageRef, SlackMessageContent][]
+}
+
+const normalizeContent = (
+  content: SlackMessageContent,
+): SlackMessageContent => {
+  const metadata = content.metadata
+  if (metadata === undefined) return content
+  const snapshot = metadata.event_payload['tq_original_content_v1']
+  return typeof snapshot !== 'string'
+    ? content
+    : {
+        ...content,
+        metadata: {
+          ...metadata,
+          event_payload: {
+            ...metadata.event_payload,
+            tq_original_content_v1: '<compressed original content>',
+          },
+        },
+      }
+}
+
+const normalizeCalls = (
+  calls: [SlackMessageContent][],
+): [SlackMessageContent][] =>
+  calls.map(([content]) => [normalizeContent(content)])
+
+const normalizeUpdateCalls = (
+  calls: [SlackMessageRef, SlackMessageContent][],
+): [SlackMessageRef, SlackMessageContent][] =>
+  calls.map(([ref, content]) => [ref, normalizeContent(content)])
+
+const observeDispatch = <TOutcome, TObservations extends DispatchObservations>(
   outcome: TOutcome,
   observations: TObservations,
-) => ({ outcome, ...observations })
+) => ({
+  outcome,
+  ...observations,
+  ...(observations.postCalls === undefined
+    ? {}
+    : { postCalls: normalizeCalls(observations.postCalls) }),
+  ...(observations.updateCalls === undefined
+    ? {}
+    : { updateCalls: normalizeUpdateCalls(observations.updateCalls) }),
+})
 
 const expectedAlertContent = (imageFileId?: string) => ({
   text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
@@ -89,7 +138,7 @@ const expectedAlertContent = (imageFileId?: string) => ({
     { type: 'header', text: { type: 'plain_text', text: '🚨 Queue depth' } },
     {
       type: 'section',
-      fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+      fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
     },
     {
       type: 'section',
@@ -190,7 +239,7 @@ describe('dispatch', () => {
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
               },
               {
                 type: 'section',
@@ -399,29 +448,19 @@ describe('dispatch', () => {
         [
           { channel: 'C9', ts: 'existing-ts' },
           {
-            text: '✅ Queue depth (解決)\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+            text: '*✅ ~Queue depth~*\nGrafana 上: resolved\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
             color: '#2da44e',
             blocks: [
               {
-                type: 'header',
-                text: { type: 'plain_text', text: '✅ Queue depth' },
+                type: 'section',
+                text: { type: 'mrkdwn', text: '*✅ ~Queue depth~*' },
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n解決' }],
-              },
-              {
-                type: 'section',
-                text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                  },
-                ],
+                text: {
+                  type: 'mrkdwn',
+                  text: 'Grafana 上: resolved\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+                },
               },
             ],
             metadata: {
@@ -433,6 +472,7 @@ describe('dispatch', () => {
                 task_number: 9,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
+                tq_original_content_v1: '<compressed original content>',
               },
             },
           },
@@ -640,7 +680,7 @@ describe('dispatch', () => {
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
               },
               {
                 type: 'section',
@@ -705,7 +745,7 @@ describe('dispatch', () => {
         },
         {
           type: 'section',
-          fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+          fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
         },
         {
           type: 'section',
@@ -829,7 +869,7 @@ describe('dispatch', () => {
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
               },
               {
                 type: 'context',
@@ -865,7 +905,7 @@ describe('dispatch', () => {
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
               },
               {
                 type: 'context',
@@ -937,7 +977,7 @@ describe('dispatch', () => {
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
               },
               {
                 type: 'section',
@@ -1056,7 +1096,7 @@ describe('dispatch', () => {
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
               },
               {
                 type: 'context',
@@ -1092,7 +1132,7 @@ describe('dispatch', () => {
               },
               {
                 type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*状態*\n発生中' }],
+                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
               },
               {
                 type: 'context',

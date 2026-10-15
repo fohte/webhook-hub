@@ -40,13 +40,12 @@ const slackLink = (url: string | undefined, label: string): string | null => {
 const renderAlertDetails = (
   alert: GrafanaAlert,
   alertName: string,
-  statusLabel: string,
   statusIcon: string,
 ): SlackBlock[] => {
   const fields = [
     {
       type: 'mrkdwn' as const,
-      text: `*状態*\n${statusLabel}`,
+      text: `*Grafana 上*\n${alert.status}`,
     },
     ...(alert.labels['severity'] === undefined
       ? []
@@ -161,7 +160,7 @@ export const buildGrafanaAlertNotification = (
   const content: SlackMessageContent = {
     text: `${statusIcon} ${alertName} (${statusLabel})`,
     color: ALERT_COLORS[alert.status],
-    blocks: renderAlertDetails(alert, alertName, statusLabel, statusIcon),
+    blocks: renderAlertDetails(alert, alertName, statusIcon),
   }
 
   return {

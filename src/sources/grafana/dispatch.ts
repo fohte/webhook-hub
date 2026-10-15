@@ -224,52 +224,64 @@ const dispatchAlert = (
         const panelImageFileId = readPanelImageFileId(
           existing === null ? undefined : existing.eventPayload,
         )
+        const metadata = buildMetadata(alert, task)
+        const previousStatus = readTqTaskStatusState(
+          existing === null ? undefined : existing.eventPayload,
+        )
         const content = addTqTaskStatus(
-          note.content,
+          { ...note.content, metadata },
           task,
           ctx.tqWebUrl,
-          buildMetadata(alert, task),
-          readTqTaskStatusState(
-            existing === null ? undefined : existing.eventPayload,
-          ),
+          metadata,
+          previousStatus,
         )
-        return addPanelImage(ctx, alert, content, panelImageFileId).andThen(
-          (notificationContent) => {
-            const notify = (messageContent: SlackMessageContent) =>
-              existing === null
-                ? ctx.notifier.postMessage(messageContent).map(() => undefined)
-                : ctx.notifier.updateMessage(existing.ref, messageContent)
+        return addPanelImage(
+          ctx,
+          alert,
+          { ...note.content, metadata },
+          panelImageFileId,
+        ).andThen((contentWithImage) => {
+          const notificationContent = addTqTaskStatus(
+            contentWithImage,
+            task,
+            ctx.tqWebUrl,
+            contentWithImage.metadata ?? metadata,
+            previousStatus,
+          )
+          const notify = (messageContent: SlackMessageContent) =>
+            existing === null
+              ? ctx.notifier.postMessage(messageContent).map(() => undefined)
+              : ctx.notifier.updateMessage(existing.ref, messageContent)
 
-            const notification = notify(notificationContent).orElse((error) => {
-              const attachedFileId = readPanelImageFileId(
-                notificationContent.metadata?.event_payload,
-              )
-              if (attachedFileId === undefined) return errAsync(error)
+          const notification = notify(notificationContent).orElse((error) => {
+            const attachedFileId = readPanelImageFileId(
+              notificationContent.metadata?.event_payload,
+            )
+            if (attachedFileId === undefined) return errAsync(error)
 
-              reportPanelImageFailure(
-                alert,
-                error,
-                existing === null ? 'post' : 'update',
-              )
-              return notify(content)
-            })
+            reportPanelImageFailure(
+              alert,
+              error,
+              existing === null ? 'post' : 'update',
+            )
+            return notify(content)
+          })
 
-            return notification.map((): DispatchOutcome => {
-              logger.info(
-                {
-                  delivery_id: ctx.deliveryId,
-                  event: ctx.eventName,
-                  fingerprint: alert.fingerprint,
-                  starts_at: alert.startsAt,
-                  title: note.alertName,
-                  status: note.status,
-                },
-                'slack_notified',
-              )
-              return 'notified'
-            })
-          },
-        )
+          return notification.map((): DispatchOutcome => {
+            logger.info(
+              {
+                delivery_id: ctx.deliveryId,
+                event: ctx.eventName,
+                fingerprint: alert.fingerprint,
+                starts_at: alert.startsAt,
+                title: note.alertName,
+                status: note.status,
+              },
+              'slack_notified',
+            )
+            return 'notified'
+          })
+        })
       })
     })
 }

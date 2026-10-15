@@ -1,14 +1,18 @@
+import { gunzipSync, gzipSync } from 'node:zlib'
+
 import { captureWithFingerprint } from '@fohte/service-kit/observability'
-import { okAsync, type ResultAsync } from 'neverthrow'
+import { err, ok, okAsync, Result, type ResultAsync } from 'neverthrow'
 
 import { logger } from '#logger'
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
-import type {
-  SlackBlock,
-  SlackMessageContent,
-  SlackMessageMetadata,
+import {
+  isSlackBlock,
+  type SlackBlock,
+  type SlackMessageContent,
+  type SlackMessageMetadata,
 } from '#slack'
+import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 
 const TQ_TASK_CREATION_FAILURE_FINGERPRINT =
   'webhook-hub.tq-task-creation-failed'
@@ -17,12 +21,24 @@ export interface TqTaskStatusInfo {
   task: TqTaskRef
   status: 'todo' | 'completed'
   statusReason: 'completed' | 'not_planned' | 'duplicate' | null
-  duplicateOfTask?: Pick<TqTaskRef, 'id' | 'number'>
+  duplicateOfTask?: Pick<TqTaskRef, 'id' | 'number'> & { title?: string }
 }
 
 export type TqTaskStatusState = Omit<TqTaskStatusInfo, 'task'>
 
 const TQ_STATUS_PREFIX = '*状態*\n'
+const TQ_ORIGINAL_CONTENT_KEY = 'tq_original_content_v1'
+const COMPLETED_COLOR = '#2da44e'
+const DISMISSED_COLOR = '#8b949e'
+
+interface TqOriginalContent {
+  text: string
+  color?: string
+  blocks?: SlackBlock[]
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const isTqStatusLine = (line: string): boolean =>
   /^(未対応|対応済み|対応不要|重複)(?:\s|$)/.test(line)
@@ -48,6 +64,214 @@ const isTqStatusElement = (
 const hasTqStatusBlock = (block: SlackBlock): boolean =>
   block.type === 'context' && block.elements.some(isTqStatusElement)
 
+const removeTqStatusLine = (text: string): string => {
+  const newline = text.lastIndexOf('\n')
+  const finalLine = text.slice(newline + 1)
+  return isTqStatusLine(finalLine)
+    ? newline === -1
+      ? ''
+      : text.slice(0, newline)
+    : text
+}
+
+const stripTqStatus = (content: SlackMessageContent): TqOriginalContent => ({
+  text: removeTqStatusLine(content.text),
+  ...(content.color === undefined ? {} : { color: content.color }),
+  ...(content.blocks === undefined
+    ? {}
+    : { blocks: content.blocks.filter((block) => !hasTqStatusBlock(block)) }),
+})
+
+const encodeOriginalContent = (content: TqOriginalContent): string =>
+  gzipSync(
+    Buffer.from(
+      JSON.stringify({
+        text: content.text,
+        color: content.color ?? null,
+        blocks: content.blocks ?? null,
+      }),
+    ),
+  ).toString('base64')
+
+const decodeOriginalContent = (value: unknown): TqOriginalContent | null => {
+  if (typeof value !== 'string') return null
+
+  const parsed = Result.fromThrowable(
+    (): unknown =>
+      JSON.parse(
+        gunzipSync(Buffer.from(value, 'base64')).toString('utf8'),
+      ) as unknown,
+    (cause) => cause,
+  )()
+
+  return parsed
+    .andThen((candidate) => {
+      if (
+        !isRecord(candidate) ||
+        typeof candidate['text'] !== 'string' ||
+        (candidate['color'] !== undefined &&
+          candidate['color'] !== null &&
+          typeof candidate['color'] !== 'string') ||
+        (candidate['blocks'] !== undefined &&
+          candidate['blocks'] !== null &&
+          (!Array.isArray(candidate['blocks']) ||
+            !candidate['blocks'].every(isSlackBlock)))
+      ) {
+        return err('invalid original Slack content')
+      }
+
+      const blocks = candidate['blocks']
+      return ok({
+        text: candidate['text'],
+        ...(typeof candidate['color'] === 'string'
+          ? { color: candidate['color'] }
+          : {}),
+        ...(Array.isArray(blocks)
+          ? { blocks: blocks.filter(isSlackBlock) }
+          : {}),
+      })
+    })
+    .match(
+      (content) => content,
+      () => null,
+    )
+}
+
+const parseField = (text: string): [string, string] | null => {
+  const newline = text.indexOf('\n')
+  if (newline === -1) return null
+  const label = text.slice(0, newline).replace(/^\*|\*$/g, '')
+  return [label, text.slice(newline + 1)]
+}
+
+const readFields = (blocks: SlackBlock[]): Map<string, string> => {
+  const fields = new Map<string, string>()
+  for (const block of blocks) {
+    if (block.type !== 'section' || block.fields === undefined) continue
+    for (const field of block.fields) {
+      if (field.type !== 'mrkdwn') continue
+      const parsed = parseField(field.text)
+      if (parsed !== null) fields.set(...parsed)
+    }
+  }
+  return fields
+}
+
+const readContext = (blocks: SlackBlock[]): string | null => {
+  const elements = blocks.flatMap((block) =>
+    block.type === 'context'
+      ? block.elements
+          .filter(
+            (element): element is { type: 'mrkdwn'; text: string } =>
+              element.type === 'mrkdwn',
+          )
+          .map((element) => element.text)
+      : [],
+  )
+  return elements.length === 0 ? null : elements.join(' · ')
+}
+
+const readHeader = (content: TqOriginalContent): string => {
+  const header = content.blocks?.find((block) => block.type === 'header')
+  return header?.type === 'header'
+    ? header.text.text
+    : (content.text.split('\n')[0] ?? '')
+}
+
+const stripLeadingIcon = (header: string): string =>
+  header.replace(/^[^\p{L}\p{N}]+\s*/u, '')
+
+const formatPrimaryContext = (content: TqOriginalContent): string => {
+  const blocks = content.blocks ?? []
+  const fields = readFields(blocks)
+  const repository = fields.get('Repository')
+  const origin = fields.get('起点の PR')
+  if (repository !== undefined && origin !== undefined) {
+    return `${repository} · 起点の PR ${origin}`
+  }
+
+  const grafanaStatus = fields.get('Grafana 上')
+  if (grafanaStatus !== undefined) return `Grafana 上: ${grafanaStatus}`
+
+  const app = fields.get('アプリ')
+  const context = readContext(blocks)
+  if (app !== undefined && context !== null) return `${app} · ${context}`
+  if (context !== null) return context
+
+  const firstField = blocks.find(
+    (block) => block.type === 'section' && block.fields !== undefined,
+  )
+  if (
+    firstField?.type === 'section' &&
+    firstField.fields?.[0]?.type === 'mrkdwn'
+  ) {
+    const field = parseField(firstField.fields[0].text)
+    if (field !== null) return `${field[0]}: ${field[1]}`
+  }
+  return stripLeadingIcon(readHeader(content))
+}
+
+const compactAppearance = (
+  content: TqOriginalContent,
+  status: string,
+  info: TqTaskStatusInfo,
+): SlackMessageContent => {
+  const icon =
+    info.statusReason === 'not_planned'
+      ? '⏭️'
+      : info.statusReason === 'duplicate'
+        ? '🔁'
+        : '✅'
+  const title = escapeSlackMrkdwn(
+    stripLeadingIcon(readHeader(content)),
+  ).replace(/~/g, '\\~')
+  const heading = `*${icon} ~${title}~*`
+  const context = formatPrimaryContext(content)
+  const summary = `${context}\n${status}`
+
+  return {
+    text: `${heading}\n${summary}`,
+    color:
+      info.statusReason === 'completed' || info.statusReason === null
+        ? COMPLETED_COLOR
+        : DISMISSED_COLOR,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: heading } },
+      { type: 'section', text: { type: 'mrkdwn', text: summary } },
+    ],
+  }
+}
+
+const addStatusBlock = (blocks: SlackBlock[], status: string): SlackBlock[] => {
+  if (blocks.some(hasTqStatusBlock)) {
+    return blocks.map((block) =>
+      block.type !== 'context'
+        ? block
+        : {
+            ...block,
+            elements: block.elements.map((element) =>
+              isTqStatusElement(element)
+                ? { ...element, text: `${TQ_STATUS_PREFIX}${status}` }
+                : element,
+            ),
+          },
+    )
+  }
+
+  const statusBlock: SlackBlock = {
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: `${TQ_STATUS_PREFIX}${status}` }],
+  }
+  const firstImageIndex = blocks.findIndex((block) => block.type === 'image')
+  return firstImageIndex === -1
+    ? [...blocks, statusBlock]
+    : [
+        ...blocks.slice(0, firstImageIndex),
+        statusBlock,
+        ...blocks.slice(firstImageIndex),
+      ]
+}
+
 export const readTqTaskStatusState = (
   eventPayload: Record<string, unknown> | undefined,
 ): TqTaskStatusState | null => {
@@ -69,11 +293,20 @@ export const readTqTaskStatusState = (
 
   const duplicateId = eventPayload?.['tq_duplicate_task_id']
   const duplicateNumber = eventPayload?.['tq_duplicate_task_number']
+  const duplicateTitle = eventPayload?.['tq_duplicate_task_title']
   return {
     status,
     statusReason,
     ...(typeof duplicateId === 'string' && typeof duplicateNumber === 'number'
-      ? { duplicateOfTask: { id: duplicateId, number: duplicateNumber } }
+      ? {
+          duplicateOfTask: {
+            id: duplicateId,
+            number: duplicateNumber,
+            ...(typeof duplicateTitle === 'string'
+              ? { title: duplicateTitle }
+              : {}),
+          },
+        }
       : {}),
   }
 }
@@ -83,48 +316,50 @@ export const updateTqTaskStatus = (
   status: string,
   info?: TqTaskStatusInfo,
 ): SlackMessageContent => {
-  const originalBlocks = content.blocks ?? []
-  const blocks = originalBlocks.some(hasTqStatusBlock)
-    ? originalBlocks.map((block) => {
-        if (block.type !== 'context') return block
-        return {
-          ...block,
-          elements: block.elements.map((element) =>
-            isTqStatusElement(element)
-              ? { ...element, text: `${TQ_STATUS_PREFIX}${status}` }
-              : element,
-          ),
-        }
-      })
-    : [
-        ...originalBlocks,
-        {
-          type: 'context' as const,
-          elements: [
-            { type: 'mrkdwn' as const, text: `${TQ_STATUS_PREFIX}${status}` },
-          ],
-        },
-      ]
-
   const metadata = content.metadata
+  const originalContent =
+    decodeOriginalContent(metadata?.event_payload[TQ_ORIGINAL_CONTENT_KEY]) ??
+    stripTqStatus(content)
+  const originalSnapshot = encodeOriginalContent(originalContent)
+  const updatedContent =
+    info?.status === 'completed'
+      ? compactAppearance(originalContent, status, info)
+      : {
+          ...originalContent,
+          text: replaceTqStatusLine(originalContent.text, status),
+          blocks: addStatusBlock(originalContent.blocks ?? [], status),
+        }
+
   let updatedMetadata = metadata
   if (metadata !== undefined && info !== undefined) {
-    const eventPayload = { ...metadata.event_payload }
+    const { [TQ_ORIGINAL_CONTENT_KEY]: previousSnapshot, ...eventPayload } =
+      metadata.event_payload
     delete eventPayload['tq_duplicate_task_id']
     delete eventPayload['tq_duplicate_task_number']
+    delete eventPayload['tq_duplicate_task_title']
     eventPayload['tq_task_status'] = info.status
     eventPayload['tq_task_status_reason'] = info.statusReason ?? 'none'
+    if (info.status === 'completed') {
+      eventPayload[TQ_ORIGINAL_CONTENT_KEY] = originalSnapshot
+    } else if (
+      typeof previousSnapshot === 'string' &&
+      decodeOriginalContent(previousSnapshot) !== null
+    ) {
+      eventPayload[TQ_ORIGINAL_CONTENT_KEY] = previousSnapshot
+    }
     if (info.duplicateOfTask !== undefined) {
       eventPayload['tq_duplicate_task_id'] = info.duplicateOfTask.id
       eventPayload['tq_duplicate_task_number'] = info.duplicateOfTask.number
+      if (info.duplicateOfTask.title !== undefined) {
+        eventPayload['tq_duplicate_task_title'] = info.duplicateOfTask.title
+      }
     }
     updatedMetadata = { ...metadata, event_payload: eventPayload }
   }
 
   return {
     ...content,
-    text: replaceTqStatusLine(content.text, status),
-    blocks,
+    ...updatedContent,
     ...(updatedMetadata === undefined ? {} : { metadata: updatedMetadata }),
   }
 }
@@ -143,14 +378,18 @@ export const formatTqTaskStatus = (
         : info.statusReason === 'duplicate'
           ? '重複'
           : '対応済み'
-  const duplicateLink =
-    info.status === 'completed' &&
-    info.statusReason === 'duplicate' &&
-    info.duplicateOfTask !== undefined
-      ? ` → <${baseUrl}/tasks/${info.duplicateOfTask.id}|tq #${String(info.duplicateOfTask.number)}>`
-      : ''
 
-  return `${state} · ${taskLink}${duplicateLink}`
+  if (info.statusReason === 'duplicate') {
+    if (info.duplicateOfTask === undefined) return state
+    const duplicateTitle =
+      info.duplicateOfTask.title === undefined
+        ? ''
+        : ` ${escapeSlackMrkdwn(info.duplicateOfTask.title)}`
+    const duplicateLink = `<${baseUrl}/tasks/${info.duplicateOfTask.id}|tq #${String(info.duplicateOfTask.number)}${duplicateTitle}>`
+    return `${state} · ${taskLink} → ${duplicateLink}`
+  }
+
+  return `${state} · ${taskLink}`
 }
 
 export const createAlertTask = (
