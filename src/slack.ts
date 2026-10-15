@@ -102,7 +102,7 @@ type MessagePayload = { metadata?: SlackMessageMetadata } & (
   | { attachments: SlackAttachment[]; text?: never }
 )
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const isTextObject = (value: unknown): boolean =>

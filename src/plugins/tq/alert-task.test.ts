@@ -3,14 +3,15 @@ import { describe, expect, it } from 'vitest'
 import {
   formatTqTaskStatus,
   readTqTaskStatusState,
+  TQ_ORIGINAL_CONTENT_KEY,
   type TqTaskStatusInfo,
   updateTqTaskStatus,
 } from '#plugins/tq/alert-task'
+import { normalizeTqOriginalContentSnapshot } from '#plugins/tq/alert-task-test-support'
 import type { SlackMessageContent } from '#slack'
 
 const TQ_WEB_URL = 'https://tasks.example.test'
 const TASK = { id: 'task-current', number: 101 }
-const SNAPSHOT_KEY = 'tq_original_content_v1'
 const TASK_METADATA = {
   event_type: 'alert_task',
   event_payload: { task_id: TASK.id },
@@ -55,32 +56,14 @@ const completedInfo: TqTaskStatusInfo = {
   statusReason: 'completed',
 }
 
-const normalizeSnapshot = (
-  content: SlackMessageContent,
-): SlackMessageContent => {
-  const metadata = content.metadata
-  if (metadata === undefined) return content
-  const snapshot = metadata.event_payload[SNAPSHOT_KEY]
-  return typeof snapshot !== 'string'
-    ? content
-    : {
-        ...content,
-        metadata: {
-          ...metadata,
-          event_payload: {
-            ...metadata.event_payload,
-            [SNAPSHOT_KEY]: '<compressed original content>',
-          },
-        },
-      }
-}
-
 describe('updateTqTaskStatus', () => {
   it('compacts a completed CI alert and changes its color', () => {
     const status = formatTqTaskStatus(completedInfo, TQ_WEB_URL)
 
     expect(
-      normalizeSnapshot(updateTqTaskStatus(ciContent, status, completedInfo)),
+      normalizeTqOriginalContentSnapshot(
+        updateTqTaskStatus(ciContent, status, completedInfo),
+      ),
     ).toEqual({
       text: [
         '*✅ ~CI failed~*',
@@ -110,7 +93,67 @@ describe('updateTqTaskStatus', () => {
           task_id: TASK.id,
           tq_task_status: 'completed',
           tq_task_status_reason: 'completed',
-          [SNAPSHOT_KEY]: '<compressed original content>',
+          [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
+        },
+      },
+    })
+  })
+
+  it('keeps titles with tildes inside the strikethrough', () => {
+    const content: SlackMessageContent = {
+      text: '🚨 CPU ~90%',
+      color: '#d73a49',
+      blocks: [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: '🚨 CPU ~90%' },
+        },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: '*Repository*\nexample/service' },
+            { type: 'mrkdwn', text: '*起点の PR*\nなし' },
+          ],
+        },
+      ],
+      metadata: TASK_METADATA,
+    }
+    const status = formatTqTaskStatus(completedInfo, TQ_WEB_URL)
+
+    expect(
+      normalizeTqOriginalContentSnapshot(
+        updateTqTaskStatus(content, status, completedInfo),
+      ),
+    ).toEqual({
+      text: [
+        '*✅ ~CPU ∼90%~*',
+        'example/service · 起点の PR なし',
+        `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+      ].join('\n'),
+      color: '#2da44e',
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*✅ ~CPU ∼90%~*' },
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: [
+              'example/service · 起点の PR なし',
+              `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+            ].join('\n'),
+          },
+        },
+      ],
+      metadata: {
+        event_type: 'alert_task',
+        event_payload: {
+          task_id: TASK.id,
+          tq_task_status: 'completed',
+          tq_task_status_reason: 'completed',
+          [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
         },
       },
     })
@@ -152,7 +195,9 @@ describe('updateTqTaskStatus', () => {
     const status = formatTqTaskStatus(info, TQ_WEB_URL)
 
     expect(
-      normalizeSnapshot(updateTqTaskStatus(content, status, info)),
+      normalizeTqOriginalContentSnapshot(
+        updateTqTaskStatus(content, status, info),
+      ),
     ).toEqual({
       text: [
         '*⏭️ ~Request failed~*',
@@ -182,7 +227,7 @@ describe('updateTqTaskStatus', () => {
           task_id: TASK.id,
           tq_task_status: 'completed',
           tq_task_status_reason: 'not_planned',
-          [SNAPSHOT_KEY]: '<compressed original content>',
+          [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
         },
       },
     })
@@ -219,7 +264,9 @@ describe('updateTqTaskStatus', () => {
     const status = formatTqTaskStatus(info, TQ_WEB_URL)
 
     expect(
-      normalizeSnapshot(updateTqTaskStatus(content, status, info)),
+      normalizeTqOriginalContentSnapshot(
+        updateTqTaskStatus(content, status, info),
+      ),
     ).toEqual({
       text: [
         '*🔁 ~High latency~*',
@@ -252,7 +299,7 @@ describe('updateTqTaskStatus', () => {
           tq_duplicate_task_id: 'task-target',
           tq_duplicate_task_number: 202,
           tq_duplicate_task_title: 'Existing alert',
-          [SNAPSHOT_KEY]: '<compressed original content>',
+          [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
         },
       },
     })
@@ -271,7 +318,7 @@ describe('updateTqTaskStatus', () => {
     }
 
     expect(
-      normalizeSnapshot(
+      normalizeTqOriginalContentSnapshot(
         updateTqTaskStatus(
           completed,
           formatTqTaskStatus(todoInfo, TQ_WEB_URL),
@@ -299,7 +346,7 @@ describe('updateTqTaskStatus', () => {
           task_id: TASK.id,
           tq_task_status: 'todo',
           tq_task_status_reason: 'none',
-          [SNAPSHOT_KEY]: '<compressed original content>',
+          [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
         },
       },
     })
@@ -331,6 +378,26 @@ describe('readTqTaskStatusState', () => {
     })
   })
 
+  it('reads a duplicate target title from metadata', () => {
+    expect(
+      readTqTaskStatusState({
+        tq_task_status: 'completed',
+        tq_task_status_reason: 'duplicate',
+        tq_duplicate_task_id: 'task-target',
+        tq_duplicate_task_number: 202,
+        tq_duplicate_task_title: 'Review target',
+      }),
+    ).toEqual({
+      status: 'completed',
+      statusReason: 'duplicate',
+      duplicateOfTask: {
+        id: 'task-target',
+        number: 202,
+        title: 'Review target',
+      },
+    })
+  })
+
   it('formats a duplicate target without a title using its task number', () => {
     const info: TqTaskStatusInfo = {
       task: TASK,
@@ -341,6 +408,23 @@ describe('readTqTaskStatusState', () => {
 
     expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(
       `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> → <${TQ_WEB_URL}/tasks/task-target|tq #202>`,
+    )
+  })
+
+  it('escapes special characters in duplicate titles', () => {
+    const info: TqTaskStatusInfo = {
+      task: TASK,
+      status: 'completed',
+      statusReason: 'duplicate',
+      duplicateOfTask: {
+        id: 'task-target',
+        number: 202,
+        title: 'Review <target> & docs',
+      },
+    }
+
+    expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(
+      `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> → <${TQ_WEB_URL}/tasks/task-target|tq #202 Review &lt;target&gt; &amp; docs>`,
     )
   })
 })

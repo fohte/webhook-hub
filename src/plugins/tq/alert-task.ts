@@ -7,12 +7,14 @@ import { logger } from '#logger'
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import {
+  isRecord,
   isSlackBlock,
   type SlackBlock,
   type SlackMessageContent,
   type SlackMessageMetadata,
 } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 const TQ_TASK_CREATION_FAILURE_FINGERPRINT =
   'webhook-hub.tq-task-creation-failed'
@@ -27,7 +29,7 @@ export interface TqTaskStatusInfo {
 export type TqTaskStatusState = Omit<TqTaskStatusInfo, 'task'>
 
 const TQ_STATUS_PREFIX = '*状態*\n'
-const TQ_ORIGINAL_CONTENT_KEY = 'tq_original_content_v1'
+export const TQ_ORIGINAL_CONTENT_KEY = 'tq_original_content_v1'
 const COMPLETED_COLOR = '#2da44e'
 const DISMISSED_COLOR = '#8b949e'
 
@@ -36,9 +38,6 @@ interface TqOriginalContent {
   color?: string
   blocks?: SlackBlock[]
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const isTqStatusLine = (line: string): boolean =>
   /^(未対応|対応済み|対応不要|重複)(?:\s|$)/.test(line)
@@ -184,16 +183,18 @@ const stripLeadingIcon = (header: string): string =>
 const formatPrimaryContext = (content: TqOriginalContent): string => {
   const blocks = content.blocks ?? []
   const fields = readFields(blocks)
-  const repository = fields.get('Repository')
-  const origin = fields.get('起点の PR')
+  const repository = fields.get(ALERT_FIELD_LABELS.repository)
+  const origin = fields.get(ALERT_FIELD_LABELS.originPullRequest)
   if (repository !== undefined && origin !== undefined) {
-    return `${repository} · 起点の PR ${origin}`
+    return `${repository} · ${ALERT_FIELD_LABELS.originPullRequest} ${origin}`
   }
 
-  const grafanaStatus = fields.get('Grafana 上')
-  if (grafanaStatus !== undefined) return `Grafana 上: ${grafanaStatus}`
+  const grafanaStatus = fields.get(ALERT_FIELD_LABELS.grafanaStatus)
+  if (grafanaStatus !== undefined) {
+    return `${ALERT_FIELD_LABELS.grafanaStatus}: ${grafanaStatus}`
+  }
 
-  const app = fields.get('アプリ')
+  const app = fields.get(ALERT_FIELD_LABELS.sentryApp)
   const context = readContext(blocks)
   if (app !== undefined && context !== null) return `${app} · ${context}`
   if (context !== null) return context
@@ -223,8 +224,8 @@ const compactAppearance = (
         ? '🔁'
         : '✅'
   const title = escapeSlackMrkdwn(
-    stripLeadingIcon(readHeader(content)),
-  ).replace(/~/g, '\\~')
+    stripLeadingIcon(readHeader(content)).replace(/~/g, '∼'),
+  )
   const heading = `*${icon} ~${title}~*`
   const context = formatPrimaryContext(content)
   const summary = `${context}\n${status}`
@@ -317,10 +318,17 @@ export const updateTqTaskStatus = (
   info?: TqTaskStatusInfo,
 ): SlackMessageContent => {
   const metadata = content.metadata
-  const originalContent =
-    decodeOriginalContent(metadata?.event_payload[TQ_ORIGINAL_CONTENT_KEY]) ??
-    stripTqStatus(content)
-  const originalSnapshot = encodeOriginalContent(originalContent)
+  const storedOriginalSnapshot =
+    metadata?.event_payload[TQ_ORIGINAL_CONTENT_KEY]
+  const decodedOriginalContent = decodeOriginalContent(storedOriginalSnapshot)
+  if (storedOriginalSnapshot !== undefined && decodedOriginalContent === null) {
+    logger.warn(
+      { task_id: metadata?.event_payload['task_id'] },
+      'tq_original_content_decode_failed',
+    )
+  }
+  const originalContent = decodedOriginalContent ?? stripTqStatus(content)
+  const encodedOriginalSnapshot = encodeOriginalContent(originalContent)
   const updatedContent =
     info?.status === 'completed'
       ? compactAppearance(originalContent, status, info)
@@ -340,7 +348,7 @@ export const updateTqTaskStatus = (
     eventPayload['tq_task_status'] = info.status
     eventPayload['tq_task_status_reason'] = info.statusReason ?? 'none'
     if (info.status === 'completed') {
-      eventPayload[TQ_ORIGINAL_CONTENT_KEY] = originalSnapshot
+      eventPayload[TQ_ORIGINAL_CONTENT_KEY] = encodedOriginalSnapshot
     } else if (
       typeof previousSnapshot === 'string' &&
       decodeOriginalContent(previousSnapshot) !== null

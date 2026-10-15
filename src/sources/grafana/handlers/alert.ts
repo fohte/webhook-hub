@@ -1,6 +1,7 @@
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 export interface GrafanaAlert {
   status: 'firing' | 'resolved'
@@ -45,7 +46,7 @@ const renderAlertDetails = (
   const fields = [
     {
       type: 'mrkdwn' as const,
-      text: `*Grafana 上*\n${alert.status}`,
+      text: `*${ALERT_FIELD_LABELS.grafanaStatus}*\n${alert.status}`,
     },
     ...(alert.labels['severity'] === undefined
       ? []

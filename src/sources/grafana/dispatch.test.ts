@@ -1,6 +1,8 @@
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
+import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task'
+import { normalizeTqOriginalContentSnapshot } from '#plugins/tq/alert-task-test-support'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import {
   SlackApiError,
@@ -87,35 +89,18 @@ type DispatchObservations = {
   updateCalls?: [SlackMessageRef, SlackMessageContent][]
 }
 
-const normalizeContent = (
-  content: SlackMessageContent,
-): SlackMessageContent => {
-  const metadata = content.metadata
-  if (metadata === undefined) return content
-  const snapshot = metadata.event_payload['tq_original_content_v1']
-  return typeof snapshot !== 'string'
-    ? content
-    : {
-        ...content,
-        metadata: {
-          ...metadata,
-          event_payload: {
-            ...metadata.event_payload,
-            tq_original_content_v1: '<compressed original content>',
-          },
-        },
-      }
-}
-
 const normalizeCalls = (
   calls: [SlackMessageContent][],
 ): [SlackMessageContent][] =>
-  calls.map(([content]) => [normalizeContent(content)])
+  calls.map(([content]) => [normalizeTqOriginalContentSnapshot(content)])
 
 const normalizeUpdateCalls = (
   calls: [SlackMessageRef, SlackMessageContent][],
 ): [SlackMessageRef, SlackMessageContent][] =>
-  calls.map(([ref, content]) => [ref, normalizeContent(content)])
+  calls.map(([ref, content]) => [
+    ref,
+    normalizeTqOriginalContentSnapshot(content),
+  ])
 
 const observeDispatch = <TOutcome, TObservations extends DispatchObservations>(
   outcome: TOutcome,
@@ -472,7 +457,7 @@ describe('dispatch', () => {
                 task_number: 9,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
-                tq_original_content_v1: '<compressed original content>',
+                [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
               },
             },
           },

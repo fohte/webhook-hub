@@ -1,6 +1,8 @@
 import { okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
+import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task'
+import { normalizeTqOriginalContentSnapshot } from '#plugins/tq/alert-task-test-support'
 import type {
   SlackMessageContent,
   SlackMessageRef,
@@ -103,26 +105,10 @@ const observeDispatch = (
 ) => ({
   result,
   lookups,
-  updates: updates.map(([ref, content]) => {
-    const metadata = content.metadata
-    if (metadata === undefined) return [ref, content]
-    const snapshot = metadata.event_payload['tq_original_content_v1']
-    return [
-      ref,
-      typeof snapshot !== 'string'
-        ? content
-        : {
-            ...content,
-            metadata: {
-              ...metadata,
-              event_payload: {
-                ...metadata.event_payload,
-                tq_original_content_v1: '<compressed original content>',
-              },
-            },
-          },
-    ]
-  }),
+  updates: updates.map(([ref, content]) => [
+    ref,
+    normalizeTqOriginalContentSnapshot(content),
+  ]),
 })
 
 describe('dispatchTqTaskStatusChanged', () => {
@@ -223,7 +209,7 @@ describe('dispatchTqTaskStatusChanged', () => {
                       tq_duplicate_task_number: task.duplicateOfTask.number,
                       tq_duplicate_task_title: task.duplicateOfTask.title,
                     }),
-                tq_original_content_v1: '<compressed original content>',
+                [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
               },
             },
           },
@@ -295,7 +281,7 @@ describe('dispatchTqTaskStatusChanged', () => {
                 task_number: TASK_NUMBER,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
-                tq_original_content_v1: '<compressed original content>',
+                [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
               },
             },
           },
