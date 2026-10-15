@@ -91,6 +91,7 @@ const buildMetadata = (
   event_payload: {
     fingerprint: alert.fingerprint,
     starts_at: alert.startsAt,
+    grafana_status: alert.status,
     ...(task === null ? {} : { task_id: task.id, task_number: task.number }),
   },
 })
@@ -234,7 +235,7 @@ const dispatchAlert = (
             content,
             task,
             ctx.tqWebUrl,
-            content.metadata ?? metadata,
+            content.metadata,
             previousStatus,
           )
         const contentWithoutPanelImage = withTaskStatus(baseContent)

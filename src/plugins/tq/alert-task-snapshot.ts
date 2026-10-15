@@ -2,9 +2,17 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 
 import { err, ok, Result } from 'neverthrow'
 
-import { isRecord, isSlackBlock, type SlackBlock } from '#slack'
+import {
+  isRecord,
+  isSlackBlock,
+  type SlackBlock,
+  type SlackMessageMetadata,
+} from '#slack'
 
 export const TQ_ORIGINAL_CONTENT_KEY = 'tq_original_content_v1'
+// Slack does not publish a metadata-specific byte limit, so this applies its
+// 4 KB message guidance conservatively.
+export const MAX_SLACK_METADATA_BYTES = 4_000
 
 export interface TqOriginalContent {
   text: string
@@ -22,6 +30,12 @@ export const encodeOriginalContent = (content: TqOriginalContent): string =>
       }),
     ),
   ).toString('base64')
+
+export const isWithinSlackMetadataSizeLimit = (
+  metadata: SlackMessageMetadata,
+): boolean =>
+  Buffer.byteLength(JSON.stringify(metadata), 'utf8') <=
+  MAX_SLACK_METADATA_BYTES
 
 export const decodeOriginalContent = (
   value: unknown,

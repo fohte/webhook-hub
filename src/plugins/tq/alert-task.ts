@@ -2,10 +2,15 @@ import { captureWithFingerprint } from '@fohte/service-kit/observability'
 import { okAsync, type ResultAsync } from 'neverthrow'
 
 import { logger } from '#logger'
-import { compactAppearance } from '#plugins/tq/alert-task-appearance'
+import {
+  compactAppearance,
+  isCompactedAppearance,
+  readGrafanaStatus,
+} from '#plugins/tq/alert-task-appearance'
 import {
   decodeOriginalContent,
   encodeOriginalContent,
+  isWithinSlackMetadataSizeLimit,
   TQ_ORIGINAL_CONTENT_KEY,
   type TqOriginalContent,
 } from '#plugins/tq/alert-task-snapshot'
@@ -17,6 +22,7 @@ import {
   type SlackMessageMetadata,
 } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 export { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
 
@@ -145,6 +151,51 @@ export const readTqTaskStatusState = (
   }
 }
 
+const appendGrafanaStatus = (
+  status: string,
+  grafanaStatus: 'firing' | 'resolved' | undefined,
+): string =>
+  grafanaStatus === undefined
+    ? status
+    : `${status} · ${ALERT_FIELD_LABELS.grafanaStatus}: ${grafanaStatus}`
+
+const restoreTodoColor = (
+  content: TqOriginalContent,
+  info: TqTaskStatusInfo | undefined,
+  metadata: SlackMessageMetadata | undefined,
+): TqOriginalContent =>
+  info?.status === 'todo' && readGrafanaStatus(metadata, content) === 'resolved'
+    ? { ...content, color: '#d73a49' }
+    : content
+
+const updateTaskStatusMetadata = (
+  metadata: SlackMessageMetadata,
+  info: TqTaskStatusInfo,
+  snapshot?: string | number | boolean,
+): SlackMessageMetadata => {
+  const eventPayload = Object.fromEntries(
+    Object.entries(metadata.event_payload).filter(
+      ([key]) => key !== TQ_ORIGINAL_CONTENT_KEY,
+    ),
+  )
+  delete eventPayload['tq_duplicate_task_id']
+  delete eventPayload['tq_duplicate_task_number']
+  delete eventPayload['tq_duplicate_task_title']
+  eventPayload['tq_task_status'] = info.status
+  eventPayload['tq_task_status_reason'] = info.statusReason ?? 'none'
+  if (snapshot !== undefined) {
+    eventPayload[TQ_ORIGINAL_CONTENT_KEY] = snapshot
+  }
+  if (info.duplicateOfTask !== undefined) {
+    eventPayload['tq_duplicate_task_id'] = info.duplicateOfTask.id
+    eventPayload['tq_duplicate_task_number'] = info.duplicateOfTask.number
+    if (info.duplicateOfTask.title !== undefined) {
+      eventPayload['tq_duplicate_task_title'] = info.duplicateOfTask.title
+    }
+  }
+  return { ...metadata, event_payload: eventPayload }
+}
+
 export const updateTqTaskStatus = (
   content: SlackMessageContent,
   status: string,
@@ -154,54 +205,131 @@ export const updateTqTaskStatus = (
   const storedOriginalSnapshot =
     metadata?.event_payload[TQ_ORIGINAL_CONTENT_KEY]
   const decodedOriginalContent = decodeOriginalContent(storedOriginalSnapshot)
-  if (storedOriginalSnapshot !== undefined && decodedOriginalContent === null) {
+  const statusWithSource = appendGrafanaStatus(
+    status,
+    readGrafanaStatus(metadata, decodedOriginalContent ?? content),
+  )
+  const metadataStatus = metadata?.event_payload['tq_task_status']
+  const isCorruptSnapshot =
+    storedOriginalSnapshot !== undefined && decodedOriginalContent === null
+  const isLegacyFoldedContent =
+    metadataStatus === 'completed' &&
+    decodedOriginalContent === null &&
+    isCompactedAppearance(content)
+
+  if (isCorruptSnapshot) {
     logger.warn(
       { task_id: metadata?.event_payload['task_id'] },
       'tq_original_content_decode_failed',
     )
   }
-  const originalContent = decodedOriginalContent ?? stripTqStatus(content)
-  const encodedOriginalSnapshot = encodeOriginalContent(originalContent)
-  const updatedContent =
-    info?.status === 'completed'
-      ? compactAppearance(originalContent, status, info)
+
+  if (isCorruptSnapshot || isLegacyFoldedContent) {
+    if (isLegacyFoldedContent && !isCorruptSnapshot) {
+      logger.warn(
+        { task_id: metadata?.event_payload['task_id'] },
+        'tq_original_content_snapshot_missing',
+      )
+    }
+    const updatedMetadata =
+      metadata === undefined || info === undefined
+        ? metadata
+        : updateTaskStatusMetadata(metadata, info, storedOriginalSnapshot)
+    const cannotRecoverFoldedContent =
+      isCompactedAppearance(content) &&
+      (isCorruptSnapshot || isLegacyFoldedContent)
+    const originalContent = restoreTodoColor(
+      stripTqStatus(content),
+      info,
+      metadata,
+    )
+    const updatedContent = cannotRecoverFoldedContent
+      ? content
       : {
           ...originalContent,
-          text: replaceTqStatusLine(originalContent.text, status),
-          blocks: addStatusBlock(originalContent.blocks ?? [], status),
+          text: replaceTqStatusLine(originalContent.text, statusWithSource),
+          blocks: addStatusBlock(
+            originalContent.blocks ?? [],
+            statusWithSource,
+          ),
         }
-
-  let updatedMetadata = metadata
-  if (metadata !== undefined && info !== undefined) {
-    const { [TQ_ORIGINAL_CONTENT_KEY]: previousSnapshot, ...eventPayload } =
-      metadata.event_payload
-    delete eventPayload['tq_duplicate_task_id']
-    delete eventPayload['tq_duplicate_task_number']
-    delete eventPayload['tq_duplicate_task_title']
-    eventPayload['tq_task_status'] = info.status
-    eventPayload['tq_task_status_reason'] = info.statusReason ?? 'none'
-    if (info.status === 'completed') {
-      eventPayload[TQ_ORIGINAL_CONTENT_KEY] = encodedOriginalSnapshot
-    } else if (
-      typeof previousSnapshot === 'string' &&
-      decodeOriginalContent(previousSnapshot) !== null
-    ) {
-      eventPayload[TQ_ORIGINAL_CONTENT_KEY] = previousSnapshot
+    return {
+      ...content,
+      ...updatedContent,
+      ...(updatedMetadata === undefined ? {} : { metadata: updatedMetadata }),
     }
-    if (info.duplicateOfTask !== undefined) {
-      eventPayload['tq_duplicate_task_id'] = info.duplicateOfTask.id
-      eventPayload['tq_duplicate_task_number'] = info.duplicateOfTask.number
-      if (info.duplicateOfTask.title !== undefined) {
-        eventPayload['tq_duplicate_task_title'] = info.duplicateOfTask.title
+  }
+
+  const originalContent = restoreTodoColor(
+    decodedOriginalContent ?? stripTqStatus(content),
+    info,
+    metadata,
+  )
+  const previousSnapshot =
+    typeof storedOriginalSnapshot === 'string' &&
+    decodedOriginalContent !== null
+      ? storedOriginalSnapshot
+      : undefined
+  const snapshot =
+    info?.status === 'completed'
+      ? (previousSnapshot ?? encodeOriginalContent(originalContent))
+      : previousSnapshot
+  const updatedMetadata =
+    metadata === undefined || info === undefined
+      ? metadata
+      : updateTaskStatusMetadata(
+          metadata,
+          info,
+          info.status === 'completed' ? snapshot : previousSnapshot,
+        )
+  const snapshotExceedsLimit =
+    info?.status === 'completed' &&
+    updatedMetadata !== undefined &&
+    !isWithinSlackMetadataSizeLimit(updatedMetadata)
+  let updatedContent: SlackMessageContent
+
+  if (info?.status === 'completed') {
+    if (!snapshotExceedsLimit) {
+      updatedContent = compactAppearance(
+        originalContent,
+        statusWithSource,
+        info,
+        metadata,
+      )
+    } else {
+      logger.warn(
+        {
+          task_id: metadata?.event_payload['task_id'],
+          metadata_bytes: Buffer.byteLength(
+            JSON.stringify(updatedMetadata),
+            'utf8',
+          ),
+        },
+        'tq_original_content_snapshot_too_large',
+      )
+      updatedContent = {
+        ...originalContent,
+        text: replaceTqStatusLine(originalContent.text, statusWithSource),
+        blocks: addStatusBlock(originalContent.blocks ?? [], statusWithSource),
       }
     }
-    updatedMetadata = { ...metadata, event_payload: eventPayload }
+  } else {
+    updatedContent = {
+      ...originalContent,
+      text: replaceTqStatusLine(originalContent.text, statusWithSource),
+      blocks: addStatusBlock(originalContent.blocks ?? [], statusWithSource),
+    }
   }
+
+  const finalMetadata =
+    snapshotExceedsLimit && metadata !== undefined
+      ? updateTaskStatusMetadata(metadata, info)
+      : updatedMetadata
 
   return {
     ...content,
     ...updatedContent,
-    ...(updatedMetadata === undefined ? {} : { metadata: updatedMetadata }),
+    ...(finalMetadata === undefined ? {} : { metadata: finalMetadata }),
   }
 }
 
@@ -221,13 +349,13 @@ export const formatTqTaskStatus = (
           : '対応済み'
 
   if (info.statusReason === 'duplicate') {
-    if (info.duplicateOfTask === undefined) return state
+    if (info.duplicateOfTask === undefined) return `${state} · ${taskLink}`
     const duplicateTitle =
       info.duplicateOfTask.title === undefined
         ? ''
         : ` ${escapeSlackMrkdwn(info.duplicateOfTask.title)}`
     const duplicateLink = `<${baseUrl}/tasks/${info.duplicateOfTask.id}|tq #${String(info.duplicateOfTask.number)}${duplicateTitle}>`
-    return `${state} · ${taskLink} → ${duplicateLink}`
+    return `${state} · ${taskLink} → ${duplicateLink} で対応`
   }
 
   return `${state} · ${taskLink}`

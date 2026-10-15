@@ -1,8 +1,16 @@
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task'
-import { normalizeTqOriginalContentSnapshot } from '#plugins/tq/alert-task-test-support'
+import {
+  addTqTaskStatus,
+  TQ_ORIGINAL_CONTENT_KEY,
+  type TqTaskStatusInfo,
+} from '#plugins/tq/alert-task'
+import {
+  type DecodedSlackMessageContent,
+  expectedTqOriginalContentSnapshot,
+  normalizeTqOriginalContentSnapshot,
+} from '#plugins/tq/alert-task-test-support'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import {
   SlackApiError,
@@ -91,12 +99,12 @@ type DispatchObservations = {
 
 const normalizeCalls = (
   calls: [SlackMessageContent][],
-): [SlackMessageContent][] =>
+): [DecodedSlackMessageContent][] =>
   calls.map(([content]) => [normalizeTqOriginalContentSnapshot(content)])
 
 const normalizeUpdateCalls = (
   calls: [SlackMessageRef, SlackMessageContent][],
-): [SlackMessageRef, SlackMessageContent][] =>
+): [SlackMessageRef, DecodedSlackMessageContent][] =>
   calls.map(([ref, content]) => [
     ref,
     normalizeTqOriginalContentSnapshot(content),
@@ -116,53 +124,86 @@ const observeDispatch = <TOutcome, TObservations extends DispatchObservations>(
     : { updateCalls: normalizeUpdateCalls(observations.updateCalls) }),
 })
 
-const expectedAlertContent = (imageFileId?: string) => ({
-  text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-  color: '#d73a49',
-  blocks: [
-    { type: 'header', text: { type: 'plain_text', text: '🚨 Queue depth' } },
-    {
-      type: 'section',
-      fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
+const expectedTodoGrafanaContent = (options: {
+  alertName: string
+  fingerprint: string
+  startsAt: string
+  summary?: string
+  task?: typeof TQ_TASK_REF | null
+  imageFileId?: string
+}) => {
+  const task = options.task === undefined ? TQ_TASK_REF : options.task
+  const status =
+    task === null
+      ? '未対応'
+      : `未対応 · <${TQ_WEB_URL}/tasks/${task.id}|tq #${String(task.number)}>`
+  const statusWithSource = `${status} · Grafana 上: firing`
+
+  return {
+    text: `🚨 ${options.alertName} (発生中)\n${statusWithSource}`,
+    color: '#d73a49',
+    blocks: [
+      {
+        type: 'header' as const,
+        text: { type: 'plain_text' as const, text: `🚨 ${options.alertName}` },
+      },
+      ...(options.summary === undefined
+        ? []
+        : [
+            {
+              type: 'section' as const,
+              text: {
+                type: 'mrkdwn' as const,
+                text: `*概要*\n${options.summary}`,
+              },
+            },
+          ]),
+      {
+        type: 'context' as const,
+        elements: [
+          { type: 'mrkdwn' as const, text: `*状態*\n${statusWithSource}` },
+        ],
+      },
+      ...(options.imageFileId === undefined
+        ? []
+        : [
+            {
+              type: 'image' as const,
+              slack_file: { id: options.imageFileId },
+              alt_text: 'Grafana panel 13',
+            },
+          ]),
+    ],
+    metadata: {
+      event_type: 'grafana_alert',
+      event_payload: {
+        fingerprint: options.fingerprint,
+        starts_at: options.startsAt,
+        grafana_status: 'firing',
+        ...(task === null
+          ? {}
+          : {
+              task_id: task.id,
+              task_number: task.number,
+              tq_task_status: 'todo',
+              tq_task_status_reason: 'none',
+            }),
+        ...(options.imageFileId === undefined
+          ? {}
+          : { panel_image_file_id: options.imageFileId }),
+      },
     },
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
-    },
-    {
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-        },
-      ],
-    },
-    ...(imageFileId === undefined
-      ? []
-      : [
-          {
-            type: 'image' as const,
-            slack_file: { id: imageFileId },
-            alt_text: 'Grafana panel 13',
-          },
-        ]),
-  ],
-  metadata: {
-    event_type: 'grafana_alert',
-    event_payload: {
-      fingerprint: 'fp-queue',
-      starts_at: INCIDENT_START,
-      task_id: '00000000-0000-4000-8000-000000000009',
-      task_number: 9,
-      tq_task_status: 'todo',
-      tq_task_status_reason: 'none',
-      ...(imageFileId === undefined
-        ? {}
-        : { panel_image_file_id: imageFileId }),
-    },
-  },
-})
+  }
+}
+
+const expectedAlertContent = (imageFileId?: string) =>
+  expectedTodoGrafanaContent({
+    alertName: 'Queue depth',
+    fingerprint: 'fp-queue',
+    startsAt: INCIDENT_START,
+    summary: 'Queue is growing',
+    ...(imageFileId === undefined ? {} : { imageFileId }),
+  })
 
 describe('dispatch', () => {
   it('creates one tq task and posts one notification for a new fingerprint', async () => {
@@ -212,48 +253,7 @@ describe('dispatch', () => {
           },
         ],
       ],
-      postCalls: [
-        [
-          {
-            text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '🚨 Queue depth' },
-              },
-              {
-                type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-              },
-              {
-                type: 'section',
-                text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                  },
-                ],
-              },
-            ],
-            metadata: {
-              event_type: 'grafana_alert',
-              event_payload: {
-                fingerprint: 'fp-queue',
-                starts_at: INCIDENT_START,
-                task_id: '00000000-0000-4000-8000-000000000009',
-                task_number: 9,
-                tq_task_status: 'todo',
-                tq_task_status_reason: 'none',
-              },
-            },
-          },
-        ],
-      ],
+      postCalls: [[expectedAlertContent()]],
       updateCalls: [],
     })
   })
@@ -382,19 +382,30 @@ describe('dispatch', () => {
     })
   })
 
-  it('updates a repeated fingerprint without creating another task or message', async () => {
+  it('keeps a compact firing alert compact when a resolved event is redelivered', async () => {
     const notifier = createNotifier()
+    const firingContent = expectedAlertContent()
+    const completedInfo: TqTaskStatusInfo = {
+      task: TQ_TASK_REF,
+      status: 'completed',
+      statusReason: 'completed',
+    }
+    const compactFiringContent = addTqTaskStatus(
+      firingContent,
+      TQ_TASK_REF,
+      TQ_WEB_URL,
+      firingContent.metadata,
+      completedInfo,
+    )
+    const compactFiringMetadata = compactFiringContent.metadata
+    if (compactFiringMetadata === undefined) {
+      throw new Error('compact Grafana alert metadata is missing')
+    }
     notifier.findMessageByMetadata.mockReturnValue(
       okAsync({
         ref: { channel: 'C9', ts: 'existing-ts' },
-        eventPayload: {
-          fingerprint: 'fp-queue',
-          starts_at: INCIDENT_START,
-          task_id: TQ_TASK_REF.id,
-          task_number: TQ_TASK_REF.number,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'completed',
-        },
+        content: compactFiringContent,
+        eventPayload: compactFiringMetadata.event_payload,
       }),
     )
     const tqClient = createTqClient()
@@ -433,7 +444,7 @@ describe('dispatch', () => {
         [
           { channel: 'C9', ts: 'existing-ts' },
           {
-            text: '*✅ ~Queue depth~*\nGrafana 上: resolved\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
+            text: '*✅ ~Queue depth~*\nQueue depth\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9> · Grafana 上: resolved',
             color: '#2da44e',
             blocks: [
               {
@@ -441,11 +452,14 @@ describe('dispatch', () => {
                 text: { type: 'mrkdwn', text: '*✅ ~Queue depth~*' },
               },
               {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: 'Grafana 上: resolved\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                },
+                type: 'context',
+                elements: [
+                  { type: 'mrkdwn', text: 'Queue depth' },
+                  {
+                    type: 'mrkdwn',
+                    text: '対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9> · Grafana 上: resolved',
+                  },
+                ],
               },
             ],
             metadata: {
@@ -453,11 +467,31 @@ describe('dispatch', () => {
               event_payload: {
                 fingerprint: 'fp-queue',
                 starts_at: INCIDENT_START,
+                grafana_status: 'resolved',
                 task_id: '00000000-0000-4000-8000-000000000009',
                 task_number: 9,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
-                [TQ_ORIGINAL_CONTENT_KEY]: '<compressed original content>',
+                [TQ_ORIGINAL_CONTENT_KEY]: expectedTqOriginalContentSnapshot({
+                  text: '✅ Queue depth (解決)',
+                  color: '#d73a49',
+                  blocks: [
+                    {
+                      type: 'header',
+                      text: {
+                        type: 'plain_text',
+                        text: '✅ Queue depth',
+                      },
+                    },
+                    {
+                      type: 'section',
+                      text: {
+                        type: 'mrkdwn',
+                        text: '*概要*\nQueue is growing',
+                      },
+                    },
+                  ],
+                }),
               },
             },
           },
@@ -655,44 +689,12 @@ describe('dispatch', () => {
       ],
       postCalls: [
         [
-          {
-            text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '🚨 Queue depth' },
-              },
-              {
-                type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-              },
-              {
-                type: 'section',
-                text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                  },
-                ],
-              },
-            ],
-            metadata: {
-              event_type: 'grafana_alert',
-              event_payload: {
-                fingerprint: 'fp-queue',
-                starts_at: nextIncidentStart,
-                task_id: '00000000-0000-4000-8000-000000000009',
-                task_number: 9,
-                tq_task_status: 'todo',
-                tq_task_status_reason: 'none',
-              },
-            },
-          },
+          expectedTodoGrafanaContent({
+            alertName: 'Queue depth',
+            fingerprint: 'fp-queue',
+            startsAt: nextIncidentStart,
+            summary: 'Queue is growing',
+          }),
         ],
       ],
       updateCalls: [],
@@ -720,44 +722,7 @@ describe('dispatch', () => {
       dispatchOutcome(ctx, { alerts: [ALERT] }),
       dispatchOutcome(ctx, { alerts: [ALERT] }),
     ])
-    const expectedContent = {
-      text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-      color: '#d73a49',
-      blocks: [
-        {
-          type: 'header',
-          text: { type: 'plain_text', text: '🚨 Queue depth' },
-        },
-        {
-          type: 'section',
-          fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-        },
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'grafana_alert',
-        event_payload: {
-          fingerprint: 'fp-queue',
-          starts_at: INCIDENT_START,
-          task_id: '00000000-0000-4000-8000-000000000009',
-          task_number: 9,
-          tq_task_status: 'todo',
-          tq_task_status_reason: 'none',
-        },
-      },
-    }
+    const expectedContent = expectedAlertContent()
 
     expect(
       observeDispatch([firstOutcome, secondOutcome], {
@@ -844,76 +809,20 @@ describe('dispatch', () => {
       ],
       postCalls: [
         [
-          {
-            text: '🚨 Queue depth (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '🚨 Queue depth' },
-              },
-              {
-                type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                  },
-                ],
-              },
-            ],
-            metadata: {
-              event_type: 'grafana_alert',
-              event_payload: {
-                fingerprint: 'fp-queue',
-                starts_at: INCIDENT_START,
-                task_id: '00000000-0000-4000-8000-000000000009',
-                task_number: 9,
-                tq_task_status: 'todo',
-                tq_task_status_reason: 'none',
-              },
-            },
-          },
+          expectedTodoGrafanaContent({
+            alertName: 'Queue depth',
+            fingerprint: 'fp-queue',
+            startsAt: INCIDENT_START,
+            task: TQ_TASK_REF,
+          }),
         ],
         [
-          {
-            text: '🚨 Disk usage (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '🚨 Disk usage' },
-              },
-              {
-                type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                  },
-                ],
-              },
-            ],
-            metadata: {
-              event_type: 'grafana_alert',
-              event_payload: {
-                fingerprint: 'fp-disk',
-                starts_at: INCIDENT_START,
-                task_id: '00000000-0000-4000-8000-000000000009',
-                task_number: 9,
-                tq_task_status: 'todo',
-                tq_task_status_reason: 'none',
-              },
-            },
-          },
+          expectedTodoGrafanaContent({
+            alertName: 'Disk usage',
+            fingerprint: 'fp-disk',
+            startsAt: INCIDENT_START,
+            task: TQ_TASK_REF,
+          }),
         ],
       ],
     })
@@ -952,35 +861,13 @@ describe('dispatch', () => {
       ],
       postCalls: [
         [
-          {
-            text: '🚨 Queue depth (発生中)\n未対応',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '🚨 Queue depth' },
-              },
-              {
-                type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-              },
-              {
-                type: 'section',
-                text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
-              },
-              {
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: '*状態*\n未対応' }],
-              },
-            ],
-            metadata: {
-              event_type: 'grafana_alert',
-              event_payload: {
-                fingerprint: 'fp-queue',
-                starts_at: INCIDENT_START,
-              },
-            },
-          },
+          expectedTodoGrafanaContent({
+            alertName: 'Queue depth',
+            fingerprint: 'fp-queue',
+            startsAt: INCIDENT_START,
+            summary: 'Queue is growing',
+            task: null,
+          }),
         ],
       ],
     })
@@ -1071,76 +958,18 @@ describe('dispatch', () => {
       ],
       postCalls: [
         [
-          {
-            text: '🚨 Grafana alert (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '🚨 Grafana alert' },
-              },
-              {
-                type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                  },
-                ],
-              },
-            ],
-            metadata: {
-              event_type: 'grafana_alert',
-              event_payload: {
-                fingerprint: 'fp-first',
-                starts_at: INCIDENT_START,
-                task_id: '00000000-0000-4000-8000-000000000009',
-                task_number: 9,
-                tq_task_status: 'todo',
-                tq_task_status_reason: 'none',
-              },
-            },
-          },
+          expectedTodoGrafanaContent({
+            alertName: 'Grafana alert',
+            fingerprint: 'fp-first',
+            startsAt: INCIDENT_START,
+          }),
         ],
         [
-          {
-            text: '🚨 Grafana alert (発生中)\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '🚨 Grafana alert' },
-              },
-              {
-                type: 'section',
-                fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nfiring' }],
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9>',
-                  },
-                ],
-              },
-            ],
-            metadata: {
-              event_type: 'grafana_alert',
-              event_payload: {
-                fingerprint: 'fp-second',
-                starts_at: INCIDENT_START,
-                task_id: '00000000-0000-4000-8000-000000000009',
-                task_number: 9,
-                tq_task_status: 'todo',
-                tq_task_status_reason: 'none',
-              },
-            },
-          },
+          expectedTodoGrafanaContent({
+            alertName: 'Grafana alert',
+            fingerprint: 'fp-second',
+            startsAt: INCIDENT_START,
+          }),
         ],
       ],
       updateCalls: [],

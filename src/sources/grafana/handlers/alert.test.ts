@@ -36,7 +36,6 @@ describe('buildGrafanaAlertNotification', () => {
           {
             type: 'section',
             fields: [
-              { type: 'mrkdwn', text: '*Grafana 上*\nfiring' },
               { type: 'mrkdwn', text: '*Severity*\ncritical' },
               { type: 'mrkdwn', text: '*instance*\nnode-a' },
             ],
@@ -96,7 +95,7 @@ describe('buildGrafanaAlertNotification', () => {
     })
   })
 
-  it('escapes alert text and displays resolved alerts with a green status', () => {
+  it('keeps resolved alerts red while preserving the resolved title', () => {
     expect(
       buildGrafanaAlertNotification({
         status: 'resolved',
@@ -109,15 +108,11 @@ describe('buildGrafanaAlertNotification', () => {
       alertName: 'Queue <full>',
       content: {
         text: '✅ Queue <full> (解決)',
-        color: '#2da44e',
+        color: '#d73a49',
         blocks: [
           {
             type: 'header',
             text: { type: 'plain_text', text: '✅ Queue <full>' },
-          },
-          {
-            type: 'section',
-            fields: [{ type: 'mrkdwn', text: '*Grafana 上*\nresolved' }],
           },
           {
             type: 'section',

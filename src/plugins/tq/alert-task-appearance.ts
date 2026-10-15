@@ -1,6 +1,10 @@
 import type { TqTaskStatusInfo } from '#plugins/tq/alert-task'
 import type { TqOriginalContent } from '#plugins/tq/alert-task-snapshot'
-import type { SlackBlock, SlackMessageContent } from '#slack'
+import type {
+  SlackBlock,
+  SlackMessageContent,
+  SlackMessageMetadata,
+} from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
@@ -49,9 +53,12 @@ const readHeader = (content: TqOriginalContent): string => {
 }
 
 const stripLeadingIcon = (header: string): string =>
-  header.replace(/^[^\p{L}\p{N}]+\s*/u, '')
+  header.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')
 
-const formatPrimaryContext = (content: TqOriginalContent): string => {
+const formatPrimaryContext = (
+  content: TqOriginalContent,
+  metadata?: SlackMessageMetadata,
+): string => {
   const blocks = content.blocks ?? []
   const fields = readFields(blocks)
   const repository = fields.get(ALERT_FIELD_LABELS.repository)
@@ -60,9 +67,15 @@ const formatPrimaryContext = (content: TqOriginalContent): string => {
     return `${repository} · ${ALERT_FIELD_LABELS.originPullRequest} ${origin}`
   }
 
-  const grafanaStatus = fields.get(ALERT_FIELD_LABELS.grafanaStatus)
-  if (grafanaStatus !== undefined) {
-    return `${ALERT_FIELD_LABELS.grafanaStatus}: ${grafanaStatus}`
+  if (readGrafanaStatus(metadata, content) !== undefined) {
+    const grafanaFields = [...fields.entries()]
+      .filter(([label]) => label !== ALERT_FIELD_LABELS.grafanaLegacyStatus)
+      .slice(0, 2)
+    if (grafanaFields.length > 0) {
+      return grafanaFields
+        .map(([label, value]) => `${label}: ${value}`)
+        .join(' · ')
+    }
   }
 
   const app = fields.get(ALERT_FIELD_LABELS.sentryApp)
@@ -87,6 +100,7 @@ export const compactAppearance = (
   content: TqOriginalContent,
   status: string,
   info: TqTaskStatusInfo,
+  metadata?: SlackMessageMetadata,
 ): SlackMessageContent => {
   const icon =
     info.statusReason === 'not_planned'
@@ -95,21 +109,55 @@ export const compactAppearance = (
         ? '🔁'
         : '✅'
   const title = escapeSlackMrkdwn(
-    stripLeadingIcon(readHeader(content)).replace(/~/g, '∼'),
+    stripLeadingIcon(readHeader(content))
+      .replace(/~/g, '∼')
+      .replace(/\*/g, '∗')
+      .replace(/_/g, '＿')
+      .replace(/`/g, 'ˋ'),
   )
   const heading = `*${icon} ~${title}~*`
-  const context = formatPrimaryContext(content)
-  const summary = `${context}\n${status}`
+  const context = formatPrimaryContext(content, metadata)
 
   return {
-    text: `${heading}\n${summary}`,
+    text: `${heading}\n${context}\n${status}`,
     color:
       info.statusReason === 'completed' || info.statusReason === null
         ? COMPLETED_COLOR
         : DISMISSED_COLOR,
     blocks: [
       { type: 'section', text: { type: 'mrkdwn', text: heading } },
-      { type: 'section', text: { type: 'mrkdwn', text: summary } },
+      {
+        type: 'context',
+        elements: [
+          { type: 'mrkdwn', text: context },
+          { type: 'mrkdwn', text: status },
+        ],
+      },
     ],
   }
+}
+
+export const isCompactedAppearance = (content: SlackMessageContent): boolean =>
+  content.blocks?.[0]?.type === 'section' &&
+  content.blocks[0].text?.type === 'mrkdwn' &&
+  /^\*(?:✅|⏭️|🔁) ~/u.test(content.blocks[0].text.text)
+
+export const readGrafanaStatus = (
+  metadata: SlackMessageMetadata | undefined,
+  content?: TqOriginalContent,
+): 'firing' | 'resolved' | undefined => {
+  const status = metadata?.event_payload['grafana_status']
+  if (status === 'firing' || status === 'resolved') return status
+  if (metadata?.event_type !== 'grafana_alert' || content === undefined) {
+    return undefined
+  }
+
+  const legacyStatus = readFields(content.blocks ?? []).get(
+    ALERT_FIELD_LABELS.grafanaLegacyStatus,
+  )
+  return legacyStatus === '発生中'
+    ? 'firing'
+    : legacyStatus === '解決'
+      ? 'resolved'
+      : undefined
 }
