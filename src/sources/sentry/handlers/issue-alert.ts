@@ -1,6 +1,7 @@
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 export interface SentryIssueAlertEvent {
   action: string
@@ -69,7 +70,7 @@ export const buildIssueAlertNotification = (
 
   const headerText = truncateHeaderText(`🐛 ${input.title}`)
   const fieldDefinitions = [
-    { label: 'アプリ', value: input.app, asCode: false },
+    { label: ALERT_FIELD_LABELS.sentryApp, value: input.app, asCode: false },
     { label: 'Level', value: input.level, asCode: false },
     { label: '発生箇所', value: input.culprit, asCode: true },
     { label: 'Rule', value: input.triggeredRule, asCode: false },

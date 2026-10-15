@@ -13,6 +13,7 @@ import { logger } from '#logger'
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
 
 export interface WorkflowRunInput {
   repo: string
@@ -148,11 +149,11 @@ const formatWorkflowRunNotification = (
       fields: [
         {
           type: 'mrkdwn',
-          text: `*Repository*\n${escapeSlackMrkdwn(input.repo)}`,
+          text: `*${ALERT_FIELD_LABELS.repository}*\n${escapeSlackMrkdwn(input.repo)}`,
         },
         {
           type: 'mrkdwn',
-          text: `*起点の PR*\n${originLine ?? 'なし'}`,
+          text: `*${ALERT_FIELD_LABELS.originPullRequest}*\n${originLine ?? 'なし'}`,
         },
         {
           type: 'mrkdwn',

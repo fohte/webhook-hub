@@ -91,6 +91,7 @@ const buildMetadata = (
   event_payload: {
     fingerprint: alert.fingerprint,
     starts_at: alert.startsAt,
+    grafana_status: alert.status,
     ...(task === null ? {} : { task_id: task.id, task_number: task.number }),
   },
 })
@@ -224,17 +225,23 @@ const dispatchAlert = (
         const panelImageFileId = readPanelImageFileId(
           existing === null ? undefined : existing.eventPayload,
         )
-        const content = addTqTaskStatus(
-          note.content,
-          task,
-          ctx.tqWebUrl,
-          buildMetadata(alert, task),
-          readTqTaskStatusState(
-            existing === null ? undefined : existing.eventPayload,
-          ),
+        const metadata = buildMetadata(alert, task)
+        const previousStatus = readTqTaskStatusState(
+          existing === null ? undefined : existing.eventPayload,
         )
-        return addPanelImage(ctx, alert, content, panelImageFileId).andThen(
-          (notificationContent) => {
+        const baseContent = { ...note.content, metadata }
+        const withTaskStatus = (content: SlackMessageContent) =>
+          addTqTaskStatus(
+            content,
+            task,
+            ctx.tqWebUrl,
+            content.metadata,
+            previousStatus,
+          )
+        const contentWithoutPanelImage = withTaskStatus(baseContent)
+        return addPanelImage(ctx, alert, baseContent, panelImageFileId).andThen(
+          (contentWithImage) => {
+            const notificationContent = withTaskStatus(contentWithImage)
             const notify = (messageContent: SlackMessageContent) =>
               existing === null
                 ? ctx.notifier.postMessage(messageContent).map(() => undefined)
@@ -251,7 +258,7 @@ const dispatchAlert = (
                 error,
                 existing === null ? 'post' : 'update',
               )
-              return notify(content)
+              return notify(contentWithoutPanelImage)
             })
 
             return notification.map((): DispatchOutcome => {

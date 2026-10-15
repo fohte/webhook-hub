@@ -1,6 +1,7 @@
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 
 export interface GrafanaAlert {
   status: 'firing' | 'resolved'
@@ -21,11 +22,6 @@ export interface GrafanaAlertNotification {
   status: GrafanaAlert['status']
 }
 
-const ALERT_COLORS = {
-  firing: '#d73a49',
-  resolved: '#2da44e',
-} as const
-
 const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 
@@ -40,14 +36,9 @@ const slackLink = (url: string | undefined, label: string): string | null => {
 const renderAlertDetails = (
   alert: GrafanaAlert,
   alertName: string,
-  statusLabel: string,
   statusIcon: string,
 ): SlackBlock[] => {
   const fields = [
-    {
-      type: 'mrkdwn' as const,
-      text: `*状態*\n${statusLabel}`,
-    },
     ...(alert.labels['severity'] === undefined
       ? []
       : [
@@ -87,7 +78,7 @@ const renderAlertDetails = (
         text: truncate(`${statusIcon} ${alertName}`, 150),
       },
     },
-    { type: 'section', fields },
+    ...(fields.length === 0 ? [] : [{ type: 'section' as const, fields }]),
   ]
 
   for (const [key, label] of [
@@ -160,8 +151,8 @@ export const buildGrafanaAlertNotification = (
   const statusIcon = alert.status === 'firing' ? '🚨' : '✅'
   const content: SlackMessageContent = {
     text: `${statusIcon} ${alertName} (${statusLabel})`,
-    color: ALERT_COLORS[alert.status],
-    blocks: renderAlertDetails(alert, alertName, statusLabel, statusIcon),
+    color: TODO_ALERT_COLOR,
+    blocks: renderAlertDetails(alert, alertName, statusIcon),
   }
 
   return {
