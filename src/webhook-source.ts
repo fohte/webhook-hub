@@ -16,6 +16,8 @@ export interface SourceContext {
 export interface WebhookSource {
   readonly name: string
   readonly path: string
+  /** Start dispatch after acknowledging the request to meet a short upstream deadline. */
+  readonly acknowledgeBeforeDispatch?: boolean
   /** A null result short-circuits `verify`/`dispatch` for this request. */
   extractContext(headers: WebhookHeaders): SourceContext | null
   verify(

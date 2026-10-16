@@ -29,18 +29,30 @@ const defaultExtractContext: WebhookSource['extractContext'] = (headers) => {
 const createSource = (overrides: {
   name?: string
   path?: string
+  acknowledgeBeforeDispatch?: boolean
   extractContext?: WebhookSource['extractContext']
   verify: () => boolean
   dispatch: () => ResultAsync<DispatchOutcome, SlackApiError>
 }): WebhookSource => ({
   name: overrides.name ?? 'dummy',
   path: overrides.path ?? '/dummy',
+  acknowledgeBeforeDispatch: overrides.acknowledgeBeforeDispatch ?? false,
   extractContext: overrides.extractContext ?? defaultExtractContext,
   verify: overrides.verify,
   dispatch: overrides.dispatch,
 })
 
 const validHeaders = { 'x-delivery': 'delivery-1', 'x-event': 'push' }
+
+const observeWithEvents = <TResult>(result: TResult, events: string[]) => ({
+  result,
+  events,
+})
+
+const observeDispatchReport = <TResult, TCaptures>(
+  result: TResult,
+  captureCalls: TCaptures,
+) => ({ result, captureCalls })
 
 describe('createApp', () => {
   it('responds to GET /healthz', async () => {
@@ -163,6 +175,82 @@ describe('createApp', () => {
     expect(result).toEqual({
       status: 200,
       body: { ok: false, outcome: 'error' },
+    })
+  })
+
+  it('acknowledges before dispatch for sources with a short deadline', async () => {
+    const dispatchStarted = Promise.withResolvers<undefined>()
+    const events: string[] = []
+    const source = createSource({
+      acknowledgeBeforeDispatch: true,
+      verify: () => true,
+      dispatch: () => {
+        events.push('dispatch_started')
+        dispatchStarted.resolve(undefined)
+        return okAsync('notified')
+      },
+    })
+    const app = createApp({ sources: [source], notifier: createNotifier() })
+
+    const resultPromise = requestJson(app, '/dummy', {
+      method: 'POST',
+      headers: validHeaders,
+      body: '{}',
+    }).then((result) => {
+      events.push('response_returned')
+      return result
+    })
+    await dispatchStarted.promise
+
+    expect(observeWithEvents(await resultPromise, events)).toEqual({
+      result: { status: 200, body: { ok: true } },
+      events: ['response_returned', 'dispatch_started'],
+    })
+  })
+
+  it('reports dispatch failures to Sentry after acknowledging the request', async () => {
+    const dispatchErr = new SlackApiError('boom')
+    const reported = Promise.withResolvers<undefined>()
+    vi.mocked(captureWithFingerprint).mockImplementation(() => {
+      reported.resolve(undefined)
+    })
+    const source = createSource({
+      acknowledgeBeforeDispatch: true,
+      verify: () => true,
+      dispatch: () => errAsync(dispatchErr),
+    })
+    const app = createApp({ sources: [source], notifier: createNotifier() })
+
+    const result = await requestJson(app, '/dummy', {
+      method: 'POST',
+      headers: validHeaders,
+      body: '{}',
+    })
+    await reported.promise
+
+    expect(
+      observeDispatchReport(
+        result,
+        vi.mocked(captureWithFingerprint).mock.calls,
+      ),
+    ).toEqual({
+      result: { status: 200, body: { ok: true } },
+      captureCalls: [
+        [
+          new WebhookDispatchError(
+            'failed to dispatch dummy webhook',
+            dispatchErr,
+          ),
+          'webhook-hub.webhook-dispatch-failed',
+          {
+            extras: {
+              source: 'dummy',
+              deliveryId: 'delivery-1',
+              event: 'push',
+            },
+          },
+        ],
+      ],
     })
   })
 

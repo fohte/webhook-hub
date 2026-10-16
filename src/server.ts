@@ -26,6 +26,97 @@ const parseJson = Result.fromThrowable(
   (caughtErr) => caughtErr,
 )
 
+const reportUnexpectedError = (
+  err: unknown,
+  context?: {
+    source: string
+    delivery_id: string
+    event: string
+  },
+): void => {
+  captureWithFingerprint(err, [UNEXPECTED_ERROR_FINGERPRINT, '{{ default }}'])
+  logger.error(
+    context === undefined ? { err } : { ...context, err },
+    'webhook_unexpected_error',
+  )
+}
+
+const reportDispatchFailure = (
+  source: string,
+  context: { deliveryId: string; eventName: string },
+  dispatchErr: unknown,
+): void => {
+  const wrapped = new WebhookDispatchError(
+    `failed to dispatch ${source} webhook`,
+    dispatchErr,
+  )
+  captureWithFingerprint(wrapped, DISPATCH_ERROR_FINGERPRINT, {
+    extras: {
+      source,
+      deliveryId: context.deliveryId,
+      event: context.eventName,
+    },
+  })
+  logger.error(
+    {
+      source,
+      delivery_id: context.deliveryId,
+      event: context.eventName,
+      err: wrapped,
+    },
+    'webhook_handler_error',
+  )
+}
+
+const logDispatchSuccess = (
+  source: string,
+  context: { deliveryId: string; eventName: string },
+  outcome: string,
+): void => {
+  logger.info(
+    {
+      source,
+      delivery_id: context.deliveryId,
+      event: context.eventName,
+      outcome,
+    },
+    'webhook_processed',
+  )
+}
+
+const dispatchAfterAcknowledgement = (
+  source: WebhookSourceRegistry[number],
+  context: { deliveryId: string; eventName: string },
+  payload: unknown,
+  notifier: SlackNotifier,
+): void => {
+  setImmediate(() => {
+    const reportUnexpected = (err: unknown): void => {
+      reportUnexpectedError(err, {
+        source: source.name,
+        delivery_id: context.deliveryId,
+        event: context.eventName,
+      })
+    }
+
+    void Promise.resolve()
+      .then(() => ({
+        dispatchResult: source.dispatch(context, payload, notifier),
+      }))
+      .then(({ dispatchResult }) =>
+        dispatchResult.match(
+          (outcome) => {
+            logDispatchSuccess(source.name, context, outcome)
+          },
+          (dispatchErr) => {
+            reportDispatchFailure(source.name, context, dispatchErr)
+          },
+        ),
+      )
+      .catch(reportUnexpected)
+  })
+}
+
 export const createApp = (deps: CreateAppDeps): Hono => {
   const app = new Hono()
 
@@ -33,8 +124,7 @@ export const createApp = (deps: CreateAppDeps): Hono => {
     // catch-all handler: any error from any route can land here, so keep
     // Sentry's default grouping (exception type/value/stacktrace) alongside
     // the shared key, or unrelated errors collapse into one issue.
-    captureWithFingerprint(err, [UNEXPECTED_ERROR_FINGERPRINT, '{{ default }}'])
-    logger.error({ err }, 'webhook_unexpected_error')
+    reportUnexpectedError(err)
     return c.json({ error: 'internal error' }, 500)
   })
 
@@ -93,40 +183,23 @@ export const createApp = (deps: CreateAppDeps): Hono => {
         return c.json({ error: 'invalid json' }, 400)
       }
 
+      if (source.acknowledgeBeforeDispatch === true) {
+        dispatchAfterAcknowledgement(
+          source,
+          context,
+          parsed.value,
+          deps.notifier,
+        )
+        return c.json({ ok: true })
+      }
+
       return source.dispatch(context, parsed.value, deps.notifier).match(
         (outcome) => {
-          logger.info(
-            {
-              source: source.name,
-              delivery_id: context.deliveryId,
-              event: context.eventName,
-              outcome,
-            },
-            'webhook_processed',
-          )
+          logDispatchSuccess(source.name, context, outcome)
           return c.json({ ok: true, outcome })
         },
         (dispatchErr) => {
-          const wrapped = new WebhookDispatchError(
-            `failed to dispatch ${source.name} webhook`,
-            dispatchErr,
-          )
-          captureWithFingerprint(wrapped, DISPATCH_ERROR_FINGERPRINT, {
-            extras: {
-              source: source.name,
-              deliveryId: context.deliveryId,
-              event: context.eventName,
-            },
-          })
-          logger.error(
-            {
-              source: source.name,
-              delivery_id: context.deliveryId,
-              event: context.eventName,
-              err: wrapped,
-            },
-            'webhook_handler_error',
-          )
+          reportDispatchFailure(source.name, context, dispatchErr)
           // Return 200 to suppress the source's redelivery; handler failures are not retried.
           return c.json({ ok: false, outcome: 'error' }, 200)
         },
