@@ -1,10 +1,10 @@
 import { createHmac } from 'node:crypto'
 
 import { Webhooks } from '@octokit/webhooks'
-import type { Hono } from 'hono'
-import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
+import { errAsync, okAsync, ResultAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import { createApp } from '#server'
 import { requestJson, requestText } from '#server-test-support'
 import type { SlackMessageRef, SlackNotifier } from '#slack'
@@ -26,16 +26,19 @@ const TQ_TASK_REF = {
 }
 
 const createNotifier = () => {
-  const postMessage = vi.fn((): ResultAsync<SlackMessageRef, SlackApiError> =>
-    okAsync({ channel: 'C1', ts: '1' }),
-  )
+  const postMessage = vi.fn((): ResultAsync<SlackMessageRef, SlackApiError> => {
+    return okAsync({ channel: 'C1', ts: '1' })
+  })
   const notifier: SlackNotifier = {
     postMessage,
     updateMessage: vi.fn(),
     findMessageByMetadata: vi.fn(),
     uploadImage: vi.fn(),
   }
-  return { notifier, postMessage }
+  return {
+    notifier,
+    postMessage,
+  }
 }
 
 const createGithubClient = () => ({
@@ -43,11 +46,14 @@ const createGithubClient = () => ({
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
 })
 
-const createTqClient = () => ({
-  createTask: vi.fn().mockReturnValue(okAsync(TQ_TASK_REF)),
+const createTqClient = (): TqClient => ({
+  createTask: vi.fn(() => okAsync(TQ_TASK_REF)),
 })
 
-const createTestApp = (notifier: SlackNotifier): Hono =>
+const createTestApp = (
+  notifier: SlackNotifier,
+  sentryTqClient: TqClient = createTqClient(),
+): ReturnType<typeof createApp> =>
   createApp({
     sources: [
       createGithubSource(
@@ -57,7 +63,7 @@ const createTestApp = (notifier: SlackNotifier): Hono =>
         createTqClient(),
         TQ_WEB_URL,
       ),
-      createSentrySource(SENTRY_SECRET, createTqClient(), TQ_WEB_URL),
+      createSentrySource(SENTRY_SECRET, sentryTqClient, TQ_WEB_URL),
     ],
     notifier,
   })
@@ -72,6 +78,11 @@ const observePostMessage = <TResult, TCalls>(
   result: TResult,
   postMessageCalls: TCalls,
 ) => ({ result, postMessageCalls })
+
+const observeWithEvents = <TResult>(result: TResult, events: string[]) => ({
+  result,
+  events,
+})
 
 const githubWorkflowRunFailureBody = JSON.stringify({
   action: 'completed',
@@ -244,12 +255,52 @@ describe('createApp with the real GitHub and Sentry sources', () => {
       body,
     })
 
+    await app.drainBackgroundDispatches()
+
     expect(observePostMessage(result, postMessage.mock.calls)).toEqual({
       result: {
         status: 200,
-        body: { ok: true, outcome: 'notified' },
+        body: { ok: true },
       },
       postMessageCalls: [[sentryIssueAlertTriggeredContent]],
+    })
+  })
+
+  it('returns a 2xx response before Sentry task creation completes', async () => {
+    const taskCreationStarted = Promise.withResolvers<undefined>()
+    const taskCreation = Promise.withResolvers<TqTaskRef>()
+    const events: string[] = []
+    const sentryTqClient: TqClient = {
+      createTask: vi.fn(() => {
+        events.push('task_creation_started')
+        taskCreationStarted.resolve(undefined)
+        return ResultAsync.fromSafePromise(taskCreation.promise)
+      }),
+    }
+    const { notifier } = createNotifier()
+    const app = createTestApp(notifier, sentryTqClient)
+
+    const resultPromise = requestJson(app, '/sentry', {
+      method: 'POST',
+      headers: {
+        'Request-ID': 'req-1',
+        'Sentry-Hook-Resource': 'event_alert',
+        'Sentry-Hook-Signature': signSentryBody(sentryIssueAlertTriggeredBody),
+      },
+      body: sentryIssueAlertTriggeredBody,
+    }).then((result) => {
+      events.push('response_returned')
+      return result
+    })
+    await taskCreationStarted.promise
+
+    const observation = observeWithEvents(await resultPromise, events)
+    taskCreation.resolve(TQ_TASK_REF)
+    await app.drainBackgroundDispatches()
+
+    expect(observation).toEqual({
+      result: { status: 200, body: { ok: true } },
+      events: ['response_returned', 'task_creation_started'],
     })
   })
 
@@ -397,6 +448,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
       },
       body: sentryBody,
     })
+    await app.drainBackgroundDispatches()
 
     expect(postMessage.mock.calls).toEqual([
       [githubWorkflowRunFailureContent],

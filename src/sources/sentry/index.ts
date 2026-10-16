@@ -13,6 +13,7 @@ export const createSentrySource = (
 ): WebhookSource => ({
   name: 'sentry',
   path: '/sentry',
+  acknowledgeBeforeDispatch: true,
   extractContext: extractSentryContext,
   verify: (rawBody, headers) =>
     verifySentrySignature(rawBody, headers, webhookSecret),

@@ -93,6 +93,10 @@ const main = (): void => {
           })
         }),
     },
+    {
+      name: 'drain-webhook-dispatches',
+      run: () => app.drainBackgroundDispatches(),
+    },
   ]
   const observabilityHandle = observability
   if (observabilityHandle) {

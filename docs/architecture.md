@@ -12,7 +12,13 @@ sequenceDiagram
   participant SLACK as Slack
 
   SRC->>POD: POST /<source> (webhook payload + signature header)
-  POD->>POD: verify signature, dispatch, filter
+  POD->>POD: verify signature, parse JSON
+  alt Sentry
+    POD-->>SRC: 200 { ok: true }
+    POD->>POD: schedule dispatch
+  else GitHub, Grafana, tq
+    POD->>POD: dispatch, filter
+  end
   alt event matches a notification rule
     POD->>TQ: POST /api/tasks
     alt task created
@@ -31,7 +37,11 @@ sequenceDiagram
   else no matching notification
     POD->>POD: ignore event
   end
-  POD-->>SRC: 200
+  alt Sentry
+    POD->>POD: log and report dispatch result
+  else GitHub, Grafana, tq
+    POD-->>SRC: 200 with dispatch outcome
+  end
 ```
 
 ## Request flow
@@ -41,9 +51,9 @@ Each registered `WebhookSource` (`src/webhook-source.ts`) is mounted at its own 
 1. `extractContext()` pulls source-specific delivery context from the request. Missing required headers return `400`; Grafana and tq generate random request IDs instead of reading a delivery ID header.
 2. `verify()` checks the request's signature against the source's shared secret. Failure returns `401`.
 3. The raw body is parsed as JSON. Parse failure returns `400`.
-4. `dispatch()` runs the source-specific handler for the event.
-5. If the handler returns a notification, the Slack client posts it; otherwise the request is recorded as `filtered` or `ignored`.
-6. Successful processing returns `200` with `{ ok: true, outcome }`. Any thrown error inside dispatch/handler is logged and also returned as `200` with `{ ok: false, outcome: "error" }` — this is intentional, because the source will redeliver any non-2xx response and the failures here are not transient.
+4. Sentry returns `200` with `{ ok: true }` and schedules `dispatch()` to run after the response. Other sources run `dispatch()` before responding.
+5. If dispatch returns a notification, the Slack client posts it; otherwise processing is recorded as `filtered` or `ignored`.
+6. GitHub, Grafana, and tq return `200` with `{ ok: true, outcome }` on success or `{ ok: false, outcome: "error" }` when dispatch fails. Sentry's dispatch result is logged and reported to Sentry after its response. A shutdown waits up to five seconds for scheduled dispatches to finish and reports any remaining deliveries.
 
 ### GitHub (`POST /github`)
 
