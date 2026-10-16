@@ -369,11 +369,20 @@ export const createSlackNotifier = (
       )
     },
     updateMessage(ref, content) {
+      const fileIds = (content.blocks ?? []).flatMap((block) => {
+        if (!isRecord(block) || block['type'] !== 'image') return []
+        const slackFile = block['slack_file']
+        return isRecord(slackFile) && typeof slackFile['id'] === 'string'
+          ? [slackFile['id']]
+          : []
+      })
+
       return wrapSlackApi(
         client.chat.update({
           channel: ref.channel,
           ts: ref.ts,
           ...buildPayload(content),
+          ...(fileIds.length > 0 ? { file_ids: fileIds } : {}),
         }),
         'failed to update Slack message',
       ).map(() => undefined)

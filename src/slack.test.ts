@@ -13,12 +13,14 @@ const {
   conversationsList,
   conversationsHistory,
   chatPostMessage,
+  chatUpdate,
   filesUploadV2,
   authTest,
 } = vi.hoisted(() => ({
   conversationsList: vi.fn(),
   conversationsHistory: vi.fn(),
   chatPostMessage: vi.fn(),
+  chatUpdate: vi.fn(),
   filesUploadV2: vi.fn(),
   authTest: vi.fn(),
 }))
@@ -30,7 +32,7 @@ vi.mock('@slack/web-api', () => ({
         list: conversationsList,
         history: conversationsHistory,
       },
-      chat: { postMessage: chatPostMessage },
+      chat: { postMessage: chatPostMessage, update: chatUpdate },
       filesUploadV2,
       auth: { test: authTest },
     }
@@ -57,6 +59,7 @@ beforeEach(() => {
   conversationsList.mockReset()
   conversationsHistory.mockReset()
   chatPostMessage.mockReset()
+  chatUpdate.mockReset()
   filesUploadV2.mockReset()
   authTest.mockReset()
   conversationsList.mockResolvedValue({
@@ -64,6 +67,7 @@ beforeEach(() => {
     response_metadata: { next_cursor: '' },
   })
   chatPostMessage.mockResolvedValue({ ok: true, ts: '1', channel: 'C1' })
+  chatUpdate.mockResolvedValue({ ok: true, ts: '1', channel: 'C1' })
   filesUploadV2.mockResolvedValue({
     ok: true,
     files: [{ ok: true, files: [{ id: 'FIMAGE' }] }],
@@ -164,6 +168,36 @@ describe('postMessage', () => {
     expect(conversationsList.mock.calls).toEqual([
       [LIST_CALL_ARGS],
       [LIST_CALL_ARGS],
+    ])
+  })
+})
+
+describe('updateMessage', () => {
+  it('shares Slack image files on the message with the coloured attachment', async () => {
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const blocks: SlackBlock[] = [
+      { type: 'header', text: { type: 'plain_text', text: 'Alert' } },
+      {
+        type: 'image',
+        slack_file: { id: 'FIMAGE' },
+        alt_text: 'Panel image',
+      },
+    ]
+
+    await notifier.updateMessage(
+      { channel: 'C1', ts: '1' },
+      { text: 'Alert', color: '#d73a49', blocks },
+    )
+
+    expect(chatUpdate.mock.calls).toEqual([
+      [
+        {
+          channel: 'C1',
+          ts: '1',
+          attachments: [{ color: '#d73a49', blocks, fallback: 'Alert' }],
+          file_ids: ['FIMAGE'],
+        },
+      ],
     ])
   })
 })
