@@ -1,5 +1,5 @@
 import { captureWithFingerprint } from '@fohte/service-kit/observability'
-import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
+import { errAsync, okAsync, ResultAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createApp, WebhookDispatchError } from '#server'
@@ -205,6 +205,51 @@ describe('createApp', () => {
     expect(observeWithEvents(await resultPromise, events)).toEqual({
       result: { status: 200, body: { ok: true } },
       events: ['response_returned', 'dispatch_started'],
+    })
+  })
+
+  it('drains acknowledged dispatches before shutdown', async () => {
+    const dispatchStarted = Promise.withResolvers<undefined>()
+    const dispatchCompletion = Promise.withResolvers<DispatchOutcome>()
+    const events: string[] = []
+    const source = createSource({
+      acknowledgeBeforeDispatch: true,
+      verify: () => true,
+      dispatch: () => {
+        events.push('dispatch_started')
+        dispatchStarted.resolve(undefined)
+        return ResultAsync.fromSafePromise(dispatchCompletion.promise).map(
+          (outcome) => {
+            events.push('dispatch_completed')
+            return outcome
+          },
+        )
+      },
+    })
+    const app = createApp({ sources: [source], notifier: createNotifier() })
+
+    const response = await requestJson(app, '/dummy', {
+      method: 'POST',
+      headers: validHeaders,
+      body: '{}',
+    })
+    await dispatchStarted.promise
+    const drain = app.drainBackgroundDispatches().then(() => {
+      events.push('drain_completed')
+    })
+    await Promise.resolve()
+    const eventsBeforeCompletion = [...events]
+    dispatchCompletion.resolve('notified')
+    await drain
+
+    expect(
+      observeWithEvents({ response, eventsBeforeCompletion }, events),
+    ).toEqual({
+      result: {
+        response: { status: 200, body: { ok: true } },
+        eventsBeforeCompletion: ['dispatch_started'],
+      },
+      events: ['dispatch_started', 'dispatch_completed', 'drain_completed'],
     })
   })
 

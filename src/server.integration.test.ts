@@ -1,7 +1,6 @@
 import { createHmac } from 'node:crypto'
 
 import { Webhooks } from '@octokit/webhooks'
-import type { Hono } from 'hono'
 import { errAsync, okAsync, ResultAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -27,9 +26,7 @@ const TQ_TASK_REF = {
 }
 
 const createNotifier = () => {
-  const postMessageCalled = Promise.withResolvers<undefined>()
   const postMessage = vi.fn((): ResultAsync<SlackMessageRef, SlackApiError> => {
-    postMessageCalled.resolve(undefined)
     return okAsync({ channel: 'C1', ts: '1' })
   })
   const notifier: SlackNotifier = {
@@ -41,7 +38,6 @@ const createNotifier = () => {
   return {
     notifier,
     postMessage,
-    postMessageCalled: postMessageCalled.promise,
   }
 }
 
@@ -57,7 +53,7 @@ const createTqClient = (): TqClient => ({
 const createTestApp = (
   notifier: SlackNotifier,
   sentryTqClient: TqClient = createTqClient(),
-): Hono =>
+): ReturnType<typeof createApp> =>
   createApp({
     sources: [
       createGithubSource(
@@ -245,7 +241,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
   })
 
   it('notifies Slack for POST /sentry with a valid signature and a triggered event_alert', async () => {
-    const { notifier, postMessage, postMessageCalled } = createNotifier()
+    const { notifier, postMessage } = createNotifier()
     const app = createTestApp(notifier)
     const body = sentryIssueAlertTriggeredBody
 
@@ -259,7 +255,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
       body,
     })
 
-    await postMessageCalled
+    await app.drainBackgroundDispatches()
 
     expect(observePostMessage(result, postMessage.mock.calls)).toEqual({
       result: {
@@ -298,7 +294,11 @@ describe('createApp with the real GitHub and Sentry sources', () => {
     })
     await taskCreationStarted.promise
 
-    expect(observeWithEvents(await resultPromise, events)).toEqual({
+    const observation = observeWithEvents(await resultPromise, events)
+    taskCreation.resolve(TQ_TASK_REF)
+    await app.drainBackgroundDispatches()
+
+    expect(observation).toEqual({
       result: { status: 200, body: { ok: true } },
       events: ['response_returned', 'task_creation_started'],
     })
@@ -423,7 +423,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
   })
 
   it('isolates a dispatch failure in the GitHub source from the Sentry source', async () => {
-    const { notifier, postMessage, postMessageCalled } = createNotifier()
+    const { notifier, postMessage } = createNotifier()
     postMessage.mockReturnValueOnce(errAsync(new SlackApiError('boom')))
     const app = createTestApp(notifier)
 
@@ -448,7 +448,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
       },
       body: sentryBody,
     })
-    await postMessageCalled
+    await app.drainBackgroundDispatches()
 
     expect(postMessage.mock.calls).toEqual([
       [githubWorkflowRunFailureContent],

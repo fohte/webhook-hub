@@ -4,7 +4,12 @@ import { Result } from 'neverthrow'
 
 import { logger } from '#logger'
 import type { SlackNotifier } from '#slack'
-import type { WebhookHeaders, WebhookSourceRegistry } from '#webhook-source'
+import type {
+  DispatchOutcome,
+  SourceContext,
+  WebhookHeaders,
+  WebhookSourceRegistry,
+} from '#webhook-source'
 
 export interface CreateAppDeps {
   sources: WebhookSourceRegistry
@@ -20,6 +25,14 @@ export class WebhookDispatchError extends Error {
 
 const DISPATCH_ERROR_FINGERPRINT = 'webhook-hub.webhook-dispatch-failed'
 const UNEXPECTED_ERROR_FINGERPRINT = 'webhook-hub.unexpected-error'
+const SHUTDOWN_DISPATCH_TIMEOUT_FINGERPRINT =
+  'webhook-hub.shutdown-dispatch-timeout'
+const BACKGROUND_DISPATCH_DRAIN_TIMEOUT_MS = 5_000
+
+interface PendingDispatch {
+  source: string
+  context: SourceContext
+}
 
 const parseJson = Result.fromThrowable(
   (text: string): unknown => JSON.parse(text) as unknown,
@@ -43,7 +56,7 @@ const reportUnexpectedError = (
 
 const reportDispatchFailure = (
   source: string,
-  context: { deliveryId: string; eventName: string },
+  context: SourceContext,
   dispatchErr: unknown,
 ): void => {
   const wrapped = new WebhookDispatchError(
@@ -70,8 +83,8 @@ const reportDispatchFailure = (
 
 const logDispatchSuccess = (
   source: string,
-  context: { deliveryId: string; eventName: string },
-  outcome: string,
+  context: SourceContext,
+  outcome: DispatchOutcome,
 ): void => {
   logger.info(
     {
@@ -86,39 +99,107 @@ const logDispatchSuccess = (
 
 const dispatchAfterAcknowledgement = (
   source: WebhookSourceRegistry[number],
-  context: { deliveryId: string; eventName: string },
+  context: SourceContext,
   payload: unknown,
   notifier: SlackNotifier,
-): void => {
-  setImmediate(() => {
-    const reportUnexpected = (err: unknown): void => {
-      reportUnexpectedError(err, {
-        source: source.name,
-        delivery_id: context.deliveryId,
-        event: context.eventName,
-      })
-    }
+): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(() => {
+      const reportUnexpected = (err: unknown): void => {
+        reportUnexpectedError(err, {
+          source: source.name,
+          delivery_id: context.deliveryId,
+          event: context.eventName,
+        })
+      }
 
-    void Promise.resolve()
-      .then(() => ({
-        dispatchResult: source.dispatch(context, payload, notifier),
-      }))
-      .then(({ dispatchResult }) =>
-        dispatchResult.match(
-          (outcome) => {
-            logDispatchSuccess(source.name, context, outcome)
+      void Promise.resolve()
+        .then(() => ({
+          dispatchResult: source.dispatch(context, payload, notifier),
+        }))
+        .then(({ dispatchResult }) =>
+          dispatchResult.match(
+            (outcome) => {
+              logDispatchSuccess(source.name, context, outcome)
+            },
+            (dispatchErr) => {
+              reportDispatchFailure(source.name, context, dispatchErr)
+            },
+          ),
+        )
+        .catch(reportUnexpected)
+        .then(
+          () => {
+            resolve()
           },
-          (dispatchErr) => {
-            reportDispatchFailure(source.name, context, dispatchErr)
+          () => {
+            resolve()
           },
-        ),
-      )
-      .catch(reportUnexpected)
+        )
+    })
   })
+
+export interface WebhookApp extends Hono {
+  drainBackgroundDispatches(): Promise<void>
 }
 
-export const createApp = (deps: CreateAppDeps): Hono => {
+export const createApp = (deps: CreateAppDeps): WebhookApp => {
   const app = new Hono()
+  const pendingDispatches = new Map<Promise<void>, PendingDispatch>()
+
+  const drainBackgroundDispatches = async (): Promise<void> => {
+    const deadline = Date.now() + BACKGROUND_DISPATCH_DRAIN_TIMEOUT_MS
+    while (pendingDispatches.size > 0) {
+      const remainingMs = deadline - Date.now()
+      if (remainingMs <= 0) break
+
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      const result = await Promise.race([
+        Promise.allSettled([...pendingDispatches.keys()]).then(() => 'drained'),
+        new Promise<'timeout'>((resolve) => {
+          timeout = setTimeout(() => {
+            resolve('timeout')
+          }, remainingMs)
+        }),
+      ])
+      if (timeout !== undefined) clearTimeout(timeout)
+      if (result === 'timeout') break
+    }
+
+    if (pendingDispatches.size > 0) {
+      const dispatches = [...pendingDispatches.values()].map(
+        ({ source, context }) => ({
+          source,
+          delivery_id: context.deliveryId,
+          event: context.eventName,
+        }),
+      )
+      const err = new Error(
+        `timed out waiting for ${String(dispatches.length)} webhook dispatches during shutdown`,
+      )
+      captureWithFingerprint(err, SHUTDOWN_DISPATCH_TIMEOUT_FINGERPRINT, {
+        extras: { dispatches },
+      })
+      logger.error({ dispatches, err }, 'webhook_dispatch_shutdown_timeout')
+    }
+  }
+
+  const trackBackgroundDispatch = (
+    source: WebhookSourceRegistry[number],
+    context: SourceContext,
+    payload: unknown,
+  ): void => {
+    const dispatch = dispatchAfterAcknowledgement(
+      source,
+      context,
+      payload,
+      deps.notifier,
+    )
+    const trackedDispatch = dispatch.finally(() => {
+      pendingDispatches.delete(trackedDispatch)
+    })
+    pendingDispatches.set(trackedDispatch, { source: source.name, context })
+  }
 
   app.onError((err, c) => {
     // catch-all handler: any error from any route can land here, so keep
@@ -184,12 +265,7 @@ export const createApp = (deps: CreateAppDeps): Hono => {
       }
 
       if (source.acknowledgeBeforeDispatch === true) {
-        dispatchAfterAcknowledgement(
-          source,
-          context,
-          parsed.value,
-          deps.notifier,
-        )
+        trackBackgroundDispatch(source, context, parsed.value)
         return c.json({ ok: true })
       }
 
@@ -207,5 +283,5 @@ export const createApp = (deps: CreateAppDeps): Hono => {
     })
   }
 
-  return app
+  return Object.assign(app, { drainBackgroundDispatches })
 }
