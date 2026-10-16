@@ -1,3 +1,5 @@
+import { setImmediate } from 'node:timers/promises'
+
 import { captureWithFingerprint } from '@fohte/service-kit/observability'
 import { Hono } from 'hono'
 import { Result } from 'neverthrow'
@@ -102,42 +104,28 @@ const dispatchAfterAcknowledgement = (
   context: SourceContext,
   payload: unknown,
   notifier: SlackNotifier,
-): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(() => {
-      const reportUnexpected = (err: unknown): void => {
-        reportUnexpectedError(err, {
-          source: source.name,
-          delivery_id: context.deliveryId,
-          event: context.eventName,
-        })
-      }
-
-      void Promise.resolve()
-        .then(() => ({
-          dispatchResult: source.dispatch(context, payload, notifier),
-        }))
-        .then(({ dispatchResult }) =>
-          dispatchResult.match(
-            (outcome) => {
-              logDispatchSuccess(source.name, context, outcome)
-            },
-            (dispatchErr) => {
-              reportDispatchFailure(source.name, context, dispatchErr)
-            },
-          ),
-        )
-        .catch(reportUnexpected)
-        .then(
-          () => {
-            resolve()
-          },
-          () => {
-            resolve()
-          },
-        )
+): Promise<void> => {
+  const reportUnexpected = (err: unknown): void => {
+    reportUnexpectedError(err, {
+      source: source.name,
+      delivery_id: context.deliveryId,
+      event: context.eventName,
     })
-  })
+  }
+
+  return setImmediate()
+    .then(() =>
+      source.dispatch(context, payload, notifier).match(
+        (outcome) => {
+          logDispatchSuccess(source.name, context, outcome)
+        },
+        (dispatchErr) => {
+          reportDispatchFailure(source.name, context, dispatchErr)
+        },
+      ),
+    )
+    .catch(reportUnexpected)
+}
 
 export interface WebhookApp extends Hono {
   drainBackgroundDispatches(): Promise<void>
@@ -148,25 +136,20 @@ export const createApp = (deps: CreateAppDeps): WebhookApp => {
   const pendingDispatches = new Map<Promise<void>, PendingDispatch>()
 
   const drainBackgroundDispatches = async (): Promise<void> => {
-    const deadline = Date.now() + BACKGROUND_DISPATCH_DRAIN_TIMEOUT_MS
-    while (pendingDispatches.size > 0) {
-      const remainingMs = deadline - Date.now()
-      if (remainingMs <= 0) break
+    if (pendingDispatches.size === 0) return
 
-      let timeout: ReturnType<typeof setTimeout> | undefined
-      const result = await Promise.race([
-        Promise.allSettled([...pendingDispatches.keys()]).then(() => 'drained'),
-        new Promise<'timeout'>((resolve) => {
-          timeout = setTimeout(() => {
-            resolve('timeout')
-          }, remainingMs)
-        }),
-      ])
-      if (timeout !== undefined) clearTimeout(timeout)
-      if (result === 'timeout') break
-    }
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const result = await Promise.race([
+      Promise.allSettled([...pendingDispatches.keys()]).then(() => 'drained'),
+      new Promise<'timeout'>((resolve) => {
+        timeout = setTimeout(() => {
+          resolve('timeout')
+        }, BACKGROUND_DISPATCH_DRAIN_TIMEOUT_MS)
+      }),
+    ])
+    if (timeout !== undefined) clearTimeout(timeout)
 
-    if (pendingDispatches.size > 0) {
+    if (result === 'timeout' && pendingDispatches.size > 0) {
       const dispatches = [...pendingDispatches.values()].map(
         ({ source, context }) => ({
           source,
