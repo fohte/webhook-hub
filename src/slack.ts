@@ -240,6 +240,13 @@ export const buildPayload = (content: SlackMessageContent): MessagePayload => {
     : withBlocks
 }
 
+const collectSlackFileIds = (blocks: readonly SlackBlock[]): string[] =>
+  blocks.flatMap((block) =>
+    block.type === 'image' && 'slack_file' in block && 'id' in block.slack_file
+      ? [block.slack_file.id]
+      : [],
+  )
+
 export const createSlackNotifier = (
   token: string,
   defaultChannel: string,
@@ -369,13 +376,7 @@ export const createSlackNotifier = (
       )
     },
     updateMessage(ref, content) {
-      const fileIds = (content.blocks ?? []).flatMap((block) => {
-        if (!isRecord(block) || block['type'] !== 'image') return []
-        const slackFile = block['slack_file']
-        return isRecord(slackFile) && typeof slackFile['id'] === 'string'
-          ? [slackFile['id']]
-          : []
-      })
+      const fileIds = collectSlackFileIds(content.blocks ?? [])
 
       return wrapSlackApi(
         client.chat.update({
