@@ -16,6 +16,7 @@ const createNotifier = (): SlackNotifier => ({
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
   findMessageByMetadata: vi.fn(),
+  findMessagesByMetadata: vi.fn(),
   uploadImage: vi.fn(),
 })
 

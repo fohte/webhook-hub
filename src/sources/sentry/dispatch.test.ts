@@ -22,6 +22,9 @@ const createNotifier = () => ({
   findMessageByMetadata: vi
     .fn<DispatchContext['notifier']['findMessageByMetadata']>()
     .mockReturnValue(okAsync(null)),
+  findMessagesByMetadata: vi
+    .fn<DispatchContext['notifier']['findMessagesByMetadata']>()
+    .mockReturnValue(okAsync([])),
   uploadImage: vi
     .fn<DispatchContext['notifier']['uploadImage']>()
     .mockReturnValue(okAsync('FIMAGE')),
@@ -63,11 +66,16 @@ const observeIssueStateDispatch = <TOutcome, TSearch, TUpdateCalls>(
   updateCalls: TUpdateCalls,
 ) => ({ outcome, search, updateCalls })
 
-const issueAlertPayload = (overrides: { action?: string } = {}): unknown => ({
+const issueAlertPayload = (
+  overrides: {
+    action?: string
+    issueIdField?: 'issue_id' | 'group_id'
+  } = {},
+): unknown => ({
   action: overrides.action ?? 'triggered',
   data: {
-    issue: { id: SENTRY_ISSUE_ID },
     event: {
+      [overrides.issueIdField ?? 'issue_id']: SENTRY_ISSUE_ID,
       title: 'TypeError: Cannot read properties of undefined',
       level: 'error',
       web_url: 'https://sentry.io/organizations/example-org/issues/123/',
@@ -307,6 +315,38 @@ describe('dispatch', () => {
     })
   })
 
+  it('falls back to the Sentry event group_id for the issue metadata', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      resource: 'event_alert',
+      payload: issueAlertPayload({ issueIdField: 'group_id' }),
+    })
+    expect(
+      observeIssueStateDispatch(
+        outcome,
+        notifier.postMessage.mock.calls.map(
+          ([content]) => content.metadata ?? null,
+        ),
+        [],
+      ),
+    ).toEqual({
+      outcome: 'notified',
+      search: [
+        {
+          event_type: 'alert_task',
+          event_payload: {
+            task_id: '00000000-0000-4000-8000-000000000001',
+            sentry_issue_id: SENTRY_ISSUE_ID,
+            tq_task_status: 'todo',
+            tq_task_status_reason: 'none',
+          },
+        },
+      ],
+      updateCalls: [],
+    })
+  })
+
   it('returns ignored without posting when the action is not triggered', async () => {
     const notifier = createNotifier()
 
@@ -346,12 +386,21 @@ describe('dispatch', () => {
   it('folds the matching Sentry notification when an issue is resolved', async () => {
     const notifier = createNotifier()
     const content = existingSentryContent()
-    notifier.findMessageByMetadata.mockReturnValue(
-      okAsync({
-        ref: SENTRY_MESSAGE_REF,
-        eventPayload: content.metadata?.event_payload ?? {},
-        content,
-      }),
+    const olderContent = existingSentryContent()
+    const olderMessageRef = { channel: 'C-TEST', ts: '1699999999.000001' }
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: SENTRY_MESSAGE_REF,
+          eventPayload: content.metadata?.event_payload ?? {},
+          content,
+        },
+        {
+          ref: olderMessageRef,
+          eventPayload: olderContent.metadata?.event_payload ?? {},
+          content: olderContent,
+        },
+      ]),
     )
 
     const outcome = await dispatchOutcome(createContext(notifier), {
@@ -361,7 +410,7 @@ describe('dispatch', () => {
         data: { issue: { id: SENTRY_ISSUE_ID } },
       },
     })
-    const searchCall = notifier.findMessageByMetadata.mock.calls[0]
+    const searchCall = notifier.findMessagesByMetadata.mock.calls[0]
     const payloadMatcher = searchCall?.[1]
 
     expect(
@@ -391,6 +440,7 @@ describe('dispatch', () => {
       },
       updateCalls: [
         [SENTRY_MESSAGE_REF, setSourceAlertResolved(content, true)],
+        [olderMessageRef, setSourceAlertResolved(olderContent, true)],
       ],
     })
   })
@@ -399,12 +449,14 @@ describe('dispatch', () => {
     const notifier = createNotifier()
     const original = existingSentryContent()
     const resolved = setSourceAlertResolved(original, true)
-    notifier.findMessageByMetadata.mockReturnValue(
-      okAsync({
-        ref: SENTRY_MESSAGE_REF,
-        eventPayload: resolved.metadata?.event_payload ?? {},
-        content: resolved,
-      }),
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: SENTRY_MESSAGE_REF,
+          eventPayload: resolved.metadata?.event_payload ?? {},
+          content: resolved,
+        },
+      ]),
     )
 
     const outcome = await dispatchOutcome(createContext(notifier), {
@@ -440,7 +492,7 @@ describe('dispatch', () => {
         data: { issue: { id: SENTRY_ISSUE_ID } },
       },
     })
-    const searchCall = notifier.findMessageByMetadata.mock.calls[0]
+    const searchCall = notifier.findMessagesByMetadata.mock.calls[0]
     const payloadMatcher = searchCall?.[1]
 
     expect(
@@ -465,5 +517,25 @@ describe('dispatch', () => {
       },
       updateCalls: [],
     })
+  })
+
+  it('ignores other Sentry issue actions without searching Slack', async () => {
+    const notifier = createNotifier()
+
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      resource: 'issue',
+      payload: {
+        action: 'assigned',
+        data: { issue: { id: SENTRY_ISSUE_ID } },
+      },
+    })
+
+    expect(
+      observeIssueStateDispatch(
+        outcome,
+        notifier.findMessagesByMetadata.mock.calls,
+        notifier.updateMessage.mock.calls,
+      ),
+    ).toEqual({ outcome: 'ignored', search: [], updateCalls: [] })
   })
 })

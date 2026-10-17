@@ -1,5 +1,4 @@
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+import { isRecord } from '#slack-message-content'
 
 const normalizeIssueId = (value: unknown): string | null => {
   if (typeof value === 'string' && value !== '') return value
@@ -17,7 +16,9 @@ export const readSentryIssueId = (payload: unknown): string | null => {
 
   const event = data['event']
   if (!isRecord(event)) return null
-  return normalizeIssueId(event['group_id'])
+  return (
+    normalizeIssueId(event['issue_id']) ?? normalizeIssueId(event['group_id'])
+  )
 }
 
 export interface SentryIssueStateChange {

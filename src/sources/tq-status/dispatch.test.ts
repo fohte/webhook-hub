@@ -96,10 +96,14 @@ const createNotifier = (
   const updateMessage = vi
     .fn<SlackNotifier['updateMessage']>()
     .mockReturnValue(okAsync(undefined))
+  const findMessagesByMetadata = vi
+    .fn<SlackNotifier['findMessagesByMetadata']>()
+    .mockReturnValue(okAsync([]))
   const notifier: SlackNotifier = {
     postMessage: vi.fn(),
     updateMessage,
     findMessageByMetadata,
+    findMessagesByMetadata,
     uploadImage: vi.fn(),
   }
   return { notifier, findMessageByMetadata, updateMessage }

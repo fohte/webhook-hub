@@ -45,22 +45,28 @@ const dispatchIssueStateChange = (
   if (stateChange === null) return okAsync('ignored')
 
   return ctx.notifier
-    .findMessageByMetadata(
+    .findMessagesByMetadata(
       'alert_task',
       (eventPayload) => eventPayload['sentry_issue_id'] === stateChange.issueId,
     )
-    .andThen((existing) => {
-      if (existing?.content === undefined) {
-        return okAsync<DispatchOutcome>('ignored')
-      }
+    .andThen((existingMessages) =>
+      existingMessages.reduce<ResultAsync<DispatchOutcome, SlackApiError>>(
+        (result, existing) =>
+          result.andThen((outcome) => {
+            if (existing.content === undefined) {
+              return okAsync<DispatchOutcome>(outcome)
+            }
 
-      return ctx.notifier
-        .updateMessage(
-          existing.ref,
-          setSourceAlertResolved(existing.content, stateChange.resolved),
-        )
-        .map((): DispatchOutcome => 'notified')
-    })
+            return ctx.notifier
+              .updateMessage(
+                existing.ref,
+                setSourceAlertResolved(existing.content, stateChange.resolved),
+              )
+              .map((): DispatchOutcome => 'notified')
+          }),
+        okAsync<DispatchOutcome>('ignored'),
+      ),
+    )
 }
 
 // Sentry defines no extra filter stage beyond recognizing a triggered
