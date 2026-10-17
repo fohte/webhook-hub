@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@fohte/service-kit':
-        specifier: 0.1.15
-        version: 0.1.15(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)
+        specifier: 0.1.16
+        version: 0.1.16(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)
       '@hono/node-server':
         specifier: 2.0.12
         version: 2.0.12(hono@4.12.34)
@@ -821,8 +821,8 @@ packages:
       typescript:
         optional: true
 
-  '@fohte/service-kit@0.1.15':
-    resolution: {integrity: sha512-evckwxgtXh/cEV4ruy315dbt2JgPi7efmTpYVqCV8sau8BVj+DSHUsJsxaswk3Ffsg/WjN6fGsgKRXe27hB0Ow==}
+  '@fohte/service-kit@0.1.16':
+    resolution: {integrity: sha512-GVy3PkzaWdrdUdNfMVkRl4+Sm9y+9xZZWVkJeiMBr29xr4cM26riEsrcVfVD4DV0PPMVU24aJ7kjx8BVH75Zjg==}
     peerDependencies:
       '@langchain/core': ^1.2.0
       '@opentelemetry/api': ^1.9.1
@@ -4409,7 +4409,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@fohte/service-kit@0.1.15(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)':
+  '@fohte/service-kit@0.1.16(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.219.0(@opentelemetry/api@1.9.1))(pino@10.3.1)(supports-color@10.2.2)':
     dependencies:
       '@bufbuild/protobuf': 2.14.0
       '@opentelemetry/auto-instrumentations-node': 0.77.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(supports-color@10.2.2)
