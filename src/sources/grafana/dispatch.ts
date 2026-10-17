@@ -8,6 +8,7 @@ import {
 } from 'neverthrow'
 
 import { logger } from '#logger'
+import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
 import {
   addTqTaskStatus,
   createAlertTask,
@@ -24,6 +25,7 @@ import {
 import {
   buildGrafanaAlertNotification,
   type GrafanaAlert,
+  isGrafanaPanelLinkBlock,
 } from '#sources/grafana/handlers/alert'
 import {
   type GrafanaPanelImageRenderer,
@@ -143,28 +145,39 @@ const addPanelImage = (
   const addImageBlock = (
     fileId: string,
     panelId: string,
-  ): SlackMessageContent => ({
-    ...content,
-    ...(content.metadata === undefined
-      ? {}
-      : {
-          metadata: {
-            ...content.metadata,
-            event_payload: {
-              ...content.metadata.event_payload,
-              panel_image_file_id: fileId,
+  ): SlackMessageContent => {
+    const blocks = content.blocks ?? []
+    const panelLinkIndex = blocks.findIndex(isGrafanaPanelLinkBlock)
+    const imageBlock = {
+      type: 'image' as const,
+      slack_file: { id: fileId },
+      alt_text: `Grafana panel ${panelId}`,
+    }
+    const blocksWithImage =
+      panelLinkIndex === -1
+        ? [...blocks, imageBlock]
+        : [
+            ...blocks.slice(0, panelLinkIndex),
+            imageBlock,
+            ...blocks.slice(panelLinkIndex),
+          ]
+
+    return {
+      ...content,
+      ...(content.metadata === undefined
+        ? {}
+        : {
+            metadata: {
+              ...content.metadata,
+              event_payload: {
+                ...content.metadata.event_payload,
+                panel_image_file_id: fileId,
+              },
             },
-          },
-        }),
-    blocks: [
-      ...(content.blocks ?? []),
-      {
-        type: 'image' as const,
-        slack_file: { id: fileId },
-        alt_text: `Grafana panel ${panelId}`,
-      },
-    ],
-  })
+          }),
+      blocks: blocksWithImage,
+    }
+  }
 
   if (existingPanelImageFileId !== undefined) {
     return okAsync(
@@ -238,45 +251,53 @@ const dispatchAlert = (
             content.metadata,
             previousStatus,
           )
-        const contentWithoutPanelImage = withTaskStatus(baseContent)
-        return addPanelImage(ctx, alert, baseContent, panelImageFileId).andThen(
-          (contentWithImage) => {
-            const notificationContent = withTaskStatus(contentWithImage)
-            const notify = (messageContent: SlackMessageContent) =>
-              existing === null
-                ? ctx.notifier.postMessage(messageContent).map(() => undefined)
-                : ctx.notifier.updateMessage(existing.ref, messageContent)
-
-            const notification = notify(notificationContent).orElse((error) => {
-              const attachedFileId = readPanelImageFileId(
-                notificationContent.metadata?.event_payload,
-              )
-              if (attachedFileId === undefined) return errAsync(error)
-
-              reportPanelImageFailure(
-                alert,
-                error,
-                existing === null ? 'post' : 'update',
-              )
-              return notify(contentWithoutPanelImage)
-            })
-
-            return notification.map((): DispatchOutcome => {
-              logger.info(
-                {
-                  delivery_id: ctx.deliveryId,
-                  event: ctx.eventName,
-                  fingerprint: alert.fingerprint,
-                  starts_at: alert.startsAt,
-                  title: note.alertName,
-                  status: note.status,
-                },
-                'slack_notified',
-              )
-              return 'notified'
-            })
-          },
+        const withSourceStatus = (content: SlackMessageContent) =>
+          setSourceAlertResolved(content, alert.status === 'resolved')
+        const contentWithoutPanelImage = withSourceStatus(
+          withTaskStatus(baseContent),
         )
+        const imageContent =
+          alert.status === 'resolved' && panelImageFileId === undefined
+            ? okAsync(baseContent)
+            : addPanelImage(ctx, alert, baseContent, panelImageFileId)
+        return imageContent.andThen((contentWithImage) => {
+          const notificationContent = withSourceStatus(
+            withTaskStatus(contentWithImage),
+          )
+          const notify = (messageContent: SlackMessageContent) =>
+            existing === null
+              ? ctx.notifier.postMessage(messageContent).map(() => undefined)
+              : ctx.notifier.updateMessage(existing.ref, messageContent)
+
+          const notification = notify(notificationContent).orElse((error) => {
+            const attachedFileId = readPanelImageFileId(
+              notificationContent.metadata?.event_payload,
+            )
+            if (attachedFileId === undefined) return errAsync(error)
+
+            reportPanelImageFailure(
+              alert,
+              error,
+              existing === null ? 'post' : 'update',
+            )
+            return notify(contentWithoutPanelImage)
+          })
+
+          return notification.map((): DispatchOutcome => {
+            logger.info(
+              {
+                delivery_id: ctx.deliveryId,
+                event: ctx.eventName,
+                fingerprint: alert.fingerprint,
+                starts_at: alert.startsAt,
+                title: note.alertName,
+                status: note.status,
+              },
+              'slack_notified',
+            )
+            return 'notified'
+          })
+        })
       })
     })
 }

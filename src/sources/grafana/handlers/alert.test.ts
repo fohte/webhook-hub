@@ -1,54 +1,73 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildGrafanaAlertNotification } from '#sources/grafana/handlers/alert'
+import type { SlackBlock } from '#slack'
+import {
+  buildGrafanaAlertNotification,
+  isGrafanaPanelLinkBlock,
+} from '#sources/grafana/handlers/alert'
 
 describe('buildGrafanaAlertNotification', () => {
-  it('builds the Slack alert and tq task from one Grafana alert', () => {
+  it('identifies only the Grafana Panel link context block', () => {
+    const contextBlocks: SlackBlock[] = [
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '<https://observability.example.test/d/overview|Dashboard>',
+          },
+        ],
+      },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '<https://observability.example.test/d/overview?viewPanel=7|Panel>',
+          },
+        ],
+      },
+    ]
+    const results = contextBlocks.map(isGrafanaPanelLinkBlock)
+
+    expect(results).toEqual([false, true])
+  })
+
+  it('builds the compact Grafana body and preserves full task details', () => {
     expect(
       buildGrafanaAlertNotification({
         status: 'firing',
         labels: {
-          alertname: 'High CPU usage',
-          severity: 'critical',
-          instance: 'node-a',
+          alertname: 'Worker backlog rising',
+          severity: 'warning',
+          environment: 'staging',
         },
         annotations: {
-          summary: 'CPU usage is high',
-          description: 'Usage exceeded 90%',
-          runbook_url: 'https://grafana.example.test/runbooks/cpu',
+          summary: 'The worker backlog crossed its target',
+          description: 'Pending jobs exceeded the configured limit',
+          runbook_url: 'https://grafana.example.test/runbooks/worker-backlog',
         },
-        fingerprint: 'fp-abcdef',
-        startsAt: '2026-01-01T00:00:00Z',
-        generatorURL: 'https://grafana.example.test/alerting/rule-1',
-        dashboardURL: 'https://grafana.example.test/d/board-1',
-        panelURL: 'https://grafana.example.test/d/board-1?viewPanel=2',
+        fingerprint: 'fp-worker-backlog',
+        startsAt: '2026-05-04T10:11:12Z',
+        generatorURL: 'https://grafana.example.test/alerting/rule-9',
+        dashboardURL: 'https://grafana.example.test/d/worker-health',
+        panelURL: 'https://grafana.example.test/d/worker-health?viewPanel=8',
       }),
     ).toEqual({
-      alertName: 'High CPU usage',
+      alertName: 'Worker backlog rising',
       content: {
-        text: '🚨 High CPU usage (発生中)',
+        text: 'Worker backlog rising\nThe worker backlog crossed its target',
         color: '#d73a49',
         blocks: [
           {
             type: 'header',
-            text: { type: 'plain_text', text: '🚨 High CPU usage' },
-          },
-          {
-            type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: '*Severity*\ncritical' },
-              { type: 'mrkdwn', text: '*instance*\nnode-a' },
-            ],
-          },
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: '*概要*\nCPU usage is high' },
+            text: { type: 'plain_text', text: 'Worker backlog rising' },
           },
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '*説明*\nUsage exceeded 90%',
+              text: 'The worker backlog crossed its target',
             },
           },
           {
@@ -56,38 +75,35 @@ describe('buildGrafanaAlertNotification', () => {
             elements: [
               {
                 type: 'mrkdwn',
-                text: [
-                  '<https://grafana.example.test/d/board-1?viewPanel=2|Panel>',
-                  '<https://grafana.example.test/d/board-1|Dashboard>',
-                  '<https://grafana.example.test/alerting/rule-1|Rule>',
-                  '<https://grafana.example.test/runbooks/cpu|Runbook>',
-                ].join(' · '),
+                text: '<https://grafana.example.test/d/worker-health?viewPanel=8|Panel>',
               },
             ],
           },
         ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
       },
       task: {
-        title: 'Grafana alert: High CPU usage',
+        title: 'Grafana alert: Worker backlog rising',
         description: [
-          'Alert: High CPU usage',
+          'Alert: Worker backlog rising',
           'Status: firing',
-          'Started at: 2026-01-01T00:00:00Z',
+          'Started at: 2026-05-04T10:11:12Z',
           [
             'Labels:',
-            '- alertname: High CPU usage',
-            '- instance: node-a',
-            '- severity: critical',
+            '- alertname: Worker backlog rising',
+            '- environment: staging',
+            '- severity: warning',
           ].join('\n'),
           [
             'Annotations:',
-            '- description: Usage exceeded 90%',
-            '- runbook_url: https://grafana.example.test/runbooks/cpu',
-            '- summary: CPU usage is high',
+            '- description: Pending jobs exceeded the configured limit',
+            '- runbook_url: https://grafana.example.test/runbooks/worker-backlog',
+            '- summary: The worker backlog crossed its target',
           ].join('\n'),
-          'Rule URL: https://grafana.example.test/alerting/rule-1',
-          'Dashboard URL: https://grafana.example.test/d/board-1',
-          'Panel URL: https://grafana.example.test/d/board-1?viewPanel=2',
+          'Rule URL: https://grafana.example.test/alerting/rule-9',
+          'Dashboard URL: https://grafana.example.test/d/worker-health',
+          'Panel URL: https://grafana.example.test/d/worker-health?viewPanel=8',
         ].join('\n\n'),
         context: 'personal',
       },
@@ -95,39 +111,44 @@ describe('buildGrafanaAlertNotification', () => {
     })
   })
 
-  it('keeps resolved alerts red while preserving the resolved title', () => {
+  it('builds the same compact body for resolved alerts before dispatch folding', () => {
     expect(
       buildGrafanaAlertNotification({
         status: 'resolved',
-        labels: { alertname: 'Queue <full>' },
-        annotations: { summary: 'Recovered & stable' },
-        fingerprint: 'fp-recovered',
-        startsAt: '2026-01-02T00:00:00Z',
+        labels: { alertname: 'Message queue pressure' },
+        annotations: { summary: 'Queue depth returned below the limit' },
+        fingerprint: 'fp-message-queue',
+        startsAt: '2026-05-05T11:12:13Z',
       }),
     ).toEqual({
-      alertName: 'Queue <full>',
+      alertName: 'Message queue pressure',
       content: {
-        text: '✅ Queue <full> (解決)',
+        text: 'Message queue pressure\nQueue depth returned below the limit',
         color: '#d73a49',
         blocks: [
           {
             type: 'header',
-            text: { type: 'plain_text', text: '✅ Queue <full>' },
+            text: { type: 'plain_text', text: 'Message queue pressure' },
           },
           {
             type: 'section',
-            text: { type: 'mrkdwn', text: '*概要*\nRecovered &amp; stable' },
+            text: {
+              type: 'mrkdwn',
+              text: 'Queue depth returned below the limit',
+            },
           },
         ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
       },
       task: {
-        title: 'Grafana alert: Queue <full>',
+        title: 'Grafana alert: Message queue pressure',
         description: [
-          'Alert: Queue <full>',
+          'Alert: Message queue pressure',
           'Status: resolved',
-          'Started at: 2026-01-02T00:00:00Z',
-          'Labels:\n- alertname: Queue <full>',
-          'Annotations:\n- summary: Recovered & stable',
+          'Started at: 2026-05-05T11:12:13Z',
+          'Labels:\n- alertname: Message queue pressure',
+          'Annotations:\n- summary: Queue depth returned below the limit',
         ].join('\n\n'),
         context: 'personal',
       },

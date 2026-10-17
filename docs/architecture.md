@@ -67,7 +67,7 @@ Headers: `Request-ID`, `Sentry-Hook-Resource`, `Sentry-Hook-Signature`. The sign
 
 Header: `X-Grafana-Alerting-Signature`. The signature is an HMAC-SHA256 of the raw body against `GRAFANA_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/grafana/verify.ts`); the optional timestamp header is not configured. Each firing or resolved alert with a non-empty fingerprint and valid `startsAt` is dispatched separately. Slack metadata stores the fingerprint, `startsAt`, and tq task reference. Redeliveries for the same incident update its message and reuse its task; a later incident with the same fingerprint creates a new message and task. History lookup is bounded to five pages within one day of the incident start.
 
-The Slack notification includes alert labels, summary and description annotations, and available panel, dashboard, rule, and runbook links. It uses mrkdwn links for destinations because Slack interactive buttons require a separate request endpoint.
+Firing notifications show the alert name, summary, available Panel link, and any rendered panel image. Resolved notifications are folded to a struck-through alert name and the Panel link. Full labels, annotations, and Grafana URLs remain in the tq task description.
 
 ### tq (`POST /tq`)
 
@@ -157,6 +157,8 @@ A Slack message is posted only when **both** of the following are true:
 
 The red attachment uses the issue title in a header, the project slug, level, culprit, and triggered rule in section fields, and a link to the issue page in a context block. Empty project slug and culprit values are omitted.
 
+The alert's Sentry issue ID is stored in Slack message metadata. For `Sentry-Hook-Resource === "issue"`, `action === "resolved"` folds every matching source attachment among up to the 1,000 most recent channel messages, while `action === "unresolved"` restores it. Messages without readable content are skipped.
+
 Every matching CI, Sentry, or Grafana alert attempts to create a personal-context tq task with the alert details and source URL in its description. The Slack notification keeps the source alert in one attachment and, on successful task creation, adds a separate attachment with the `todo` status and a link to the task. Slack message metadata contains the task ID. Task creation failures are logged and captured, while the source alert still posts without a tq attachment. Grafana processes every alert in a grouped payload even if one alert's Slack delivery fails.
 
-All other resources and actions short-circuit to `ignored`. No further filtering is applied on top of this — every verified, triggered issue alert is forwarded.
+Other Sentry resources and unsupported actions short-circuit to `ignored`. Triggered issue alerts are forwarded without additional filtering.

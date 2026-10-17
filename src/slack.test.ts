@@ -570,6 +570,81 @@ describe('findMessageByMetadata', () => {
 })
 
 describe('findMessagesByMetadata', () => {
+  it('returns every matching message across history pages', async () => {
+    conversationsHistory
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            ts: 'recent-ts',
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: { sentry_issue_id: 'sentry-issue-42' },
+            },
+          },
+          {
+            ts: 'unrelated-ts',
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: { sentry_issue_id: 'another-issue' },
+            },
+          },
+        ],
+        response_metadata: { next_cursor: 'older-page' },
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            ts: 'older-ts',
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: { sentry_issue_id: 'sentry-issue-42' },
+            },
+          },
+        ],
+        response_metadata: { next_cursor: '' },
+      })
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier
+      .findMessagesByMetadata(
+        'alert_task',
+        (payload) => payload['sentry_issue_id'] === 'sentry-issue-42',
+      )
+      .match(
+        (matches) => matches,
+        () => [],
+      )
+
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
+      result: [
+        {
+          ref: { channel: 'CDEFAULT', ts: 'recent-ts' },
+          eventPayload: { sentry_issue_id: 'sentry-issue-42' },
+        },
+        {
+          ref: { channel: 'CDEFAULT', ts: 'older-ts' },
+          eventPayload: { sentry_issue_id: 'sentry-issue-42' },
+        },
+      ],
+      calls: [
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+          },
+        ],
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+            cursor: 'older-page',
+          },
+        ],
+      ],
+    })
+  })
+
   it('collects all matching messages within the requested page bound', async () => {
     conversationsHistory
       .mockResolvedValueOnce({
