@@ -14,7 +14,7 @@ export interface SlackMessageMetadata {
 
 export type SlackBlock = HeaderBlock | SectionBlock | ContextBlock | ImageBlock
 
-export interface SlackMessageAttachmentContent {
+interface SlackMessageAttachmentContent {
   text: string
   color?: string
   blocks?: SlackBlock[]

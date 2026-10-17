@@ -10,7 +10,6 @@ import {
 
 export type {
   SlackBlock,
-  SlackMessageAttachmentContent,
   SlackMessageContent,
   SlackMessageMetadata,
 } from '#slack-message-content'
