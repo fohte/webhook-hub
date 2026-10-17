@@ -46,7 +46,7 @@ export interface SlackMessageRef {
   ts: string
 }
 
-export interface SlackMessageMatch {
+interface SlackMessageMatch {
   ref: SlackMessageRef
   eventPayload: Record<string, unknown>
   content?: SlackMessageContent
@@ -101,39 +101,6 @@ const collectSlackFileIds = (blocks: readonly SlackBlock[]): string[] =>
       : [],
   )
 
-const matchMessagesByMetadata = (
-  messages: unknown,
-  channelId: string,
-  eventType: string | readonly string[],
-  payloadMatcher: (payload: Record<string, unknown>) => boolean,
-): SlackMessageMatch[] => {
-  if (!Array.isArray(messages)) return []
-
-  return messages.flatMap((message) => {
-    if (!isRecord(message) || typeof message['ts'] !== 'string') return []
-
-    const metadata = readMessageMetadata(message)
-    if (
-      metadata === null ||
-      (typeof eventType === 'string'
-        ? metadata.event_type !== eventType
-        : !eventType.includes(metadata.event_type)) ||
-      !payloadMatcher(metadata.event_payload)
-    ) {
-      return []
-    }
-
-    const content = readMessageContent(message)
-    return [
-      {
-        ref: { channel: channelId, ts: message['ts'] },
-        eventPayload: metadata.event_payload,
-        ...(content === null ? {} : { content }),
-      },
-    ]
-  })
-}
-
 export const createSlackNotifier = (
   token: string,
   defaultChannel: string,
@@ -180,15 +147,82 @@ export const createSlackNotifier = (
     return resolved
   }
 
-  const searchMessagesInHistory = (
+  const readMatchingMessages = (
+    channelId: string,
+    messages: readonly unknown[] | undefined,
+    eventType: string | readonly string[],
+    payloadMatcher: (payload: Record<string, unknown>) => boolean,
+  ): SlackMessageMatch[] =>
+    (messages ?? []).flatMap((message) => {
+      const timestamp = isRecord(message) ? message['ts'] : undefined
+      const metadata = readMessageMetadata(message)
+      if (
+        typeof timestamp !== 'string' ||
+        metadata === null ||
+        (typeof eventType === 'string'
+          ? metadata.event_type !== eventType
+          : !eventType.includes(metadata.event_type)) ||
+        !payloadMatcher(metadata.event_payload)
+      ) {
+        return []
+      }
+      const content = readMessageContent(message)
+      return [
+        {
+          ref: { channel: channelId, ts: timestamp },
+          eventPayload: metadata.event_payload,
+          ...(content === null ? {} : { content }),
+        },
+      ]
+    })
+
+  const findMessageInHistory = (
     channelId: string,
     eventType: string | readonly string[],
     payloadMatcher: (payload: Record<string, unknown>) => boolean,
     options: SlackHistorySearchOptions,
-    stopAfterFirstMatch: boolean,
     cursor = '',
     page = 1,
-    matches: SlackMessageMatch[] = [],
+  ): ResultAsync<SlackMessageMatch | null, SlackApiError> =>
+    wrapSlackApi(
+      client.conversations.history({
+        channel: channelId,
+        limit: 200,
+        include_all_metadata: true,
+        ...(options.oldest === undefined ? {} : { oldest: options.oldest }),
+        ...(options.latest === undefined ? {} : { latest: options.latest }),
+        ...(cursor === '' ? {} : { cursor }),
+      }),
+      'failed to fetch Slack conversation history',
+    ).andThen((res) => {
+      const match = readMatchingMessages(
+        channelId,
+        res.messages,
+        eventType,
+        payloadMatcher,
+      )[0]
+      if (match !== undefined) return ok(match)
+
+      const nextCursor = res.response_metadata?.next_cursor ?? ''
+      return nextCursor === '' || page >= (options.maxPages ?? 5)
+        ? ok(null)
+        : findMessageInHistory(
+            channelId,
+            eventType,
+            payloadMatcher,
+            options,
+            nextCursor,
+            page + 1,
+          )
+    })
+
+  const findMessagesInHistory = (
+    channelId: string,
+    eventType: string | readonly string[],
+    payloadMatcher: (payload: Record<string, unknown>) => boolean,
+    options: SlackHistorySearchOptions,
+    cursor = '',
+    page = 1,
   ): ResultAsync<SlackMessageMatch[], SlackApiError> =>
     wrapSlackApi(
       client.conversations.history({
@@ -201,28 +235,23 @@ export const createSlackNotifier = (
       }),
       'failed to fetch Slack conversation history',
     ).andThen((res) => {
-      const pageMatches = matchMessagesByMetadata(
-        res.messages,
+      const matches = readMatchingMessages(
         channelId,
+        res.messages,
         eventType,
         payloadMatcher,
       )
-      const allMatches = [...matches, ...pageMatches]
       const nextCursor = res.response_metadata?.next_cursor ?? ''
-      return (stopAfterFirstMatch && allMatches.length > 0) ||
-        nextCursor === '' ||
-        page >= (options.maxPages ?? 5)
-        ? ok(allMatches)
-        : searchMessagesInHistory(
+      return nextCursor === '' || page >= (options.maxPages ?? 5)
+        ? ok(matches)
+        : findMessagesInHistory(
             channelId,
             eventType,
             payloadMatcher,
             options,
-            stopAfterFirstMatch,
             nextCursor,
             page + 1,
-            allMatches,
-          )
+          ).map((nextMatches) => [...matches, ...nextMatches])
     })
 
   return {
@@ -272,24 +301,12 @@ export const createSlackNotifier = (
     },
     findMessageByMetadata(eventType, payloadMatcher, options = {}) {
       return resolveChannelId(defaultChannel).andThen((channelId) =>
-        searchMessagesInHistory(
-          channelId,
-          eventType,
-          payloadMatcher,
-          options,
-          true,
-        ).map((matches) => matches[0] ?? null),
+        findMessageInHistory(channelId, eventType, payloadMatcher, options),
       )
     },
     findMessagesByMetadata(eventType, payloadMatcher, options = {}) {
       return resolveChannelId(defaultChannel).andThen((channelId) =>
-        searchMessagesInHistory(
-          channelId,
-          eventType,
-          payloadMatcher,
-          options,
-          false,
-        ),
+        findMessagesInHistory(channelId, eventType, payloadMatcher, options),
       )
     },
     uploadImage(image) {
