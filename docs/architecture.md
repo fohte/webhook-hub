@@ -153,7 +153,7 @@ A Slack message is posted only when **both** of the following are true:
 - `Sentry-Hook-Resource === "event_alert"`
 - `payload.action === "triggered"`
 
-The red attachment uses the issue title in a header, the project slug, level, culprit, and triggered rule in section fields, and a link to the issue page in a context block. Empty project slug and culprit values are omitted.
+The red attachment uses the issue title in a header. When available, a section shows the project slug, environment, handled status, and request method and path. Further sections show the exception causes and up to three recent in-app stack frames when present. A context block links to the issue when its URL is available. The sender uses Sentry's name and icon.
 
 The alert's Sentry issue ID is stored in Slack message metadata. For `Sentry-Hook-Resource === "issue"`, `action === "resolved"` folds every matching source attachment among up to the 1,000 most recent channel messages, while `action === "unresolved"` restores it. Messages without readable content are skipped.
 

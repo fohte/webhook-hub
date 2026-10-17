@@ -167,42 +167,37 @@ const sentryIssueAlertTriggeredBody = JSON.stringify({
   action: 'triggered',
   data: {
     event: {
-      title: 'TypeError: Cannot read properties of undefined',
+      title: 'WidgetReadFault: catalog request failed',
       level: 'error',
-      web_url: 'https://sentry.io/organizations/example-org/issues/123/',
-      url: 'https://sentry.io/api/0/projects/example-org/sample-app/events/456/',
-      culprit: 'src/example.ts in runTask',
+      web_url: 'https://monitoring.example.test/issues/456',
+      url: 'https://monitoring.example.test/api/0/projects/demo-team/widget-service/events/abc',
+      culprit: 'src/widgets/read.ts in readWidget',
     },
-    triggered_rule: 'sample-rule',
+    triggered_rule: 'widget failures',
   },
 })
 
 const sentryIssueAlertTriggeredContent = {
-  text: '🐛 TypeError: Cannot read properties of undefined',
+  text: 'WidgetReadFault: catalog request failed',
   color: '#d73a49',
   blocks: [
     {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: '🐛 TypeError: Cannot read properties of undefined',
+        text: 'WidgetReadFault: catalog request failed',
       },
     },
     {
       type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
-        { type: 'mrkdwn', text: '*Level*\nerror' },
-        { type: 'mrkdwn', text: '*発生箇所*\n`src/example.ts in runTask`' },
-        { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
-      ],
+      text: { type: 'mrkdwn', text: '`widget-service`' },
     },
     {
       type: 'context',
       elements: [
         {
           type: 'mrkdwn',
-          text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+          text: '<https://monitoring.example.test/issues/456|View issue>',
         },
       ],
     },
@@ -232,6 +227,8 @@ const sentryIssueAlertTriggeredContent = {
       tq_task_status_reason: 'none',
     },
   },
+  username: 'Sentry',
+  iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
 }
 
 describe('createApp with the real GitHub and Sentry sources', () => {
