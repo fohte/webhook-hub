@@ -3,26 +3,15 @@ import {
   decodeOriginalContent,
   encodeOriginalContent,
   isWithinSlackMetadataSizeLimit,
+  replacePrimaryContent,
   TQ_ORIGINAL_CONTENT_KEY,
   type TqOriginalContent,
+  withoutOriginalContentSnapshot,
 } from '#plugins/tq/alert-task-snapshot'
-import type {
-  SlackBlock,
-  SlackMessageContent,
-  SlackMessageMetadata,
-} from '#slack'
+import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 
 const RESOLVED_SOURCE_COLOR = '#2eb67d'
-
-const withoutOriginalContentSnapshot = (
-  eventPayload: SlackMessageMetadata['event_payload'],
-): SlackMessageMetadata['event_payload'] =>
-  Object.fromEntries(
-    Object.entries(eventPayload).filter(
-      ([key]) => key !== TQ_ORIGINAL_CONTENT_KEY,
-    ),
-  )
 
 const toOriginalContent = (
   content: SlackMessageContent,
@@ -31,21 +20,6 @@ const toOriginalContent = (
   ...(content.color === undefined ? {} : { color: content.color }),
   ...(content.blocks === undefined ? {} : { blocks: content.blocks }),
 })
-
-const withPrimaryContent = (
-  content: SlackMessageContent,
-  primary: TqOriginalContent,
-): SlackMessageContent => {
-  const restored = { ...content }
-  delete restored.color
-  delete restored.blocks
-  return {
-    ...restored,
-    text: primary.text,
-    ...(primary.color === undefined ? {} : { color: primary.color }),
-    ...(primary.blocks === undefined ? {} : { blocks: primary.blocks }),
-  }
-}
 
 const readTitle = (content: TqOriginalContent): string => {
   const heading = content.blocks?.find((block) => block.type === 'header')
@@ -114,7 +88,7 @@ export const setSourceAlertResolved = (
     }
 
     return {
-      ...withPrimaryContent(content, original),
+      ...replacePrimaryContent(content, original),
       metadata: {
         ...metadata,
         event_payload: withoutOriginalContentSnapshot(metadata.event_payload),
@@ -160,7 +134,7 @@ export const setSourceAlertResolved = (
   }
 
   return {
-    ...withPrimaryContent(content, makeResolvedAppearance(original)),
+    ...replacePrimaryContent(content, makeResolvedAppearance(original)),
     metadata: updatedMetadata,
   }
 }

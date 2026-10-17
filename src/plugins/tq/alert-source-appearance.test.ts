@@ -102,4 +102,28 @@ describe('setSourceAlertResolved', () => {
       },
     ])
   })
+
+  it('leaves source content unchanged when its snapshot exceeds Slack metadata size', () => {
+    let state = 1
+    const highEntropyText = Array.from({ length: 9000 }, () => {
+      state = (state * 48_271) % 2_147_483_647
+      return String.fromCharCode(33 + (state % 90))
+    }).join('')
+    const largeContent: SlackMessageContent = {
+      ...SOURCE_CONTENT,
+      blocks: [
+        ...(SOURCE_CONTENT.blocks ?? []),
+        {
+          type: 'section',
+          fields: Array.from({ length: 5 }, (_, index) => ({
+            type: 'mrkdwn' as const,
+            text: `*Field ${String(index)}*\n${highEntropyText.slice(index * 1800, (index + 1) * 1800)}`,
+          })),
+        },
+      ],
+      metadata: TASK_METADATA,
+    }
+
+    expect(setSourceAlertResolved(largeContent, true)).toEqual(largeContent)
+  })
 })

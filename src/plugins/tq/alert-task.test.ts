@@ -109,6 +109,18 @@ describe('formatTqTaskStatus', () => {
       `~${TASK_LINK}~ · duplicate of #202 Review &lt;target&gt; &amp; notes`,
     )
   })
+
+  it('formats a duplicate target without a title using its task number', () => {
+    const info: TqTaskStatusInfo = {
+      ...COMPLETED_INFO,
+      statusReason: 'duplicate',
+      duplicateOfTask: { id: 'task-target-id', number: 202 },
+    }
+
+    expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(
+      `~${TASK_LINK}~ · duplicate of #202`,
+    )
+  })
 })
 
 describe('updateTqTaskStatus', () => {
@@ -186,6 +198,82 @@ describe('updateTqTaskStatus', () => {
       },
     })
   })
+
+  it.each([
+    { name: 'missing', snapshot: undefined },
+    { name: 'corrupt', snapshot: 'broken-snapshot' },
+  ])(
+    'recovers a previous compact alert with a $name snapshot',
+    ({ snapshot }) => {
+      const context = 'service · <https://alerts.example.test/42|View alert>'
+      const heading = '*✅ ~Database unavailable~*'
+      const status = `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`
+      const legacyContent: SlackMessageContent = {
+        text: [heading, context, status].join('\n'),
+        color: '#2da44e',
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: heading },
+          },
+          {
+            type: 'context',
+            elements: [
+              { type: 'mrkdwn', text: context },
+              { type: 'mrkdwn', text: status },
+            ],
+          },
+        ],
+        metadata: {
+          event_type: 'alert_task',
+          event_payload: {
+            task_id: TASK.id,
+            tq_task_status: 'completed',
+            tq_task_status_reason: 'completed',
+            ...(snapshot === undefined
+              ? {}
+              : { [TQ_ORIGINAL_CONTENT_KEY]: snapshot }),
+          },
+        },
+      }
+      const todoStatus = formatTqTaskStatus(TODO_INFO, TQ_WEB_URL)
+
+      expect(updateTqTaskStatus(legacyContent, todoStatus, TODO_INFO)).toEqual({
+        text: [`*🚨 Database unavailable*`, context].join('\n'),
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: '*🚨 Database unavailable*' },
+          },
+          {
+            type: 'context',
+            elements: [{ type: 'mrkdwn', text: context }],
+          },
+        ],
+        additionalAttachments: [
+          {
+            text: todoStatus,
+            color: '#2eb67d',
+            blocks: [
+              {
+                type: 'context',
+                elements: [{ type: 'mrkdwn', text: todoStatus }],
+              },
+            ],
+          },
+        ],
+        metadata: {
+          event_type: 'alert_task',
+          event_payload: {
+            task_id: TASK.id,
+            tq_task_status: 'todo',
+            tq_task_status_reason: 'none',
+          },
+        },
+      })
+    },
+  )
 
   it('moves the legacy task status out of a single attachment', () => {
     const legacyStatus = `未対応 · ${TASK_LINK}`

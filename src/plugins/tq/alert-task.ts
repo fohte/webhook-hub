@@ -4,8 +4,10 @@ import { okAsync, type ResultAsync } from 'neverthrow'
 import { logger } from '#logger'
 import {
   decodeOriginalContent,
+  replacePrimaryContent,
   TQ_ORIGINAL_CONTENT_KEY,
   type TqOriginalContent,
+  withoutOriginalContentSnapshot,
 } from '#plugins/tq/alert-task-snapshot'
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
 import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
@@ -15,6 +17,7 @@ import type {
   SlackMessageMetadata,
 } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
+import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 
 export { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
 
@@ -42,15 +45,6 @@ export type TqTaskStatusState = Omit<TqTaskStatusInfo, 'task'>
 const isLegacyStatusLine = (line: string): boolean =>
   /^(未対応|対応済み|対応不要|重複)(?:\s|$)/.test(line)
 
-const withoutOriginalContentSnapshot = (
-  eventPayload: SlackMessageMetadata['event_payload'],
-): SlackMessageMetadata['event_payload'] =>
-  Object.fromEntries(
-    Object.entries(eventPayload).filter(
-      ([key]) => key !== TQ_ORIGINAL_CONTENT_KEY,
-    ),
-  )
-
 const removeLegacyStatusLine = (text: string): string => {
   const newline = text.lastIndexOf('\n')
   const finalLine = text.slice(newline + 1)
@@ -61,13 +55,6 @@ const removeLegacyStatusLine = (text: string): string => {
     : text
 }
 
-const isLegacyStatusBlock = (block: SlackBlock): boolean =>
-  block.type === 'context' &&
-  block.elements.some(
-    (element) =>
-      element.type === 'mrkdwn' && element.text.startsWith('*状態*\n'),
-  )
-
 const isLegacyCompactedAppearance = (content: SlackMessageContent): boolean => {
   const heading = content.blocks?.[0]
   return (
@@ -77,31 +64,68 @@ const isLegacyCompactedAppearance = (content: SlackMessageContent): boolean => {
   )
 }
 
+const isLegacyStatusText = (text: string): boolean =>
+  text.startsWith('*状態*\n') || isLegacyStatusLine(text)
+
+const restoreLegacyCompactedHeading = (
+  heading: string,
+  metadata: SlackMessageMetadata | undefined,
+): string => {
+  const title = /^\*(?:✅|⏭️|🔁) ~([\s\S]*)~\*$/u.exec(heading)?.[1]
+  if (title === undefined) return heading
+  const icon = metadata?.event_type === 'grafana_alert' ? '🔥' : '🚨'
+  return `*${icon} ${title}*`
+}
+
 const removeLegacyStatus = (
   content: SlackMessageContent,
 ): TqOriginalContent => {
   const compacted = isLegacyCompactedAppearance(content)
-  return {
-    text: removeLegacyStatusLine(content.text),
-    ...(content.color === undefined ? {} : { color: content.color }),
-    ...(content.blocks === undefined
-      ? {}
-      : {
-          blocks: content.blocks.filter(
-            (block, index) =>
-              !isLegacyStatusBlock(block) && !(compacted && index === 2),
-          ),
-        }),
+  const metadata = content.metadata
+  const blocks: SlackBlock[] | undefined = content.blocks?.flatMap<SlackBlock>(
+    (block, index) => {
+      if (
+        block.type === 'section' &&
+        compacted &&
+        index === 0 &&
+        block.text?.type === 'mrkdwn'
+      ) {
+        return [
+          {
+            ...block,
+            text: {
+              ...block.text,
+              text: restoreLegacyCompactedHeading(block.text.text, metadata),
+            },
+          },
+        ]
+      }
+      if (block.type !== 'context') return [block]
+      const elements = block.elements.filter(
+        (element) =>
+          element.type !== 'mrkdwn' || !isLegacyStatusText(element.text),
+      )
+      return elements.length === 0 ? [] : [{ ...block, elements }]
+    },
+  )
+  const lines = removeLegacyStatusLine(content.text).split('\n')
+  const heading = content.blocks?.[0]
+  if (
+    compacted &&
+    heading?.type === 'section' &&
+    heading.text?.type === 'mrkdwn'
+  ) {
+    lines[0] = restoreLegacyCompactedHeading(heading.text.text, metadata)
   }
-}
-
-const clearPrimaryAppearance = (
-  content: SlackMessageContent,
-): SlackMessageContent => {
-  const restored = { ...content }
-  delete restored.color
-  delete restored.blocks
-  return restored
+  return {
+    text: lines.join('\n'),
+    ...(compacted
+      ? { color: TODO_ALERT_COLOR }
+      : content.color === undefined
+        ? {}
+        : { color: content.color }),
+    ...(blocks === undefined ? {} : { blocks }),
+  }
 }
 
 const restoreLegacyCompactedContent = (
@@ -109,16 +133,18 @@ const restoreLegacyCompactedContent = (
 ): {
   content: TqOriginalContent
   metadata?: SlackMessageMetadata
-  restoredSnapshot: boolean
 } => {
   const metadata = content.metadata
   const snapshot = metadata?.event_payload[TQ_ORIGINAL_CONTENT_KEY]
-  if (
-    metadata === undefined ||
-    !isLegacyCompactedAppearance(content) ||
-    snapshot === undefined
-  ) {
-    return { content: removeLegacyStatus(content), restoredSnapshot: false }
+  const compacted = isLegacyCompactedAppearance(content)
+  if (metadata !== undefined && compacted && snapshot === undefined) {
+    logger.warn(
+      { task_id: metadata.event_payload['task_id'] },
+      'tq_original_content_snapshot_missing',
+    )
+  }
+  if (metadata === undefined || !compacted || snapshot === undefined) {
+    return { content: removeLegacyStatus(content) }
   }
 
   const decoded = decodeOriginalContent(snapshot)
@@ -133,7 +159,6 @@ const restoreLegacyCompactedContent = (
         ...metadata,
         event_payload: withoutOriginalContentSnapshot(metadata.event_payload),
       },
-      restoredSnapshot: false,
     }
   }
 
@@ -143,7 +168,6 @@ const restoreLegacyCompactedContent = (
       ...metadata,
       event_payload: withoutOriginalContentSnapshot(metadata.event_payload),
     },
-    restoredSnapshot: true,
   }
 }
 
@@ -262,8 +286,7 @@ export const updateTqTaskStatus = (
   const additionalAttachments = content.additionalAttachments ?? []
   const statusAttachment = tqStatusAttachment(status, info)
   return {
-    ...(legacy.restoredSnapshot ? clearPrimaryAppearance(content) : content),
-    ...legacy.content,
+    ...replacePrimaryContent(content, legacy.content),
     additionalAttachments: [
       ...additionalAttachments.slice(0, -1),
       statusAttachment,
