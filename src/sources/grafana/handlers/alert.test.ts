@@ -1,8 +1,38 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildGrafanaAlertNotification } from '#sources/grafana/handlers/alert'
+import type { SlackBlock } from '#slack'
+import {
+  buildGrafanaAlertNotification,
+  isGrafanaPanelLinkBlock,
+} from '#sources/grafana/handlers/alert'
 
 describe('buildGrafanaAlertNotification', () => {
+  it('identifies only the Grafana Panel link context block', () => {
+    const contextBlocks: SlackBlock[] = [
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '<https://observability.example.test/d/overview|Dashboard>',
+          },
+        ],
+      },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '<https://observability.example.test/d/overview?viewPanel=7|Panel>',
+          },
+        ],
+      },
+    ]
+    const results = contextBlocks.map(isGrafanaPanelLinkBlock)
+
+    expect(results).toEqual([false, true])
+  })
+
   it('builds the compact Grafana body and preserves full task details', () => {
     expect(
       buildGrafanaAlertNotification({

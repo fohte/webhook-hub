@@ -25,6 +25,7 @@ import {
 import {
   buildGrafanaAlertNotification,
   type GrafanaAlert,
+  isGrafanaPanelLinkBlock,
 } from '#sources/grafana/handlers/alert'
 import {
   type GrafanaPanelImageRenderer,
@@ -146,7 +147,7 @@ const addPanelImage = (
     panelId: string,
   ): SlackMessageContent => {
     const blocks = content.blocks ?? []
-    const panelLinkIndex = blocks.findIndex((block) => block.type === 'context')
+    const panelLinkIndex = blocks.findIndex(isGrafanaPanelLinkBlock)
     const imageBlock = {
       type: 'image' as const,
       slack_file: { id: fileId },

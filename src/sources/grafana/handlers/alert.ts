@@ -5,6 +5,7 @@ import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 
 const GRAFANA_USERNAME = 'Grafana'
 const GRAFANA_ICON_URL = 'https://grafana.com/static/assets/img/fav32.png'
+const PANEL_LINK_LABEL = 'Panel'
 
 export interface GrafanaAlert {
   status: 'firing' | 'resolved'
@@ -33,6 +34,15 @@ const slackLink = (url: string | undefined, label: string): string | null => {
   return `<${escapeSlackMrkdwn(url)}|${escapeSlackMrkdwn(label)}>`
 }
 
+export const isGrafanaPanelLinkBlock = (block: SlackBlock): boolean =>
+  block.type === 'context' &&
+  block.elements.some(
+    (element) =>
+      'text' in element &&
+      typeof element.text === 'string' &&
+      element.text.endsWith(`|${PANEL_LINK_LABEL}>`),
+  )
+
 const renderAlertDetails = (
   alertName: string,
   summary: string | undefined,
@@ -55,7 +65,7 @@ const renderAlertDetails = (
     })
   }
 
-  const panelLink = slackLink(panelURL, 'Panel')
+  const panelLink = slackLink(panelURL, PANEL_LINK_LABEL)
   if (panelLink !== null) {
     blocks.push({
       type: 'context',
