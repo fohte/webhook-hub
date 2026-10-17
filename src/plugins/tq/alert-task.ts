@@ -337,35 +337,25 @@ export const addTqTaskStatus = (
   metadata?: SlackMessageMetadata,
   previousStatus?: TqTaskStatusState | null,
 ): SlackMessageContent => {
-  const taskStatusInfo =
-    task === null
-      ? undefined
-      : {
-          task,
-          ...(previousStatus ?? {
-            status: 'todo' as const,
-            statusReason: null,
-          }),
-        }
-  const status =
-    taskStatusInfo === undefined
-      ? '未対応'
-      : formatTqTaskStatus(taskStatusInfo, tqWebUrl)
-  const resolvedMetadata =
-    metadata ??
-    (task === null
-      ? undefined
-      : {
-          event_type: 'alert_task',
-          event_payload: { task_id: task.id },
-        })
+  if (task === null) {
+    return metadata === undefined ? content : { ...content, metadata }
+  }
+
+  const taskStatusInfo = {
+    task,
+    ...(previousStatus ?? {
+      status: 'todo' as const,
+      statusReason: null,
+    }),
+  }
+  const resolvedMetadata = metadata ?? {
+    event_type: 'alert_task',
+    event_payload: { task_id: task.id },
+  }
 
   return updateTqTaskStatus(
-    {
-      ...content,
-      ...(resolvedMetadata === undefined ? {} : { metadata: resolvedMetadata }),
-    },
-    status,
+    { ...content, metadata: resolvedMetadata },
+    formatTqTaskStatus(taskStatusInfo, tqWebUrl),
     taskStatusInfo,
   )
 }

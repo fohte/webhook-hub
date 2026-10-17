@@ -310,18 +310,6 @@ describe('dispatch (workflow_run)', () => {
                 ],
               },
             ],
-            additionalAttachments: [
-              {
-                text: '未対応',
-                color: '#2eb67d',
-                blocks: [
-                  {
-                    type: 'context',
-                    elements: [{ type: 'mrkdwn', text: '未対応' }],
-                  },
-                ],
-              },
-            ],
             username: 'GitHub CI',
             iconUrl: 'https://avatars.githubusercontent.com/in/15368',
           },

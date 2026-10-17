@@ -231,18 +231,6 @@ describe('dispatch', () => {
                 ],
               },
             ],
-            additionalAttachments: [
-              {
-                text: '未対応',
-                color: '#2eb67d',
-                blocks: [
-                  {
-                    type: 'context',
-                    elements: [{ type: 'mrkdwn', text: '未対応' }],
-                  },
-                ],
-              },
-            ],
           },
         ],
       ],

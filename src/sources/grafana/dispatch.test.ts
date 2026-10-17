@@ -133,10 +133,6 @@ const expectedTodoGrafanaContent = (options: {
   panelURL?: string
 }) => {
   const task = options.task === undefined ? TQ_TASK_REF : options.task
-  const status =
-    task === null
-      ? '未対応'
-      : `<${TQ_WEB_URL}/tasks/${task.id}|tq #${String(task.number)}> · todo`
 
   return {
     text: `🚨 ${options.alertName} (発生中)`,
@@ -199,18 +195,27 @@ const expectedTodoGrafanaContent = (options: {
           : { panel_image_file_id: options.imageFileId }),
       },
     },
-    additionalAttachments: [
-      {
-        text: status,
-        color: '#2eb67d',
-        blocks: [
-          {
-            type: 'context' as const,
-            elements: [{ type: 'mrkdwn' as const, text: status }],
-          },
-        ],
-      },
-    ],
+    ...(task === null
+      ? {}
+      : {
+          additionalAttachments: [
+            {
+              text: `<${TQ_WEB_URL}/tasks/${task.id}|tq #${String(task.number)}> · todo`,
+              color: '#2eb67d',
+              blocks: [
+                {
+                  type: 'context' as const,
+                  elements: [
+                    {
+                      type: 'mrkdwn' as const,
+                      text: `<${TQ_WEB_URL}/tasks/${task.id}|tq #${String(task.number)}> · todo`,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
   }
 }
 

@@ -15,7 +15,7 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 - **Grafana alerts** — each firing or resolved alert is posted separately. Redeliveries with the same fingerprint and `startsAt` update the existing Slack message without creating another tq task; a later incident with the same fingerprint gets its own message and task.
 - **tq task status changes** — `task.status_changed` webhooks update the lower Slack attachment to `todo`, `completed`, `not planned`, or `duplicate of #N <title>` while preserving the source alert above it. The lookup searches the most recent 1,000 Slack channel messages.
 
-CI, Sentry, and Grafana alert notifications include a `todo` status and a [tq task](https://github.com/fohte/tq) link in the lower attachment when task creation succeeds. Task creation is best-effort: if the tq API is unavailable, the Slack notification still posts without a task link.
+CI, Sentry, and Grafana alert notifications include a `todo` status and a [tq task](https://github.com/fohte/tq) link in a separate attachment when task creation succeeds. Task creation is best-effort: if the tq API is unavailable, the source alert still posts without a tq attachment.
 
 ## Endpoints
 

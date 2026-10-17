@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  addTqTaskStatus,
   formatTqTaskStatus,
   readTqTaskStatusState,
   type TqTaskStatusInfo,
@@ -435,7 +436,39 @@ describe('updateTqTaskStatus', () => {
   })
 })
 
+describe('addTqTaskStatus', () => {
+  it('omits the task attachment when task creation failed', () => {
+    const metadata = {
+      event_type: 'grafana_alert',
+      event_payload: {
+        fingerprint: 'alert-fingerprint',
+        grafana_status: 'firing',
+      },
+    }
+    const content = { ...SOURCE_CONTENT, metadata }
+
+    expect(addTqTaskStatus(content, null, TQ_WEB_URL, metadata)).toEqual(
+      content,
+    )
+  })
+})
+
 describe('readTqTaskStatusState', () => {
+  it('reads a duplicate target without a title from metadata', () => {
+    expect(
+      readTqTaskStatusState({
+        tq_task_status: 'completed',
+        tq_task_status_reason: 'duplicate',
+        tq_duplicate_task_id: 'task-target-id',
+        tq_duplicate_task_number: 202,
+      }),
+    ).toEqual({
+      status: 'completed',
+      statusReason: 'duplicate',
+      duplicateOfTask: { id: 'task-target-id', number: 202 },
+    })
+  })
+
   it('reads a duplicate target and its title from metadata', () => {
     expect(
       readTqTaskStatusState({
