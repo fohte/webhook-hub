@@ -180,51 +180,12 @@ export const createSlackNotifier = (
     return resolved
   }
 
-  const findMessageInHistory = (
+  const searchMessagesInHistory = (
     channelId: string,
     eventType: string | readonly string[],
     payloadMatcher: (payload: Record<string, unknown>) => boolean,
     options: SlackHistorySearchOptions,
-    cursor = '',
-    page = 1,
-  ): ResultAsync<SlackMessageMatch | null, SlackApiError> =>
-    wrapSlackApi(
-      client.conversations.history({
-        channel: channelId,
-        limit: 200,
-        include_all_metadata: true,
-        ...(options.oldest === undefined ? {} : { oldest: options.oldest }),
-        ...(options.latest === undefined ? {} : { latest: options.latest }),
-        ...(cursor === '' ? {} : { cursor }),
-      }),
-      'failed to fetch Slack conversation history',
-    ).andThen((res) => {
-      const match = matchMessagesByMetadata(
-        res.messages,
-        channelId,
-        eventType,
-        payloadMatcher,
-      )[0]
-      if (match !== undefined) return ok(match)
-
-      const nextCursor = res.response_metadata?.next_cursor ?? ''
-      return nextCursor === '' || page >= (options.maxPages ?? 5)
-        ? ok(null)
-        : findMessageInHistory(
-            channelId,
-            eventType,
-            payloadMatcher,
-            options,
-            nextCursor,
-            page + 1,
-          )
-    })
-
-  const findMessagesInHistory = (
-    channelId: string,
-    eventType: string | readonly string[],
-    payloadMatcher: (payload: Record<string, unknown>) => boolean,
-    options: SlackHistorySearchOptions,
+    stopAfterFirstMatch: boolean,
     cursor = '',
     page = 1,
     matches: SlackMessageMatch[] = [],
@@ -248,13 +209,16 @@ export const createSlackNotifier = (
       )
       const allMatches = [...matches, ...pageMatches]
       const nextCursor = res.response_metadata?.next_cursor ?? ''
-      return nextCursor === '' || page >= (options.maxPages ?? 5)
+      return (stopAfterFirstMatch && allMatches.length > 0) ||
+        nextCursor === '' ||
+        page >= (options.maxPages ?? 5)
         ? ok(allMatches)
-        : findMessagesInHistory(
+        : searchMessagesInHistory(
             channelId,
             eventType,
             payloadMatcher,
             options,
+            stopAfterFirstMatch,
             nextCursor,
             page + 1,
             allMatches,
@@ -308,12 +272,24 @@ export const createSlackNotifier = (
     },
     findMessageByMetadata(eventType, payloadMatcher, options = {}) {
       return resolveChannelId(defaultChannel).andThen((channelId) =>
-        findMessageInHistory(channelId, eventType, payloadMatcher, options),
+        searchMessagesInHistory(
+          channelId,
+          eventType,
+          payloadMatcher,
+          options,
+          true,
+        ).map((matches) => matches[0] ?? null),
       )
     },
     findMessagesByMetadata(eventType, payloadMatcher, options = {}) {
       return resolveChannelId(defaultChannel).andThen((channelId) =>
-        findMessagesInHistory(channelId, eventType, payloadMatcher, options),
+        searchMessagesInHistory(
+          channelId,
+          eventType,
+          payloadMatcher,
+          options,
+          false,
+        ),
       )
     },
     uploadImage(image) {
