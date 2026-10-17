@@ -1,14 +1,9 @@
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import {
-  addTqTaskStatus,
-  TQ_ORIGINAL_CONTENT_KEY,
-  type TqTaskStatusInfo,
-} from '#plugins/tq/alert-task'
+import { addTqTaskStatus, type TqTaskStatusInfo } from '#plugins/tq/alert-task'
 import {
   type DecodedSlackMessageContent,
-  expectedTqOriginalContentSnapshot,
   normalizeTqOriginalContentSnapshot,
 } from '#plugins/tq/alert-task-test-support'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
@@ -33,6 +28,9 @@ const TQ_TASK_REF = {
 }
 const TQ_WEB_URL = 'https://tasks.example.test'
 const INCIDENT_START = '2026-01-01T00:00:00Z'
+const TASK_COMPLETED_AT = '2026-01-02T03:04:05Z'
+const TASK_COMPLETED_DATE =
+  '<!date^1767323045^{date_short} {time}|2026-01-02 03:04 UTC>'
 const ALERT = {
   status: 'firing',
   labels: { alertname: 'Queue depth' },
@@ -135,14 +133,9 @@ const expectedTodoGrafanaContent = (options: {
   panelURL?: string
 }) => {
   const task = options.task === undefined ? TQ_TASK_REF : options.task
-  const status =
-    task === null
-      ? '未対応'
-      : `未対応 · <${TQ_WEB_URL}/tasks/${task.id}|tq #${String(task.number)}>`
-  const statusWithSource = `${status} · Grafana 上: firing`
 
   return {
-    text: `🚨 ${options.alertName} (発生中)\n${statusWithSource}`,
+    text: `🚨 ${options.alertName} (発生中)`,
     color: '#d73a49',
     blocks: [
       {
@@ -173,12 +166,6 @@ const expectedTodoGrafanaContent = (options: {
               ],
             },
           ]),
-      {
-        type: 'context' as const,
-        elements: [
-          { type: 'mrkdwn' as const, text: `*状態*\n${statusWithSource}` },
-        ],
-      },
       ...(options.imageFileId === undefined
         ? []
         : [
@@ -208,6 +195,27 @@ const expectedTodoGrafanaContent = (options: {
           : { panel_image_file_id: options.imageFileId }),
       },
     },
+    ...(task === null
+      ? {}
+      : {
+          additionalAttachments: [
+            {
+              text: `<${TQ_WEB_URL}/tasks/${task.id}|tq #${String(task.number)}> · todo`,
+              color: '#2eb67d',
+              blocks: [
+                {
+                  type: 'context' as const,
+                  elements: [
+                    {
+                      type: 'mrkdwn' as const,
+                      text: `<${TQ_WEB_URL}/tasks/${task.id}|tq #${String(task.number)}> · todo`,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
   }
 }
 
@@ -401,30 +409,31 @@ describe('dispatch', () => {
     })
   })
 
-  it('keeps a compact firing alert compact when a resolved event is redelivered', async () => {
+  it('preserves the closed task status when a resolved event is redelivered', async () => {
     const notifier = createNotifier()
     const firingContent = expectedAlertContent()
     const completedInfo: TqTaskStatusInfo = {
       task: TQ_TASK_REF,
       status: 'completed',
       statusReason: 'completed',
+      occurredAt: TASK_COMPLETED_AT,
     }
-    const compactFiringContent = addTqTaskStatus(
+    const closedFiringContent = addTqTaskStatus(
       firingContent,
       TQ_TASK_REF,
       TQ_WEB_URL,
       firingContent.metadata,
       completedInfo,
     )
-    const compactFiringMetadata = compactFiringContent.metadata
-    if (compactFiringMetadata === undefined) {
-      throw new Error('compact Grafana alert metadata is missing')
+    const closedFiringMetadata = closedFiringContent.metadata
+    if (closedFiringMetadata === undefined) {
+      throw new Error('Grafana alert metadata is missing')
     }
     notifier.findMessageByMetadata.mockReturnValue(
       okAsync({
         ref: { channel: 'C9', ts: 'existing-ts' },
-        content: compactFiringContent,
-        eventPayload: compactFiringMetadata.event_payload,
+        content: closedFiringContent,
+        eventPayload: closedFiringMetadata.event_payload,
       }),
     )
     const tqClient = createTqClient()
@@ -463,23 +472,31 @@ describe('dispatch', () => {
         [
           { channel: 'C9', ts: 'existing-ts' },
           {
-            text: '*✅ ~Queue depth~*\nQueue depth\n対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9> · Grafana 上: resolved',
-            color: '#2da44e',
+            text: '✅ Queue depth (解決)',
+            color: '#d73a49',
             blocks: [
               {
+                type: 'header',
+                text: { type: 'plain_text', text: '✅ Queue depth' },
+              },
+              {
                 type: 'section',
-                text: { type: 'mrkdwn', text: '*✅ ~Queue depth~*' },
+                text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
               },
+            ],
+            additionalAttachments: [
               {
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: 'Queue depth' }],
-              },
-              {
-                type: 'context',
-                elements: [
+                text: `~<${TQ_WEB_URL}/tasks/${TQ_TASK_REF.id}|tq #9>~ · completed ${TASK_COMPLETED_DATE}`,
+                color: '#8250df',
+                blocks: [
                   {
-                    type: 'mrkdwn',
-                    text: '対応済み · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000009|tq #9> · Grafana 上: resolved',
+                    type: 'context',
+                    elements: [
+                      {
+                        type: 'mrkdwn',
+                        text: `~<${TQ_WEB_URL}/tasks/${TQ_TASK_REF.id}|tq #9>~ · completed ${TASK_COMPLETED_DATE}`,
+                      },
+                    ],
                   },
                 ],
               },
@@ -494,26 +511,7 @@ describe('dispatch', () => {
                 task_number: 9,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
-                [TQ_ORIGINAL_CONTENT_KEY]: expectedTqOriginalContentSnapshot({
-                  text: '✅ Queue depth (解決)',
-                  color: '#d73a49',
-                  blocks: [
-                    {
-                      type: 'header',
-                      text: {
-                        type: 'plain_text',
-                        text: '✅ Queue depth',
-                      },
-                    },
-                    {
-                      type: 'section',
-                      text: {
-                        type: 'mrkdwn',
-                        text: '*概要*\nQueue is growing',
-                      },
-                    },
-                  ],
-                }),
+                tq_task_occurred_at: TASK_COMPLETED_AT,
               },
             },
           },

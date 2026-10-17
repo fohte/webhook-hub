@@ -1,12 +1,10 @@
 import { okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task'
 import {
-  formatTqTaskStatus,
-  type TqTaskStatusInfo,
-  updateTqTaskStatus,
-} from '#plugins/tq/alert-task'
+  encodeOriginalContent,
+  TQ_ORIGINAL_CONTENT_KEY,
+} from '#plugins/tq/alert-task-snapshot'
 import {
   expectedTqOriginalContentSnapshot,
   normalizeTqOriginalContentSnapshot,
@@ -24,18 +22,27 @@ const DUPLICATE_TASK_ID = 'task-duplicate-id'
 const DUPLICATE_TASK_NUMBER = 202
 const TQ_WEB_URL = 'https://tasks.example.test'
 const REF: SlackMessageRef = { channel: 'CEXAMPLE', ts: '123.456' }
+const TASK_LINK = `<${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`
+const OCCURRED_AT = '2026-01-02T03:04:05Z'
+const SLACK_DATE = '<!date^1767323045^{date_short} {time}|2026-01-02 03:04 UTC>'
 
 const sourceContent: SlackMessageContent = {
   text: 'Alert details',
   color: '#d73a49',
   blocks: [
-    {
-      type: 'header',
-      text: { type: 'plain_text', text: 'Alert details' },
-    },
+    { type: 'header', text: { type: 'plain_text', text: 'Alert details' } },
     {
       type: 'section',
       text: { type: 'mrkdwn', text: '*Summary*\nExample alert details' },
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '<https://alerts.example.test/1|View alert>',
+        },
+      ],
     },
     {
       type: 'image',
@@ -45,19 +52,14 @@ const sourceContent: SlackMessageContent = {
   ],
 }
 
-const originalContent: SlackMessageContent = {
+const legacyContent: SlackMessageContent = {
   ...sourceContent,
-  text: `Alert details\n未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
+  text: `Alert details\n未対応 · ${TASK_LINK}`,
   blocks: [
     ...(sourceContent.blocks ?? []).slice(0, 2),
     {
       type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-        },
-      ],
+      elements: [{ type: 'mrkdwn', text: `*状態*\n未対応 · ${TASK_LINK}` }],
     },
     ...(sourceContent.blocks ?? []).slice(2),
   ],
@@ -67,27 +69,27 @@ const originalContent: SlackMessageContent = {
   },
 }
 
-const createMessage = (content: SlackMessageContent = originalContent) => ({
+const createMessage = (content: SlackMessageContent = legacyContent) => ({
   ref: REF,
   eventPayload: content.metadata?.event_payload ?? { task_id: TASK_ID },
   content,
 })
 
 const createNotifier = (
-  firstMessage: ReturnType<typeof createMessage> | null = createMessage(),
+  message: ReturnType<typeof createMessage> | null = createMessage(),
 ) => {
   const findMessageByMetadata = vi
     .fn<SlackNotifier['findMessageByMetadata']>()
     .mockImplementation((eventTypes, payloadMatcher) => {
       const allowedEventTypes =
         typeof eventTypes === 'string' ? [eventTypes] : eventTypes
-      const eventType = firstMessage?.content.metadata?.event_type
+      const eventType = message?.content.metadata?.event_type
       return okAsync(
-        firstMessage !== null &&
+        message !== null &&
           eventType !== undefined &&
           allowedEventTypes.includes(eventType) &&
-          payloadMatcher(firstMessage.eventPayload)
-          ? firstMessage
+          payloadMatcher(message.eventPayload)
+          ? message
           : null,
       )
     })
@@ -105,7 +107,7 @@ const createNotifier = (
 
 const eventFor = (task: Record<string, unknown>) => ({
   event: 'task.status_changed',
-  occurredAt: '2026-01-02T03:04:05Z',
+  occurredAt: OCCURRED_AT,
   task: {
     id: TASK_ID,
     number: TASK_NUMBER,
@@ -133,102 +135,18 @@ describe('dispatchTqTaskStatusChanged', () => {
     {
       name: 'completed',
       task: { status: 'completed', statusReason: 'completed' },
-      expected: {
-        result: 'notified',
-        lookups: [['alert_task', 'grafana_alert']],
-        updates: [
-          [
-            REF,
-            {
-              text: [
-                '*✅ ~Alert details~*',
-                'Alert details',
-                `対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-              ].join('\n'),
-              color: '#2da44e',
-              blocks: [
-                {
-                  type: 'section',
-                  text: { type: 'mrkdwn', text: '*✅ ~Alert details~*' },
-                },
-                {
-                  type: 'context',
-                  elements: [{ type: 'mrkdwn', text: 'Alert details' }],
-                },
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-                    },
-                  ],
-                },
-              ],
-              metadata: {
-                event_type: 'alert_task',
-                event_payload: {
-                  task_id: TASK_ID,
-                  tq_task_status: 'completed',
-                  tq_task_status_reason: 'completed',
-                  [TQ_ORIGINAL_CONTENT_KEY]:
-                    expectedTqOriginalContentSnapshot(sourceContent),
-                },
-              },
-            },
-          ],
-        ],
-      },
+      status: `~${TASK_LINK}~ · completed ${SLACK_DATE}`,
+      color: '#8250df',
+      reason: 'completed',
+      extraMetadata: { tq_task_occurred_at: OCCURRED_AT },
     },
     {
       name: 'not planned',
       task: { status: 'completed', statusReason: 'not_planned' },
-      expected: {
-        result: 'notified',
-        lookups: [['alert_task', 'grafana_alert']],
-        updates: [
-          [
-            REF,
-            {
-              text: [
-                '*⏭️ ~Alert details~*',
-                'Alert details',
-                `対応不要 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-              ].join('\n'),
-              color: '#8b949e',
-              blocks: [
-                {
-                  type: 'section',
-                  text: { type: 'mrkdwn', text: '*⏭️ ~Alert details~*' },
-                },
-                {
-                  type: 'context',
-                  elements: [{ type: 'mrkdwn', text: 'Alert details' }],
-                },
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `対応不要 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-                    },
-                  ],
-                },
-              ],
-              metadata: {
-                event_type: 'alert_task',
-                event_payload: {
-                  task_id: TASK_ID,
-                  tq_task_status: 'completed',
-                  tq_task_status_reason: 'not_planned',
-                  [TQ_ORIGINAL_CONTENT_KEY]:
-                    expectedTqOriginalContentSnapshot(sourceContent),
-                },
-              },
-            },
-          ],
-        ],
-      },
+      status: `~${TASK_LINK}~ · not planned ${SLACK_DATE}`,
+      color: '#6b6e75',
+      reason: 'not_planned',
+      extraMetadata: { tq_task_occurred_at: OCCURRED_AT },
     },
     {
       name: 'duplicate',
@@ -238,66 +156,33 @@ describe('dispatchTqTaskStatusChanged', () => {
         duplicateOfTask: {
           id: DUPLICATE_TASK_ID,
           number: DUPLICATE_TASK_NUMBER,
-          title: 'Example task',
+          title: 'Related task',
         },
       },
-      expected: {
-        result: 'notified',
-        lookups: [['alert_task', 'grafana_alert']],
-        updates: [
-          [
-            REF,
-            {
-              text: [
-                '*🔁 ~Alert details~*',
-                'Alert details',
-                `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #${String(DUPLICATE_TASK_NUMBER)} Example task> で対応`,
-              ].join('\n'),
-              color: '#8b949e',
-              blocks: [
-                {
-                  type: 'section',
-                  text: { type: 'mrkdwn', text: '*🔁 ~Alert details~*' },
-                },
-                {
-                  type: 'context',
-                  elements: [{ type: 'mrkdwn', text: 'Alert details' }],
-                },
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #${String(DUPLICATE_TASK_NUMBER)} Example task> で対応`,
-                    },
-                  ],
-                },
-              ],
-              metadata: {
-                event_type: 'alert_task',
-                event_payload: {
-                  task_id: TASK_ID,
-                  tq_task_status: 'completed',
-                  tq_task_status_reason: 'duplicate',
-                  tq_duplicate_task_id: DUPLICATE_TASK_ID,
-                  tq_duplicate_task_number: DUPLICATE_TASK_NUMBER,
-                  tq_duplicate_task_title: 'Example task',
-                  [TQ_ORIGINAL_CONTENT_KEY]:
-                    expectedTqOriginalContentSnapshot(sourceContent),
-                },
-              },
-            },
-          ],
-        ],
+      status: `~${TASK_LINK}~ · duplicate of #202 Related task`,
+      color: '#6b6e75',
+      reason: 'duplicate',
+      extraMetadata: {
+        tq_duplicate_task_id: DUPLICATE_TASK_ID,
+        tq_duplicate_task_number: DUPLICATE_TASK_NUMBER,
+        tq_duplicate_task_title: 'Related task',
+        tq_task_occurred_at: OCCURRED_AT,
       },
     },
-  ])('updates the status display for $name', async ({ task, expected }) => {
+    {
+      name: 'todo',
+      task: { status: 'todo', statusReason: null },
+      status: `${TASK_LINK} · todo`,
+      color: '#2eb67d',
+      reason: 'none',
+      extraMetadata: {},
+    },
+  ])('updates the lower attachment for $name', async (item) => {
     const { notifier, findMessageByMetadata, updateMessage } = createNotifier()
-
     const result = await dispatchTqTaskStatusChanged(
       notifier,
       TQ_WEB_URL,
-      eventFor(task),
+      eventFor(item.task),
     ).match(
       (outcome) => outcome,
       () => 'error',
@@ -306,48 +191,7 @@ describe('dispatchTqTaskStatusChanged', () => {
     expect(
       observeDispatch(
         result,
-        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
-        updateMessage.mock.calls,
-      ),
-    ).toEqual(expected)
-  })
-
-  it('rebuilds a compact alert when only the completed reason changes', async () => {
-    const completedInfo: TqTaskStatusInfo = {
-      task: { id: TASK_ID, number: TASK_NUMBER },
-      status: 'completed',
-      statusReason: 'completed',
-    }
-    const completedContent = updateTqTaskStatus(
-      originalContent,
-      formatTqTaskStatus(completedInfo, TQ_WEB_URL),
-      completedInfo,
-    )
-    const { notifier, findMessageByMetadata, updateMessage } = createNotifier(
-      createMessage(completedContent),
-    )
-
-    const result = await dispatchTqTaskStatusChanged(
-      notifier,
-      TQ_WEB_URL,
-      eventFor({
-        status: 'completed',
-        statusReason: 'duplicate',
-        duplicateOfTask: {
-          id: DUPLICATE_TASK_ID,
-          number: DUPLICATE_TASK_NUMBER,
-          title: 'Example task',
-        },
-      }),
-    ).match(
-      (outcome) => outcome,
-      () => 'error',
-    )
-
-    expect(
-      observeDispatch(
-        result,
-        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
+        findMessageByMetadata.mock.calls.map(([eventTypes]) => eventTypes),
         updateMessage.mock.calls,
       ),
     ).toEqual({
@@ -357,27 +201,15 @@ describe('dispatchTqTaskStatusChanged', () => {
         [
           REF,
           {
-            text: [
-              '*🔁 ~Alert details~*',
-              'Alert details',
-              `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #202 Example task> で対応`,
-            ].join('\n'),
-            color: '#8b949e',
-            blocks: [
+            ...sourceContent,
+            additionalAttachments: [
               {
-                type: 'section',
-                text: { type: 'mrkdwn', text: '*🔁 ~Alert details~*' },
-              },
-              {
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: 'Alert details' }],
-              },
-              {
-                type: 'context',
-                elements: [
+                text: item.status,
+                color: item.color,
+                blocks: [
                   {
-                    type: 'mrkdwn',
-                    text: `重複 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101> → <${TQ_WEB_URL}/tasks/${DUPLICATE_TASK_ID}|tq #202 Example task> で対応`,
+                    type: 'context',
+                    elements: [{ type: 'mrkdwn', text: item.status }],
                   },
                 ],
               },
@@ -386,13 +218,9 @@ describe('dispatchTqTaskStatusChanged', () => {
               event_type: 'alert_task',
               event_payload: {
                 task_id: TASK_ID,
-                tq_task_status: 'completed',
-                tq_task_status_reason: 'duplicate',
-                tq_duplicate_task_id: DUPLICATE_TASK_ID,
-                tq_duplicate_task_number: DUPLICATE_TASK_NUMBER,
-                tq_duplicate_task_title: 'Example task',
-                [TQ_ORIGINAL_CONTENT_KEY]:
-                  expectedTqOriginalContentSnapshot(sourceContent),
+                tq_task_status: item.task.status,
+                tq_task_status_reason: item.reason,
+                ...item.extraMetadata,
               },
             },
           },
@@ -401,22 +229,21 @@ describe('dispatchTqTaskStatusChanged', () => {
     })
   })
 
-  it('finds Grafana notifications by task ID', async () => {
-    const grafanaMessage = createMessage({
-      ...originalContent,
+  it('finds Grafana alerts and preserves their source metadata', async () => {
+    const grafanaContent: SlackMessageContent = {
+      ...legacyContent,
       metadata: {
         event_type: 'grafana_alert',
         event_payload: {
           fingerprint: 'fingerprint-example',
-          starts_at: '2026-01-02T03:04:05Z',
           task_id: TASK_ID,
           task_number: TASK_NUMBER,
         },
       },
-    })
-    const { notifier, findMessageByMetadata, updateMessage } =
-      createNotifier(grafanaMessage)
-
+    }
+    const { notifier, findMessageByMetadata, updateMessage } = createNotifier(
+      createMessage(grafanaContent),
+    )
     const result = await dispatchTqTaskStatusChanged(
       notifier,
       TQ_WEB_URL,
@@ -429,7 +256,7 @@ describe('dispatchTqTaskStatusChanged', () => {
     expect(
       observeDispatch(
         result,
-        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
+        findMessageByMetadata.mock.calls.map(([eventTypes]) => eventTypes),
         updateMessage.mock.calls,
       ),
     ).toEqual({
@@ -439,24 +266,20 @@ describe('dispatchTqTaskStatusChanged', () => {
         [
           REF,
           {
-            ...grafanaMessage.content,
-            text: `*✅ ~Alert details~*\nAlert details\n対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-            color: '#2da44e',
-            blocks: [
+            ...sourceContent,
+            additionalAttachments: [
               {
-                type: 'section',
-                text: { type: 'mrkdwn', text: '*✅ ~Alert details~*' },
-              },
-              {
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: 'Alert details' }],
-              },
-              {
-                type: 'context',
-                elements: [
+                text: `~${TASK_LINK}~ · completed ${SLACK_DATE}`,
+                color: '#8250df',
+                blocks: [
                   {
-                    type: 'mrkdwn',
-                    text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
+                    type: 'context',
+                    elements: [
+                      {
+                        type: 'mrkdwn',
+                        text: `~${TASK_LINK}~ · completed ${SLACK_DATE}`,
+                      },
+                    ],
                   },
                 ],
               },
@@ -465,13 +288,11 @@ describe('dispatchTqTaskStatusChanged', () => {
               event_type: 'grafana_alert',
               event_payload: {
                 fingerprint: 'fingerprint-example',
-                starts_at: '2026-01-02T03:04:05Z',
                 task_id: TASK_ID,
                 task_number: TASK_NUMBER,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
-                [TQ_ORIGINAL_CONTENT_KEY]:
-                  expectedTqOriginalContentSnapshot(sourceContent),
+                tq_task_occurred_at: OCCURRED_AT,
               },
             },
           },
@@ -480,96 +301,9 @@ describe('dispatchTqTaskStatusChanged', () => {
     })
   })
 
-  it('restores the snapshot and clears duplicate metadata when a task returns to todo', async () => {
-    const duplicateInfo: TqTaskStatusInfo = {
-      task: { id: TASK_ID, number: TASK_NUMBER },
-      status: 'completed',
-      statusReason: 'duplicate',
-      duplicateOfTask: {
-        id: DUPLICATE_TASK_ID,
-        number: DUPLICATE_TASK_NUMBER,
-      },
-    }
-    const duplicateContent = updateTqTaskStatus(
-      originalContent,
-      formatTqTaskStatus(duplicateInfo, TQ_WEB_URL),
-      duplicateInfo,
-    )
-    const { notifier, findMessageByMetadata, updateMessage } = createNotifier(
-      createMessage(duplicateContent),
-    )
-
-    const result = await dispatchTqTaskStatusChanged(
-      notifier,
-      TQ_WEB_URL,
-      eventFor({ status: 'todo', statusReason: null }),
-    ).match(
-      (outcome) => outcome,
-      () => 'error',
-    )
-
-    expect(
-      observeDispatch(
-        result,
-        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
-        updateMessage.mock.calls,
-      ),
-    ).toEqual({
-      result: 'notified',
-      lookups: [['alert_task', 'grafana_alert']],
-      updates: [
-        [
-          REF,
-          {
-            text: `Alert details\n未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: 'Alert details' },
-              },
-              {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: '*Summary*\nExample alert details',
-                },
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK_ID}|tq #101>`,
-                  },
-                ],
-              },
-              {
-                type: 'image',
-                slack_file: { id: 'FEXAMPLE' },
-                alt_text: 'Example panel',
-              },
-            ],
-            metadata: {
-              event_type: 'alert_task',
-              event_payload: {
-                task_id: TASK_ID,
-                tq_task_status: 'todo',
-                tq_task_status_reason: 'none',
-                [TQ_ORIGINAL_CONTENT_KEY]:
-                  expectedTqOriginalContentSnapshot(sourceContent),
-              },
-            },
-          },
-        ],
-      ],
-    })
-  })
-
-  it('ignores events without a matching alert notification', async () => {
+  it('ignores a status event when there is no matching alert', async () => {
     const { notifier, findMessageByMetadata, updateMessage } =
       createNotifier(null)
-
     const result = await dispatchTqTaskStatusChanged(
       notifier,
       TQ_WEB_URL,
@@ -582,7 +316,7 @@ describe('dispatchTqTaskStatusChanged', () => {
     expect(
       observeDispatch(
         result,
-        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
+        findMessageByMetadata.mock.calls.map(([eventTypes]) => eventTypes),
         updateMessage.mock.calls,
       ),
     ).toEqual({
@@ -592,9 +326,8 @@ describe('dispatchTqTaskStatusChanged', () => {
     })
   })
 
-  it('ignores an invalid status event', async () => {
+  it('ignores invalid status events without searching Slack history', async () => {
     const { notifier, findMessageByMetadata, updateMessage } = createNotifier()
-
     const result = await dispatchTqTaskStatusChanged(notifier, TQ_WEB_URL, {
       event: 'other.event',
     }).match(
@@ -605,23 +338,54 @@ describe('dispatchTqTaskStatusChanged', () => {
     expect(
       observeDispatch(
         result,
-        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
+        findMessageByMetadata.mock.calls.map(([eventTypes]) => eventTypes),
         updateMessage.mock.calls,
       ),
     ).toEqual({ result: 'ignored', lookups: [], updates: [] })
   })
 
-  it('ignores a notification with a different task ID', async () => {
-    const message = createMessage({
-      ...originalContent,
+  it('keeps the original source snapshot when updating a folded source attachment', async () => {
+    const foldedContent: SlackMessageContent = {
+      text: '*~Alert details~*\n<https://alerts.example.test/1|View alert>',
+      color: '#2eb67d',
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: '*~Alert details~*' },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: '<https://alerts.example.test/1|View alert>',
+            },
+          ],
+        },
+      ],
+      additionalAttachments: [
+        {
+          text: `${TASK_LINK} · todo`,
+          color: '#2eb67d',
+          blocks: [
+            {
+              type: 'context',
+              elements: [{ type: 'mrkdwn', text: `${TASK_LINK} · todo` }],
+            },
+          ],
+        },
+      ],
       metadata: {
         event_type: 'alert_task',
-        event_payload: { task_id: 'another-task-id' },
+        event_payload: {
+          task_id: TASK_ID,
+          [TQ_ORIGINAL_CONTENT_KEY]: encodeOriginalContent(sourceContent),
+        },
       },
-    })
-    const { notifier, findMessageByMetadata, updateMessage } =
-      createNotifier(message)
-
+    }
+    const { notifier, findMessageByMetadata, updateMessage } = createNotifier(
+      createMessage(foldedContent),
+    )
     const result = await dispatchTqTaskStatusChanged(
       notifier,
       TQ_WEB_URL,
@@ -634,13 +398,48 @@ describe('dispatchTqTaskStatusChanged', () => {
     expect(
       observeDispatch(
         result,
-        findMessageByMetadata.mock.calls.map(([eventType]) => eventType),
+        findMessageByMetadata.mock.calls.map(([eventTypes]) => eventTypes),
         updateMessage.mock.calls,
       ),
     ).toEqual({
-      result: 'ignored',
+      result: 'notified',
       lookups: [['alert_task', 'grafana_alert']],
-      updates: [],
+      updates: [
+        [
+          REF,
+          {
+            ...foldedContent,
+            additionalAttachments: [
+              {
+                text: `~${TASK_LINK}~ · completed ${SLACK_DATE}`,
+                color: '#8250df',
+                blocks: [
+                  {
+                    type: 'context',
+                    elements: [
+                      {
+                        type: 'mrkdwn',
+                        text: `~${TASK_LINK}~ · completed ${SLACK_DATE}`,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: {
+                task_id: TASK_ID,
+                tq_task_status: 'completed',
+                tq_task_status_reason: 'completed',
+                tq_task_occurred_at: OCCURRED_AT,
+                [TQ_ORIGINAL_CONTENT_KEY]:
+                  expectedTqOriginalContentSnapshot(sourceContent),
+              },
+            },
+          },
+        ],
+      ],
     })
   })
 })

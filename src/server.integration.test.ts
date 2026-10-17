@@ -110,7 +110,7 @@ const githubWorkflowRunFailureBody = JSON.stringify({
 })
 
 const githubWorkflowRunFailureContent = {
-  text: '🚨 CI failed\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+  text: '🚨 CI failed',
   color: '#d73a49',
   blocks: [
     { type: 'header', text: { type: 'plain_text', text: '🚨 CI failed' } },
@@ -132,12 +132,20 @@ const githubWorkflowRunFailureContent = {
         },
       ],
     },
+  ],
+  additionalAttachments: [
     {
-      type: 'context',
-      elements: [
+      text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+      color: '#2eb67d',
+      blocks: [
         {
-          type: 'mrkdwn',
-          text: '*状態*\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+            },
+          ],
         },
       ],
     },
@@ -169,7 +177,7 @@ const sentryIssueAlertTriggeredBody = JSON.stringify({
 })
 
 const sentryIssueAlertTriggeredContent = {
-  text: '🐛 TypeError: Cannot read properties of undefined\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+  text: '🐛 TypeError: Cannot read properties of undefined',
   color: '#d73a49',
   blocks: [
     {
@@ -197,12 +205,20 @@ const sentryIssueAlertTriggeredContent = {
         },
       ],
     },
+  ],
+  additionalAttachments: [
     {
-      type: 'context',
-      elements: [
+      text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+      color: '#2eb67d',
+      blocks: [
         {
-          type: 'mrkdwn',
-          text: '*状態*\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+            },
+          ],
         },
       ],
     },

@@ -19,7 +19,7 @@ export const dispatchTqTaskStatusChanged = (
   const parsed = TaskStatusChangedWebhookEvent.safeParse(payload)
   if (!parsed.success) return okAsync<DispatchOutcome>('ignored')
 
-  const { task } = parsed.data
+  const { task, occurredAt } = parsed.data
   return findAlertMessage(notifier, task.id).andThen((message) => {
     if (message === null || message.content === undefined) {
       return okAsync<DispatchOutcome>('ignored')
@@ -29,6 +29,7 @@ export const dispatchTqTaskStatusChanged = (
       task: { id: task.id, number: task.number },
       status: task.status,
       statusReason: task.statusReason,
+      occurredAt,
       ...(task.duplicateOfTask === undefined
         ? {}
         : { duplicateOfTask: task.duplicateOfTask }),

@@ -1,234 +1,151 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import { logger } from '#logger'
 import {
+  addTqTaskStatus,
   formatTqTaskStatus,
   readTqTaskStatusState,
-  TQ_ORIGINAL_CONTENT_KEY,
   type TqTaskStatusInfo,
   updateTqTaskStatus,
 } from '#plugins/tq/alert-task'
-import { compactAppearance } from '#plugins/tq/alert-task-appearance'
 import {
-  expectedTqOriginalContentSnapshot,
-  normalizeTqOriginalContentSnapshot,
-} from '#plugins/tq/alert-task-test-support'
+  encodeOriginalContent,
+  TQ_ORIGINAL_CONTENT_KEY,
+} from '#plugins/tq/alert-task-snapshot'
+import { normalizeTqOriginalContentSnapshot } from '#plugins/tq/alert-task-test-support'
 import type { SlackMessageContent } from '#slack'
 
-vi.mock('#logger', () => ({ logger: { warn: vi.fn() } }))
-
 const TQ_WEB_URL = 'https://tasks.example.test'
-const TASK = { id: 'task-current', number: 101 }
+const TASK = { id: 'task-example-id', number: 101 }
 const TASK_METADATA = {
   event_type: 'alert_task',
   event_payload: { task_id: TASK.id },
 } as const
-
-const ciContent: SlackMessageContent = {
-  text: '🚨 CI failed',
+const SOURCE_CONTENT: SlackMessageContent = {
+  text: 'Alert details',
   color: '#d73a49',
   blocks: [
-    {
-      type: 'header',
-      text: { type: 'plain_text', text: '🚨 CI failed' },
-    },
+    { type: 'header', text: { type: 'plain_text', text: 'Alert details' } },
     {
       type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: '*Repository*\nfohte/example' },
-        {
-          type: 'mrkdwn',
-          text: '*起点の PR*\n<https://github.com/fohte/example/pull/42|#42 Update database>',
-        },
-        { type: 'mrkdwn', text: '*失敗箇所*\n`test` › `unit`' },
-        { type: 'mrkdwn', text: '*トリガー*\npush' },
-      ],
+      text: { type: 'mrkdwn', text: '*Summary*\nExample alert details' },
     },
     {
       type: 'context',
       elements: [
         {
           type: 'mrkdwn',
-          text: '<https://github.com/fohte/example/actions/runs/7|View run>',
+          text: '<https://alerts.example.test/1|View alert>',
         },
       ],
     },
-  ],
-  metadata: TASK_METADATA,
-}
-
-const sentryContent: SlackMessageContent = {
-  text: '🐛 Request failed',
-  color: '#d73a49',
-  blocks: [
     {
-      type: 'header',
-      text: { type: 'plain_text', text: '🐛 Request failed' },
-    },
-    {
-      type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: '*アプリ*\napi' },
-        { type: 'mrkdwn', text: '*Level*\nerror' },
-        { type: 'mrkdwn', text: '*発生箇所*\n`request.ts`' },
-      ],
-    },
-    {
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: '<https://sentry.example.test/issue/7|View issue>',
-        },
-      ],
+      type: 'image',
+      slack_file: { id: 'FEXAMPLE' },
+      alt_text: 'Example panel',
     },
   ],
-  metadata: TASK_METADATA,
 }
-
-const grafanaContent: SlackMessageContent = {
-  text: '🔥 High latency',
-  color: '#d73a49',
-  blocks: [
-    {
-      type: 'header',
-      text: { type: 'plain_text', text: '🔥 High latency' },
-    },
-    {
-      type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: '*Severity*\ncritical' },
-        { type: 'mrkdwn', text: '*instance*\nservice-a' },
-      ],
-    },
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: '*概要*\nLatency is high' },
-    },
-  ],
-  metadata: {
-    event_type: 'grafana_alert',
-    event_payload: { task_id: TASK.id, grafana_status: 'resolved' },
-  },
+const TASK_LINK = `<${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`
+const COMPLETED_AT = '2026-01-02T03:04:05Z'
+const SLACK_DATE = '<!date^1767323045^{date_short} {time}|2026-01-02 03:04 UTC>'
+const TODO_INFO: TqTaskStatusInfo = {
+  task: TASK,
+  status: 'todo',
+  statusReason: null,
 }
-
-const legacyGrafanaContent: SlackMessageContent = {
-  text: '✅ Database saturation (解決)',
-  color: '#2da44e',
-  blocks: [
-    {
-      type: 'header',
-      text: { type: 'plain_text', text: '✅ Database saturation' },
-    },
-    {
-      type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: '*Grafana 上*\nresolved' },
-        { type: 'mrkdwn', text: '*Severity*\ncritical' },
-        { type: 'mrkdwn', text: '*instance*\nworker-3' },
-      ],
-    },
-  ],
-  metadata: {
-    event_type: 'grafana_alert',
-    event_payload: { task_id: TASK.id },
-  },
-}
-
-const completedInfo: TqTaskStatusInfo = {
+const COMPLETED_INFO: TqTaskStatusInfo = {
   task: TASK,
   status: 'completed',
   statusReason: 'completed',
+  occurredAt: COMPLETED_AT,
+}
+const NOT_PLANNED_INFO: TqTaskStatusInfo = {
+  ...COMPLETED_INFO,
+  statusReason: 'not_planned',
+}
+const DUPLICATE_INFO: TqTaskStatusInfo = {
+  ...COMPLETED_INFO,
+  statusReason: 'duplicate',
+  duplicateOfTask: {
+    id: 'task-target-id',
+    number: 202,
+    title: 'Related task',
+  },
 }
 
-const normalizeUpdates = (...contents: SlackMessageContent[]) =>
-  contents.map(normalizeTqOriginalContentSnapshot)
-
-describe('compactAppearance', () => {
+describe('formatTqTaskStatus', () => {
   it.each([
     {
-      name: 'strips a leading Slack emoji shortcode',
-      header: ':satellite: Signal unavailable',
-      title: 'Signal unavailable',
+      info: TODO_INFO,
+      expected: `${TASK_LINK} · todo`,
     },
     {
-      name: 'strips a leading Unicode emoji',
-      header: '🚨 Signal unavailable',
-      title: 'Signal unavailable',
+      info: COMPLETED_INFO,
+      expected: `~${TASK_LINK}~ · completed ${SLACK_DATE}`,
     },
     {
-      name: 'keeps a leading non-emoji label',
-      header: '[prod] Signal unavailable',
-      title: '[prod] Signal unavailable',
+      info: NOT_PLANNED_INFO,
+      expected: `~${TASK_LINK}~ · not planned ${SLACK_DATE}`,
     },
-  ])('$name', ({ header, title }) => {
-    expect(
-      compactAppearance(
-        {
-          text: header,
-          blocks: [
-            { type: 'header', text: { type: 'plain_text', text: header } },
-          ],
-        },
-        '対応済み',
-        completedInfo,
-      ),
-    ).toEqual({
-      text: `*✅ ~${title}~*\n${title}\n対応済み`,
-      color: '#2da44e',
-      blocks: [
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: `*✅ ~${title}~*` },
-        },
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: title }],
-        },
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: '対応済み' }],
-        },
-      ],
-    })
+    {
+      info: DUPLICATE_INFO,
+      expected: `~${TASK_LINK}~ · duplicate of #202 Related task`,
+    },
+  ])('formats the $info.statusReason status', ({ info, expected }) => {
+    expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(expected)
+  })
+
+  it('escapes Slack markup in a duplicate task title', () => {
+    const info: TqTaskStatusInfo = {
+      ...COMPLETED_INFO,
+      statusReason: 'duplicate',
+      duplicateOfTask: {
+        id: 'task-target-id',
+        number: 202,
+        title: 'Review <target> & notes',
+      },
+    }
+
+    expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(
+      `~${TASK_LINK}~ · duplicate of #202 Review &lt;target&gt; &amp; notes`,
+    )
+  })
+
+  it('formats a duplicate target without a title using its task number', () => {
+    const info: TqTaskStatusInfo = {
+      ...COMPLETED_INFO,
+      statusReason: 'duplicate',
+      duplicateOfTask: { id: 'task-target-id', number: 202 },
+    }
+
+    expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(
+      `~${TASK_LINK}~ · duplicate of #202`,
+    )
   })
 })
 
 describe('updateTqTaskStatus', () => {
-  it('compacts a completed CI alert and changes its color', () => {
-    const status = formatTqTaskStatus(completedInfo, TQ_WEB_URL)
+  it('adds the completed task status below the unchanged source attachment', () => {
+    const status = formatTqTaskStatus(COMPLETED_INFO, TQ_WEB_URL)
 
     expect(
       normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(ciContent, status, completedInfo),
+        updateTqTaskStatus(
+          { ...SOURCE_CONTENT, metadata: TASK_METADATA },
+          status,
+          COMPLETED_INFO,
+        ),
       ),
     ).toEqual({
-      text: [
-        '*✅ ~CI failed~*',
-        'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
-        `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      ].join('\n'),
-      color: '#2da44e',
-      blocks: [
+      ...SOURCE_CONTENT,
+      additionalAttachments: [
         {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*✅ ~CI failed~*' },
-        },
-        {
-          type: 'context',
-          elements: [
+          text: status,
+          color: '#8250df',
+          blocks: [
             {
-              type: 'mrkdwn',
-              text: 'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
-            },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+              type: 'context',
+              elements: [{ type: 'mrkdwn', text: status }],
             },
           ],
         },
@@ -239,62 +156,35 @@ describe('updateTqTaskStatus', () => {
           task_id: TASK.id,
           tq_task_status: 'completed',
           tq_task_status_reason: 'completed',
-          [TQ_ORIGINAL_CONTENT_KEY]:
-            expectedTqOriginalContentSnapshot(ciContent),
+          tq_task_occurred_at: COMPLETED_AT,
         },
       },
     })
   })
 
-  it('keeps titles with tildes inside the strikethrough', () => {
-    const content: SlackMessageContent = {
-      text: '🚨 CPU ~90%',
-      color: '#d73a49',
-      blocks: [
-        {
-          type: 'header',
-          text: { type: 'plain_text', text: '🚨 CPU ~90%' },
-        },
-        {
-          type: 'section',
-          fields: [
-            { type: 'mrkdwn', text: '*Repository*\nexample/service' },
-            { type: 'mrkdwn', text: '*起点の PR*\nなし' },
-          ],
-        },
-      ],
-      metadata: TASK_METADATA,
-    }
-    const status = formatTqTaskStatus(completedInfo, TQ_WEB_URL)
+  it('updates only the task attachment when a task returns to todo', () => {
+    const completedStatus = formatTqTaskStatus(COMPLETED_INFO, TQ_WEB_URL)
+    const completed = updateTqTaskStatus(
+      { ...SOURCE_CONTENT, metadata: TASK_METADATA },
+      completedStatus,
+      COMPLETED_INFO,
+    )
+    const todoStatus = formatTqTaskStatus(TODO_INFO, TQ_WEB_URL)
 
     expect(
       normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(content, status, completedInfo),
+        updateTqTaskStatus(completed, todoStatus, TODO_INFO),
       ),
     ).toEqual({
-      text: [
-        '*✅ ~CPU ∼90%~*',
-        'example/service · 起点の PR なし',
-        `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      ].join('\n'),
-      color: '#2da44e',
-      blocks: [
+      ...SOURCE_CONTENT,
+      additionalAttachments: [
         {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*✅ ~CPU ∼90%~*' },
-        },
-        {
-          type: 'context',
-          elements: [
-            { type: 'mrkdwn', text: 'example/service · 起点の PR なし' },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
+          text: todoStatus,
+          color: '#2eb67d',
+          blocks: [
             {
-              type: 'mrkdwn',
-              text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+              type: 'context',
+              elements: [{ type: 'mrkdwn', text: todoStatus }],
             },
           ],
         },
@@ -303,784 +193,179 @@ describe('updateTqTaskStatus', () => {
         event_type: 'alert_task',
         event_payload: {
           task_id: TASK.id,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'completed',
-          [TQ_ORIGINAL_CONTENT_KEY]: expectedTqOriginalContentSnapshot(content),
-        },
-      },
-    })
-  })
-
-  it('keeps leading punctuation and neutralizes mrkdwn title markers', () => {
-    const content: SlackMessageContent = {
-      text: '🚨 [# (Queue) *critical* _state_ `value`',
-      color: '#d73a49',
-      blocks: [
-        {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: '🚨 [# (Queue) *critical* _state_ `value`',
-          },
-        },
-      ],
-      metadata: TASK_METADATA,
-    }
-    const status = formatTqTaskStatus(completedInfo, TQ_WEB_URL)
-
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(content, status, completedInfo),
-      ),
-    ).toEqual({
-      text: [
-        '*✅ ~[# (Queue) ∗critical∗ ＿state＿ ˋvalueˋ~*',
-        '[# (Queue) *critical* _state_ `value`',
-        `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      ].join('\n'),
-      color: '#2da44e',
-      blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: '*✅ ~[# (Queue) ∗critical∗ ＿state＿ ˋvalueˋ~*',
-          },
-        },
-        {
-          type: 'context',
-          elements: [
-            { type: 'mrkdwn', text: '[# (Queue) *critical* _state_ `value`' },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'alert_task',
-        event_payload: {
-          task_id: TASK.id,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'completed',
-          [TQ_ORIGINAL_CONTENT_KEY]: expectedTqOriginalContentSnapshot(content),
-        },
-      },
-    })
-  })
-
-  it('compacts a Sentry alert as not planned', () => {
-    const content: SlackMessageContent = {
-      text: '🐛 Request failed',
-      color: '#d73a49',
-      blocks: [
-        {
-          type: 'header',
-          text: { type: 'plain_text', text: '🐛 Request failed' },
-        },
-        {
-          type: 'section',
-          fields: [
-            { type: 'mrkdwn', text: '*アプリ*\napi' },
-            { type: 'mrkdwn', text: '*Level*\nerror' },
-            { type: 'mrkdwn', text: '*発生箇所*\n`request.ts`' },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: '<https://sentry.example.test/issue/7|View issue>',
-            },
-          ],
-        },
-      ],
-      metadata: TASK_METADATA,
-    }
-    const info: TqTaskStatusInfo = {
-      ...completedInfo,
-      statusReason: 'not_planned',
-    }
-    const status = formatTqTaskStatus(info, TQ_WEB_URL)
-
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(content, status, info),
-      ),
-    ).toEqual({
-      text: [
-        '*⏭️ ~Request failed~*',
-        'api · <https://sentry.example.test/issue/7|View issue>',
-        `対応不要 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      ].join('\n'),
-      color: '#8b949e',
-      blocks: [
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*⏭️ ~Request failed~*' },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'api · <https://sentry.example.test/issue/7|View issue>',
-            },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `対応不要 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'alert_task',
-        event_payload: {
-          task_id: TASK.id,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'not_planned',
-          [TQ_ORIGINAL_CONTENT_KEY]: expectedTqOriginalContentSnapshot(content),
-        },
-      },
-    })
-  })
-
-  it('compacts a completed Sentry alert with its issue context', () => {
-    const status = formatTqTaskStatus(completedInfo, TQ_WEB_URL)
-
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(sentryContent, status, completedInfo),
-      ),
-    ).toEqual({
-      text: [
-        '*✅ ~Request failed~*',
-        'api · <https://sentry.example.test/issue/7|View issue>',
-        `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      ].join('\n'),
-      color: '#2da44e',
-      blocks: [
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*✅ ~Request failed~*' },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'api · <https://sentry.example.test/issue/7|View issue>',
-            },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'alert_task',
-        event_payload: {
-          task_id: TASK.id,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'completed',
-          [TQ_ORIGINAL_CONTENT_KEY]:
-            expectedTqOriginalContentSnapshot(sentryContent),
+          tq_task_status: 'todo',
+          tq_task_status_reason: 'none',
         },
       },
     })
   })
 
   it.each([
-    {
-      name: 'completed',
-      info: completedInfo,
-      heading: '*✅ ~High latency~*',
-      color: '#2da44e',
-      state: '対応済み',
-      reason: 'completed',
-    },
-    {
-      name: 'not planned',
-      info: { ...completedInfo, statusReason: 'not_planned' as const },
-      heading: '*⏭️ ~High latency~*',
-      color: '#8b949e',
-      state: '対応不要',
-      reason: 'not_planned',
-    },
+    { name: 'missing', snapshot: undefined },
+    { name: 'corrupt', snapshot: 'broken-snapshot' },
   ])(
-    'compacts a Grafana alert as $name',
-    ({ info, heading, color, state, reason }) => {
-      const status = formatTqTaskStatus(info, TQ_WEB_URL)
-
-      expect(
-        normalizeTqOriginalContentSnapshot(
-          updateTqTaskStatus(grafanaContent, status, info),
-        ),
-      ).toEqual({
-        text: [
-          heading,
-          'Severity: critical · instance: service-a',
-          `${state} · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
-        ].join('\n'),
-        color,
+    'recovers a previous compact alert with a $name snapshot',
+    ({ snapshot }) => {
+      const context = 'service · <https://alerts.example.test/42|View alert>'
+      const heading = '*✅ ~Database unavailable~*'
+      const status = `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`
+      const legacyContent: SlackMessageContent = {
+        text: [heading, context, status].join('\n'),
+        color: '#2da44e',
         blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: heading } },
           {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: 'Severity: critical · instance: service-a',
-              },
-            ],
+            type: 'section',
+            text: { type: 'mrkdwn', text: heading },
           },
           {
             type: 'context',
             elements: [
+              { type: 'mrkdwn', text: context },
+              { type: 'mrkdwn', text: status },
+            ],
+          },
+        ],
+        metadata: {
+          event_type: 'alert_task',
+          event_payload: {
+            task_id: TASK.id,
+            tq_task_status: 'completed',
+            tq_task_status_reason: 'completed',
+            ...(snapshot === undefined
+              ? {}
+              : { [TQ_ORIGINAL_CONTENT_KEY]: snapshot }),
+          },
+        },
+      }
+      const todoStatus = formatTqTaskStatus(TODO_INFO, TQ_WEB_URL)
+
+      expect(updateTqTaskStatus(legacyContent, todoStatus, TODO_INFO)).toEqual({
+        text: [`*🚨 Database unavailable*`, context].join('\n'),
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: '*🚨 Database unavailable*' },
+          },
+          {
+            type: 'context',
+            elements: [{ type: 'mrkdwn', text: context }],
+          },
+        ],
+        additionalAttachments: [
+          {
+            text: todoStatus,
+            color: '#2eb67d',
+            blocks: [
               {
-                type: 'mrkdwn',
-                text: `${state} · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
+                type: 'context',
+                elements: [{ type: 'mrkdwn', text: todoStatus }],
               },
             ],
           },
         ],
         metadata: {
-          event_type: 'grafana_alert',
+          event_type: 'alert_task',
           event_payload: {
             task_id: TASK.id,
-            grafana_status: 'resolved',
-            tq_task_status: 'completed',
-            tq_task_status_reason: reason,
-            [TQ_ORIGINAL_CONTENT_KEY]:
-              expectedTqOriginalContentSnapshot(grafanaContent),
+            tq_task_status: 'todo',
+            tq_task_status_reason: 'none',
           },
         },
       })
     },
   )
 
-  it('reads the Grafana state from legacy fields and restores resolved alerts in red', () => {
-    const closed = updateTqTaskStatus(
-      legacyGrafanaContent,
-      formatTqTaskStatus(completedInfo, TQ_WEB_URL),
-      completedInfo,
-    )
-    const todoInfo: TqTaskStatusInfo = {
-      ...completedInfo,
-      status: 'todo',
-      statusReason: null,
-    }
-    const restored = updateTqTaskStatus(
-      closed,
-      formatTqTaskStatus(todoInfo, TQ_WEB_URL),
-      todoInfo,
-    )
-    expect(normalizeUpdates(closed, restored)).toEqual([
-      {
-        text: [
-          '*✅ ~Database saturation~*',
-          'Severity: critical · instance: worker-3',
-          `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
-        ].join('\n'),
-        color: '#2da44e',
-        blocks: [
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: '*✅ ~Database saturation~*' },
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: 'Severity: critical · instance: worker-3',
-              },
-            ],
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
-              },
-            ],
-          },
-        ],
-        metadata: {
-          event_type: 'grafana_alert',
-          event_payload: {
-            task_id: TASK.id,
-            tq_task_status: 'completed',
-            tq_task_status_reason: 'completed',
-            [TQ_ORIGINAL_CONTENT_KEY]:
-              expectedTqOriginalContentSnapshot(legacyGrafanaContent),
-          },
-        },
-      },
-      {
-        text: [
-          '✅ Database saturation (解決)',
-          `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
-        ].join('\n'),
-        color: '#d73a49',
-        blocks: [
-          {
-            type: 'header',
-            text: {
-              type: 'plain_text',
-              text: '✅ Database saturation',
-            },
-          },
-          {
-            type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: '*Grafana 上*\nresolved' },
-              { type: 'mrkdwn', text: '*Severity*\ncritical' },
-              { type: 'mrkdwn', text: '*instance*\nworker-3' },
-            ],
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
-              },
-            ],
-          },
-        ],
-        metadata: {
-          event_type: 'grafana_alert',
-          event_payload: {
-            task_id: TASK.id,
-            tq_task_status: 'todo',
-            tq_task_status_reason: 'none',
-            [TQ_ORIGINAL_CONTENT_KEY]:
-              expectedTqOriginalContentSnapshot(legacyGrafanaContent),
-          },
-        },
-      },
-    ])
-  })
-
-  it('keeps Grafana status beside a duplicate link', () => {
-    const content: SlackMessageContent = {
-      text: '🚨 High latency',
-      color: '#d73a49',
-      blocks: [
-        {
-          type: 'header',
-          text: { type: 'plain_text', text: '🚨 High latency' },
-        },
-        {
-          type: 'section',
-          fields: [
-            { type: 'mrkdwn', text: '*Severity*\ncritical' },
-            { type: 'mrkdwn', text: '*instance*\nservice-a' },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'grafana_alert',
-        event_payload: {
-          task_id: TASK.id,
-          grafana_status: 'firing',
-        },
-      },
-    }
-    const info: TqTaskStatusInfo = {
-      ...completedInfo,
-      statusReason: 'duplicate',
-      duplicateOfTask: {
-        id: 'task-target',
-        number: 202,
-        title: 'Existing alert',
-      },
-    }
-    const status = formatTqTaskStatus(info, TQ_WEB_URL)
-
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(content, status, info),
-      ),
-    ).toEqual({
-      text: [
-        '*🔁 ~High latency~*',
-        'Severity: critical · instance: service-a',
-        `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> → <${TQ_WEB_URL}/tasks/task-target|tq #202 Existing alert> で対応 · Grafana 上: firing`,
-      ].join('\n'),
-      color: '#8b949e',
-      blocks: [
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*🔁 ~High latency~*' },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'Severity: critical · instance: service-a',
-            },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> → <${TQ_WEB_URL}/tasks/task-target|tq #202 Existing alert> で対応 · Grafana 上: firing`,
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'grafana_alert',
-        event_payload: {
-          task_id: TASK.id,
-          grafana_status: 'firing',
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'duplicate',
-          tq_duplicate_task_id: 'task-target',
-          tq_duplicate_task_number: 202,
-          tq_duplicate_task_title: 'Existing alert',
-          [TQ_ORIGINAL_CONTENT_KEY]: expectedTqOriginalContentSnapshot(content),
-        },
-      },
-    })
-  })
-
-  it('restores every original field and the source color when a task returns to todo', () => {
-    const completed = updateTqTaskStatus(
-      ciContent,
-      formatTqTaskStatus(completedInfo, TQ_WEB_URL),
-      completedInfo,
-    )
-    const todoInfo: TqTaskStatusInfo = {
-      ...completedInfo,
-      status: 'todo',
-      statusReason: null,
-    }
-
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(
-          completed,
-          formatTqTaskStatus(todoInfo, TQ_WEB_URL),
-          todoInfo,
-        ),
-      ),
-    ).toEqual({
-      ...ciContent,
-      text: `🚨 CI failed\n未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      blocks: [
-        ...(ciContent.blocks ?? []),
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'alert_task',
-        event_payload: {
-          task_id: TASK.id,
-          tq_task_status: 'todo',
-          tq_task_status_reason: 'none',
-          [TQ_ORIGINAL_CONTENT_KEY]:
-            expectedTqOriginalContentSnapshot(ciContent),
-        },
-      },
-    })
-  })
-
-  it('restores every Sentry field when a task returns to todo', () => {
-    const completed = updateTqTaskStatus(
-      sentryContent,
-      formatTqTaskStatus(completedInfo, TQ_WEB_URL),
-      completedInfo,
-    )
-    const todoInfo: TqTaskStatusInfo = {
-      ...completedInfo,
-      status: 'todo',
-      statusReason: null,
-    }
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(
-          completed,
-          formatTqTaskStatus(todoInfo, TQ_WEB_URL),
-          todoInfo,
-        ),
-      ),
-    ).toEqual({
-      text: `🐛 Request failed\n未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      color: '#d73a49',
-      blocks: [
-        ...(sentryContent.blocks ?? []),
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'alert_task',
-        event_payload: {
-          task_id: TASK.id,
-          tq_task_status: 'todo',
-          tq_task_status_reason: 'none',
-          [TQ_ORIGINAL_CONTENT_KEY]:
-            expectedTqOriginalContentSnapshot(sentryContent),
-        },
-      },
-    })
-  })
-
-  it('restores every Grafana field when a task returns to todo', () => {
-    const completed = updateTqTaskStatus(
-      grafanaContent,
-      formatTqTaskStatus(completedInfo, TQ_WEB_URL),
-      completedInfo,
-    )
-    const todoInfo: TqTaskStatusInfo = {
-      ...completedInfo,
-      status: 'todo',
-      statusReason: null,
-    }
-
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(
-          completed,
-          formatTqTaskStatus(todoInfo, TQ_WEB_URL),
-          todoInfo,
-        ),
-      ),
-    ).toEqual({
-      text: `🔥 High latency\n未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
-      color: '#d73a49',
-      blocks: [
-        {
-          type: 'header',
-          text: { type: 'plain_text', text: '🔥 High latency' },
-        },
-        {
-          type: 'section',
-          fields: [
-            { type: 'mrkdwn', text: '*Severity*\ncritical' },
-            { type: 'mrkdwn', text: '*instance*\nservice-a' },
-          ],
-        },
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*概要*\nLatency is high' },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `*状態*\n未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> · Grafana 上: resolved`,
-            },
-          ],
-        },
-      ],
-      metadata: {
-        event_type: 'grafana_alert',
-        event_payload: {
-          task_id: TASK.id,
-          grafana_status: 'resolved',
-          tq_task_status: 'todo',
-          tq_task_status_reason: 'none',
-          [TQ_ORIGINAL_CONTENT_KEY]:
-            expectedTqOriginalContentSnapshot(grafanaContent),
-        },
-      },
-    })
-  })
-
-  it('keeps a corrupt snapshot unchanged and updates compact status when reopening', () => {
-    const completed = updateTqTaskStatus(
-      ciContent,
-      formatTqTaskStatus(completedInfo, TQ_WEB_URL),
-      completedInfo,
-    )
-    const completedMetadata = completed.metadata
-    if (completedMetadata === undefined) {
-      throw new Error('completed alert metadata is missing')
-    }
-    const corruptContent: SlackMessageContent = {
-      ...completed,
-      metadata: {
-        ...completedMetadata,
-        event_payload: {
-          ...completedMetadata.event_payload,
-          [TQ_ORIGINAL_CONTENT_KEY]: 'broken-snapshot',
-        },
-      },
-    }
-    const todoInfo: TqTaskStatusInfo = {
-      ...completedInfo,
-      status: 'todo',
-      statusReason: null,
-    }
-    const warnSpy = vi.spyOn(logger, 'warn')
-    warnSpy.mockClear()
-    const expected = {
-      content: {
-        ...corruptContent,
-        text: [
-          '*🚨 CI failed*',
-          'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
-          `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-        ].join('\n'),
-        color: '#d73a49',
-        blocks: [
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: '*🚨 CI failed*' },
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: 'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>',
-              },
-            ],
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-              },
-            ],
-          },
-        ],
-        metadata: {
-          ...corruptContent.metadata,
-          event_payload: {
-            task_id: TASK.id,
-            tq_task_status: 'todo',
-            tq_task_status_reason: 'none',
-            [TQ_ORIGINAL_CONTENT_KEY]: 'broken-snapshot',
-          },
-        },
-      },
-      warnings: [[{ task_id: TASK.id }, 'tq_original_content_decode_failed']],
-    }
-
-    const updateAndObserve = () => {
-      const updated = updateTqTaskStatus(
-        corruptContent,
-        formatTqTaskStatus(todoInfo, TQ_WEB_URL),
-        todoInfo,
-      )
-      return {
-        content: normalizeTqOriginalContentSnapshot(updated),
-        warnings: warnSpy.mock.calls,
-      }
-    }
-
-    expect(updateAndObserve()).toEqual(expected)
-  })
-
-  it('updates task status in the previous compact layout when its snapshot is corrupt', () => {
-    const status = `対応済み · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`
-    const context =
-      'fohte/example · 起点の PR <https://github.com/fohte/example/pull/42|#42 Update database>'
+  it('moves the legacy task status out of a single attachment', () => {
+    const legacyStatus = `未対応 · ${TASK_LINK}`
     const legacyContent: SlackMessageContent = {
-      text: ['*✅ ~CI failed~*', context, status].join('\n'),
+      ...SOURCE_CONTENT,
+      text: `Alert details\n${legacyStatus}`,
+      blocks: [
+        ...(SOURCE_CONTENT.blocks ?? []).slice(0, 2),
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: `*状態*\n${legacyStatus}` }],
+        },
+        ...(SOURCE_CONTENT.blocks ?? []).slice(2),
+      ],
+      metadata: TASK_METADATA,
+    }
+    const status = formatTqTaskStatus(COMPLETED_INFO, TQ_WEB_URL)
+
+    expect(
+      normalizeTqOriginalContentSnapshot(
+        updateTqTaskStatus(legacyContent, status, COMPLETED_INFO),
+      ),
+    ).toEqual({
+      ...SOURCE_CONTENT,
+      additionalAttachments: [
+        {
+          text: status,
+          color: '#8250df',
+          blocks: [
+            {
+              type: 'context',
+              elements: [{ type: 'mrkdwn', text: status }],
+            },
+          ],
+        },
+      ],
+      metadata: {
+        event_type: 'alert_task',
+        event_payload: {
+          task_id: TASK.id,
+          tq_task_status: 'completed',
+          tq_task_status_reason: 'completed',
+          tq_task_occurred_at: COMPLETED_AT,
+        },
+      },
+    })
+  })
+
+  it('restores a previous compact task notification from its snapshot', () => {
+    const compactStatus = '対応済み'
+    const legacyCompact: SlackMessageContent = {
+      text: `*✅ ~Alert details~*\nAlert details\n${compactStatus}`,
       color: '#2da44e',
       blocks: [
         {
           type: 'section',
-          text: { type: 'mrkdwn', text: '*✅ ~CI failed~*' },
+          text: { type: 'mrkdwn', text: '*✅ ~Alert details~*' },
         },
         {
           type: 'context',
-          elements: [
-            { type: 'mrkdwn', text: context },
-            { type: 'mrkdwn', text: status },
-          ],
+          elements: [{ type: 'mrkdwn', text: 'Alert details' }],
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: compactStatus }],
         },
       ],
       metadata: {
-        event_type: 'alert_task',
+        ...TASK_METADATA,
         event_payload: {
-          task_id: TASK.id,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'completed',
-          [TQ_ORIGINAL_CONTENT_KEY]: 'broken-snapshot',
+          ...TASK_METADATA.event_payload,
+          [TQ_ORIGINAL_CONTENT_KEY]: encodeOriginalContent(SOURCE_CONTENT),
         },
       },
     }
-    const todoInfo: TqTaskStatusInfo = {
-      ...completedInfo,
-      status: 'todo',
-      statusReason: null,
-    }
+    const status = formatTqTaskStatus(TODO_INFO, TQ_WEB_URL)
 
     expect(
       normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(
-          legacyContent,
-          formatTqTaskStatus(todoInfo, TQ_WEB_URL),
-          todoInfo,
-        ),
+        updateTqTaskStatus(legacyCompact, status, TODO_INFO),
       ),
     ).toEqual({
-      text: [
-        '*🚨 CI failed*',
-        context,
-        `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      ].join('\n'),
-      color: '#d73a49',
-      blocks: [
+      ...SOURCE_CONTENT,
+      additionalAttachments: [
         {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*🚨 CI failed*' },
-        },
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: context }],
-        },
-        {
-          type: 'context',
-          elements: [
+          text: status,
+          color: '#2eb67d',
+          blocks: [
             {
-              type: 'mrkdwn',
-              text: `未対応 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+              type: 'context',
+              elements: [{ type: 'mrkdwn', text: status }],
             },
           ],
         },
@@ -1091,101 +376,50 @@ describe('updateTqTaskStatus', () => {
           task_id: TASK.id,
           tq_task_status: 'todo',
           tq_task_status_reason: 'none',
-          [TQ_ORIGINAL_CONTENT_KEY]: 'broken-snapshot',
         },
       },
     })
   })
 
-  it('keeps the full alert when the original-content snapshot exceeds Slack metadata size', () => {
-    let state = 1
-    const highEntropyText = Array.from({ length: 9000 }, () => {
-      state = (state * 48_271) % 2_147_483_647
-      return String.fromCharCode(33 + (state % 90))
-    }).join('')
-    const largeContent: SlackMessageContent = {
-      text: '🚨 Large alert',
-      color: '#d73a49',
+  it('removes compact appearance fields absent from the restored snapshot', () => {
+    const sourceContent = { text: 'Plain alert' }
+    const legacyCompact: SlackMessageContent = {
+      text: '*✅ ~Plain alert~*\nPlain alert',
+      color: '#2da44e',
       blocks: [
-        {
-          type: 'header',
-          text: { type: 'plain_text', text: '🚨 Large alert' },
-        },
         {
           type: 'section',
-          fields: Array.from({ length: 5 }, (_, index) => ({
-            type: 'mrkdwn' as const,
-            text: `*Field ${String(index)}*\n${highEntropyText.slice(index * 1800, (index + 1) * 1800)}`,
-          })),
+          text: { type: 'mrkdwn', text: '*✅ ~Plain alert~*' },
         },
-      ],
-      metadata: TASK_METADATA,
-    }
-    const status = formatTqTaskStatus(completedInfo, TQ_WEB_URL)
-
-    expect(
-      normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(largeContent, status, completedInfo),
-      ),
-    ).toEqual({
-      text: `🚨 Large alert\n${status}`,
-      color: '#d73a49',
-      blocks: [
-        ...(largeContent.blocks ?? []),
         {
           type: 'context',
-          elements: [{ type: 'mrkdwn', text: `*状態*\n${status}` }],
+          elements: [{ type: 'mrkdwn', text: 'Plain alert' }],
         },
       ],
       metadata: {
-        event_type: 'alert_task',
+        ...TASK_METADATA,
         event_payload: {
-          task_id: TASK.id,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'completed',
+          ...TASK_METADATA.event_payload,
+          [TQ_ORIGINAL_CONTENT_KEY]: encodeOriginalContent(sourceContent),
         },
       },
-    })
-  })
-
-  it('keeps the task link in duplicate appearance when the duplicate target is unavailable', () => {
-    const info: TqTaskStatusInfo = {
-      ...completedInfo,
-      statusReason: 'duplicate',
     }
-    const status = formatTqTaskStatus(info, TQ_WEB_URL)
+    const status = formatTqTaskStatus(TODO_INFO, TQ_WEB_URL)
 
     expect(
       normalizeTqOriginalContentSnapshot(
-        updateTqTaskStatus(sentryContent, status, info),
+        updateTqTaskStatus(legacyCompact, status, TODO_INFO),
       ),
     ).toEqual({
-      text: [
-        '*🔁 ~Request failed~*',
-        'api · <https://sentry.example.test/issue/7|View issue>',
-        `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
-      ].join('\n'),
-      color: '#8b949e',
-      blocks: [
+      text: 'Plain alert',
+      additionalAttachments: [
         {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*🔁 ~Request failed~*' },
-        },
-        {
-          type: 'context',
-          elements: [
+          text: status,
+          color: '#2eb67d',
+          blocks: [
             {
-              type: 'mrkdwn',
-              text: 'api · <https://sentry.example.test/issue/7|View issue>',
-            },
-          ],
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101>`,
+              type: 'context',
+              elements: [{ type: 'mrkdwn', text: status }],
             },
           ],
         },
@@ -1194,79 +428,75 @@ describe('updateTqTaskStatus', () => {
         event_type: 'alert_task',
         event_payload: {
           task_id: TASK.id,
-          tq_task_status: 'completed',
-          tq_task_status_reason: 'duplicate',
-          [TQ_ORIGINAL_CONTENT_KEY]:
-            expectedTqOriginalContentSnapshot(sentryContent),
+          tq_task_status: 'todo',
+          tq_task_status_reason: 'none',
         },
       },
     })
   })
 })
 
+describe('addTqTaskStatus', () => {
+  it('omits the task attachment when task creation failed', () => {
+    const metadata = {
+      event_type: 'grafana_alert',
+      event_payload: {
+        fingerprint: 'alert-fingerprint',
+        grafana_status: 'firing',
+      },
+    }
+    const content = { ...SOURCE_CONTENT, metadata }
+
+    expect(addTqTaskStatus(content, null, TQ_WEB_URL, metadata)).toEqual(
+      content,
+    )
+  })
+})
+
 describe('readTqTaskStatusState', () => {
-  it('keeps a duplicate target from metadata without a title', () => {
+  it('reads a duplicate target without a title from metadata', () => {
     expect(
       readTqTaskStatusState({
         tq_task_status: 'completed',
         tq_task_status_reason: 'duplicate',
-        tq_duplicate_task_id: 'task-target',
+        tq_duplicate_task_id: 'task-target-id',
         tq_duplicate_task_number: 202,
       }),
     ).toEqual({
       status: 'completed',
       statusReason: 'duplicate',
-      duplicateOfTask: { id: 'task-target', number: 202 },
+      duplicateOfTask: { id: 'task-target-id', number: 202 },
     })
   })
 
-  it('reads a duplicate target title from metadata', () => {
+  it('reads a duplicate target and its title from metadata', () => {
     expect(
       readTqTaskStatusState({
         tq_task_status: 'completed',
         tq_task_status_reason: 'duplicate',
-        tq_duplicate_task_id: 'task-target',
+        tq_duplicate_task_id: 'task-target-id',
         tq_duplicate_task_number: 202,
-        tq_duplicate_task_title: 'Review target',
+        tq_duplicate_task_title: 'Related task',
+        tq_task_occurred_at: COMPLETED_AT,
       }),
     ).toEqual({
       status: 'completed',
       statusReason: 'duplicate',
+      occurredAt: COMPLETED_AT,
       duplicateOfTask: {
-        id: 'task-target',
+        id: 'task-target-id',
         number: 202,
-        title: 'Review target',
+        title: 'Related task',
       },
     })
   })
 
-  it('formats a duplicate target without a title using its task number', () => {
-    const info: TqTaskStatusInfo = {
-      task: TASK,
-      status: 'completed',
-      statusReason: 'duplicate',
-      duplicateOfTask: { id: 'task-target', number: 202 },
-    }
-
-    expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(
-      `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> → <${TQ_WEB_URL}/tasks/task-target|tq #202> で対応`,
-    )
-  })
-
-  it('escapes special characters in duplicate titles', () => {
-    const info: TqTaskStatusInfo = {
-      task: TASK,
-      status: 'completed',
-      statusReason: 'duplicate',
-      duplicateOfTask: {
-        id: 'task-target',
-        number: 202,
-        title: 'Review <target> & docs',
-      },
-    }
-
-    expect(formatTqTaskStatus(info, TQ_WEB_URL)).toBe(
-      `重複 · <${TQ_WEB_URL}/tasks/${TASK.id}|tq #101> → <${TQ_WEB_URL}/tasks/task-target|tq #202 Review &lt;target&gt; &amp; docs> で対応`,
-    )
+  it('returns null for a task state with an invalid reason', () => {
+    expect(
+      readTqTaskStatusState({
+        tq_task_status: 'todo',
+        tq_task_status_reason: 'duplicate',
+      }),
+    ).toBeNull()
   })
 })

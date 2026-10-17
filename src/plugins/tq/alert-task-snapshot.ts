@@ -6,6 +6,7 @@ import {
   isRecord,
   isSlackBlock,
   type SlackBlock,
+  type SlackMessageContent,
   type SlackMessageMetadata,
 } from '#slack'
 
@@ -17,6 +18,30 @@ export interface TqOriginalContent {
   text: string
   color?: string
   blocks?: SlackBlock[]
+}
+
+export const withoutOriginalContentSnapshot = (
+  eventPayload: SlackMessageMetadata['event_payload'],
+): SlackMessageMetadata['event_payload'] =>
+  Object.fromEntries(
+    Object.entries(eventPayload).filter(
+      ([key]) => key !== TQ_ORIGINAL_CONTENT_KEY,
+    ),
+  )
+
+export const replacePrimaryContent = (
+  content: SlackMessageContent,
+  primary: TqOriginalContent,
+): SlackMessageContent => {
+  const restored = { ...content }
+  delete restored.color
+  delete restored.blocks
+  return {
+    ...restored,
+    text: primary.text,
+    ...(primary.color === undefined ? {} : { color: primary.color }),
+    ...(primary.blocks === undefined ? {} : { blocks: primary.blocks }),
+  }
 }
 
 export const encodeOriginalContent = (content: TqOriginalContent): string =>

@@ -188,7 +188,7 @@ describe('dispatch (workflow_run)', () => {
       postMessageCalls: [
         [
           {
-            text: '🚨 CI failed\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+            text: '🚨 CI failed',
             color: '#d73a49',
             blocks: [
               {
@@ -213,15 +213,6 @@ describe('dispatch (workflow_run)', () => {
                   },
                 ],
               },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
-                  },
-                ],
-              },
             ],
             metadata: {
               event_type: 'alert_task',
@@ -231,6 +222,23 @@ describe('dispatch (workflow_run)', () => {
                 tq_task_status_reason: 'none',
               },
             },
+            additionalAttachments: [
+              {
+                text: '<https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+                color: '#2eb67d',
+                blocks: [
+                  {
+                    type: 'context',
+                    elements: [
+                      {
+                        type: 'mrkdwn',
+                        text: '<https://tasks.example.test/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
             username: 'GitHub CI',
             iconUrl: 'https://avatars.githubusercontent.com/in/15368',
           },
@@ -276,7 +284,7 @@ describe('dispatch (workflow_run)', () => {
       postMessageCalls: [
         [
           {
-            text: '🚨 CI failed\n未対応',
+            text: '🚨 CI failed',
             color: '#d73a49',
             blocks: [
               {
@@ -300,10 +308,6 @@ describe('dispatch (workflow_run)', () => {
                     text: '<https://github.com/fohte/example/actions/runs/1|View run>',
                   },
                 ],
-              },
-              {
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: '*状態*\n未対応' }],
               },
             ],
             username: 'GitHub CI',
