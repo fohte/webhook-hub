@@ -8,6 +8,7 @@ import {
 } from 'neverthrow'
 
 import { logger } from '#logger'
+import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
 import {
   addTqTaskStatus,
   createAlertTask,
@@ -238,10 +239,16 @@ const dispatchAlert = (
             content.metadata,
             previousStatus,
           )
-        const contentWithoutPanelImage = withTaskStatus(baseContent)
+        const withSourceStatus = (content: SlackMessageContent) =>
+          setSourceAlertResolved(content, alert.status === 'resolved')
+        const contentWithoutPanelImage = withSourceStatus(
+          withTaskStatus(baseContent),
+        )
         return addPanelImage(ctx, alert, baseContent, panelImageFileId).andThen(
           (contentWithImage) => {
-            const notificationContent = withTaskStatus(contentWithImage)
+            const notificationContent = withSourceStatus(
+              withTaskStatus(contentWithImage),
+            )
             const notify = (messageContent: SlackMessageContent) =>
               existing === null
                 ? ctx.notifier.postMessage(messageContent).map(() => undefined)

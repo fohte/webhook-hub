@@ -1,9 +1,14 @@
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
-import { addTqTaskStatus, type TqTaskStatusInfo } from '#plugins/tq/alert-task'
+import {
+  addTqTaskStatus,
+  TQ_ORIGINAL_CONTENT_KEY,
+  type TqTaskStatusInfo,
+} from '#plugins/tq/alert-task'
 import {
   type DecodedSlackMessageContent,
+  expectedTqOriginalContentSnapshot,
   normalizeTqOriginalContentSnapshot,
 } from '#plugins/tq/alert-task-test-support'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
@@ -135,12 +140,15 @@ const expectedTodoGrafanaContent = (options: {
   const task = options.task === undefined ? TQ_TASK_REF : options.task
 
   return {
-    text: `🚨 ${options.alertName} (発生中)`,
+    text: [
+      options.alertName,
+      ...(options.summary === undefined ? [] : [options.summary]),
+    ].join('\n'),
     color: '#d73a49',
     blocks: [
       {
         type: 'header' as const,
-        text: { type: 'plain_text' as const, text: `🚨 ${options.alertName}` },
+        text: { type: 'plain_text' as const, text: options.alertName },
       },
       ...(options.summary === undefined
         ? []
@@ -149,7 +157,7 @@ const expectedTodoGrafanaContent = (options: {
               type: 'section' as const,
               text: {
                 type: 'mrkdwn' as const,
-                text: `*概要*\n${options.summary}`,
+                text: options.summary,
               },
             },
           ]),
@@ -176,6 +184,8 @@ const expectedTodoGrafanaContent = (options: {
             },
           ]),
     ],
+    username: 'Grafana',
+    iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
     metadata: {
       event_type: 'grafana_alert',
       event_payload: {
@@ -216,6 +226,51 @@ const expectedTodoGrafanaContent = (options: {
             },
           ],
         }),
+  }
+}
+
+const expectedFoldedGrafanaContent = (options: {
+  alertName: string
+  fingerprint: string
+  startsAt: string
+  summary?: string
+  task?: typeof TQ_TASK_REF | null
+  panelURL?: string
+}) => {
+  const original = expectedTodoGrafanaContent(options)
+  const title = `*~${options.alertName}~*`
+  const linkBlocks = original.blocks.filter(
+    (block) =>
+      block.type === 'context' &&
+      block.elements.some((element) =>
+        /<https?:\/\/[^>]+>/u.test(element.text),
+      ),
+  )
+  const linkText = linkBlocks.flatMap((block) =>
+    block.type === 'context'
+      ? block.elements.map((element) => element.text)
+      : [],
+  )
+
+  return {
+    ...original,
+    text: [title, ...linkText].join('\n'),
+    color: '#2eb67d',
+    blocks: [
+      {
+        type: 'section' as const,
+        text: { type: 'mrkdwn' as const, text: title },
+      },
+      ...linkBlocks,
+    ],
+    metadata: {
+      ...original.metadata,
+      event_payload: {
+        ...original.metadata.event_payload,
+        grafana_status: 'resolved',
+        [TQ_ORIGINAL_CONTENT_KEY]: expectedTqOriginalContentSnapshot(original),
+      },
+    },
   }
 }
 
@@ -409,9 +464,10 @@ describe('dispatch', () => {
     })
   })
 
-  it('preserves the closed task status when a resolved event is redelivered', async () => {
+  it('folds a resolved source alert while preserving the closed task status', async () => {
     const notifier = createNotifier()
-    const firingContent = expectedAlertContent()
+    const panelURL = 'https://grafana.example.test/d/worker-queue?viewPanel=7'
+    const firingContent = expectedAlertContent(undefined, { panelURL })
     const completedInfo: TqTaskStatusInfo = {
       task: TQ_TASK_REF,
       status: 'completed',
@@ -438,7 +494,14 @@ describe('dispatch', () => {
     )
     const tqClient = createTqClient()
     const outcome = await dispatchOutcome(createContext(notifier, tqClient), {
-      alerts: [{ ...ALERT, status: 'resolved' }],
+      alerts: [{ ...ALERT, status: 'resolved', panelURL }],
+    })
+    const expectedResolved = expectedFoldedGrafanaContent({
+      alertName: 'Queue depth',
+      fingerprint: 'fp-queue',
+      startsAt: INCIDENT_START,
+      summary: 'Queue is growing',
+      panelURL,
     })
 
     expect(
@@ -472,18 +535,7 @@ describe('dispatch', () => {
         [
           { channel: 'C9', ts: 'existing-ts' },
           {
-            text: '✅ Queue depth (解決)',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: { type: 'plain_text', text: '✅ Queue depth' },
-              },
-              {
-                type: 'section',
-                text: { type: 'mrkdwn', text: '*概要*\nQueue is growing' },
-              },
-            ],
+            ...expectedResolved,
             additionalAttachments: [
               {
                 text: `~<${TQ_WEB_URL}/tasks/${TQ_TASK_REF.id}|tq #9>~ · completed ${TASK_COMPLETED_DATE}`,
@@ -502,13 +554,9 @@ describe('dispatch', () => {
               },
             ],
             metadata: {
-              event_type: 'grafana_alert',
+              ...expectedResolved.metadata,
               event_payload: {
-                fingerprint: 'fp-queue',
-                starts_at: INCIDENT_START,
-                grafana_status: 'resolved',
-                task_id: '00000000-0000-4000-8000-000000000009',
-                task_number: 9,
+                ...expectedResolved.metadata.event_payload,
                 tq_task_status: 'completed',
                 tq_task_status_reason: 'completed',
                 tq_task_occurred_at: TASK_COMPLETED_AT,
@@ -516,6 +564,67 @@ describe('dispatch', () => {
             },
           },
         ],
+      ],
+    })
+  })
+
+  it('unfolds the existing alert when the same fingerprint fires again', async () => {
+    const notifier = createNotifier()
+    const panelURL = 'https://grafana.example.test/d/worker-queue?viewPanel=7'
+    const alert = { ...ALERT, panelURL }
+    const tqClient = createTqClient()
+    const firingContent = expectedAlertContent(undefined, { panelURL })
+    const firingMetadata = firingContent.metadata
+    const ref = { channel: 'C9', ts: 'existing-ts' }
+    notifier.findMessageByMetadata.mockReturnValueOnce(
+      okAsync({
+        ref,
+        content: firingContent,
+        eventPayload: firingMetadata.event_payload,
+      }),
+    )
+
+    const resolvedOutcome = await dispatchOutcome(
+      createContext(notifier, tqClient),
+      { alerts: [{ ...alert, status: 'resolved' }] },
+    )
+    const resolvedContent = notifier.updateMessage.mock.calls[0]?.[1]
+    notifier.findMessageByMetadata.mockReturnValueOnce(
+      okAsync({
+        ref,
+        eventPayload:
+          resolvedContent?.metadata?.event_payload ??
+          firingMetadata.event_payload,
+      }),
+    )
+
+    const firingOutcome = await dispatchOutcome(
+      createContext(notifier, tqClient),
+      {
+        alerts: [alert],
+      },
+    )
+
+    expect(
+      observeDispatch([resolvedOutcome, firingOutcome], {
+        taskCalls: tqClient.createTask.mock.calls,
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: ['notified', 'notified'],
+      taskCalls: [],
+      updateCalls: [
+        [
+          ref,
+          expectedFoldedGrafanaContent({
+            alertName: 'Queue depth',
+            fingerprint: 'fp-queue',
+            startsAt: INCIDENT_START,
+            summary: 'Queue is growing',
+            panelURL,
+          }),
+        ],
+        [ref, expectedAlertContent(undefined, { panelURL })],
       ],
     })
   })
