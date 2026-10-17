@@ -14,6 +14,7 @@ const createNotifier = () => ({
   postMessage: vi.fn().mockReturnValue(okAsync({ channel: 'C1', ts: '1' })),
   updateMessage: vi.fn(),
   findMessageByMetadata: vi.fn(),
+  findMessagesByMetadata: vi.fn(),
   uploadImage: vi.fn().mockReturnValue(okAsync('FIMAGE')),
 })
 

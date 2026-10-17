@@ -27,6 +27,9 @@ const createNotifier = () => ({
   findMessageByMetadata: vi
     .fn<SlackNotifier['findMessageByMetadata']>()
     .mockReturnValue(okAsync(null)),
+  findMessagesByMetadata: vi
+    .fn<SlackNotifier['findMessagesByMetadata']>()
+    .mockReturnValue(okAsync([])),
   uploadImage: vi
     .fn<SlackNotifier['uploadImage']>()
     .mockReturnValue(okAsync('FIMAGE')),
@@ -234,6 +237,35 @@ const observeWorkflowResolution = <TOutcome, TSearchCalls, TTaskCalls>(
   taskCalls,
 })
 
+const observeWorkflowUpdateFailures = (
+  error: SlackApiError,
+  updateCalls: Array<Parameters<SlackNotifier['updateMessage']>>,
+) => {
+  const cause = error.cause
+  return {
+    error: {
+      name: error.name,
+      message: error.message,
+      cause:
+        cause instanceof AggregateError
+          ? {
+              name: cause.name,
+              message: cause.message,
+              errors: cause.errors.map((nested) =>
+                nested instanceof Error
+                  ? { name: nested.name, message: nested.message }
+                  : String(nested),
+              ),
+            }
+          : cause,
+    },
+    updateCalls: updateCalls.map(([ref, content]) => [
+      ref,
+      normalizeAlertContent(content),
+    ]),
+  }
+}
+
 const observeFilteredWorkflowRun = (
   outcome: DispatchOutcome,
   notifier: ReturnType<typeof createNotifier>,
@@ -243,6 +275,7 @@ const observeFilteredWorkflowRun = (
   taskCalls: tqClient.createTask.mock.calls,
   updateCalls: notifier.updateMessage.mock.calls,
   findMessageCalls: notifier.findMessageByMetadata.mock.calls,
+  findMessagesCalls: notifier.findMessagesByMetadata.mock.calls,
   postMessageCalls: notifier.postMessage.mock.calls,
 })
 
@@ -611,7 +644,7 @@ describe('dispatch (workflow_run)', () => {
       options: SlackHistorySearchOptions | undefined
       matchingAlertIds: string[]
     }> = []
-    notifier.findMessageByMetadata.mockImplementation(
+    notifier.findMessagesByMetadata.mockImplementation(
       (
         eventType: string | readonly string[],
         payloadMatcher: (payload: Record<string, unknown>) => boolean,
@@ -631,17 +664,12 @@ describe('dispatch (workflow_run)', () => {
             String(message.eventPayload['github_alert_id']),
           ),
         })
-        const match = matches[0]
         return okAsync(
-          match === undefined
-            ? null
-            : {
-                ref: match.ref,
-                eventPayload: match.eventPayload,
-                ...(match.content === undefined
-                  ? {}
-                  : { content: match.content }),
-              },
+          matches.map((match) => ({
+            ref: match.ref,
+            eventPayload: match.eventPayload,
+            ...(match.content === undefined ? {} : { content: match.content }),
+          })),
         )
       },
     )
@@ -694,21 +722,6 @@ describe('dispatch (workflow_run)', () => {
             'alert-second',
           ],
         },
-        {
-          eventTypes: ['alert_task'],
-          options: { maxPages: 2 },
-          matchingAlertIds: ['alert-first', 'alert-second'],
-        },
-        {
-          eventTypes: ['alert_task'],
-          options: { maxPages: 2 },
-          matchingAlertIds: ['alert-second'],
-        },
-        {
-          eventTypes: ['alert_task'],
-          options: { maxPages: 2 },
-          matchingAlertIds: [],
-        },
       ],
       updateCalls: [
         [
@@ -733,7 +746,7 @@ describe('dispatch (workflow_run)', () => {
       options: SlackHistorySearchOptions | undefined
       matchingAlertIds: string[]
     }> = []
-    notifier.findMessageByMetadata.mockImplementation(
+    notifier.findMessagesByMetadata.mockImplementation(
       (eventType, _payloadMatcher, options) => {
         searchCalls.push({
           eventTypes:
@@ -741,7 +754,7 @@ describe('dispatch (workflow_run)', () => {
           options,
           matchingAlertIds: [],
         })
-        return okAsync(null)
+        return okAsync([])
       },
     )
 
@@ -811,7 +824,74 @@ describe('dispatch (workflow_run)', () => {
       taskCalls: [],
       updateCalls: [],
       findMessageCalls: [],
+      findMessagesCalls: [],
       postMessageCalls: [],
+    })
+  })
+
+  it('continues folding remaining alerts and returns all update failures', async () => {
+    const notifier = createNotifier()
+    const firstAlert = workflowAlertContent({
+      alertId: 'alert-first',
+      runId: 401,
+    })
+    const secondAlert = workflowAlertContent({
+      alertId: 'alert-second',
+      runId: 402,
+    })
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: { channel: 'C1', ts: 'first-alert' },
+          eventPayload: firstAlert.metadata?.event_payload ?? {},
+          content: firstAlert,
+        },
+        {
+          ref: { channel: 'C1', ts: 'second-alert' },
+          eventPayload: secondAlert.metadata?.event_payload ?? {},
+          content: secondAlert,
+        },
+      ]),
+    )
+    notifier.updateMessage.mockImplementation((ref) =>
+      ref.ts === 'first-alert'
+        ? errAsync(new SlackApiError('first update failed'))
+        : okAsync(undefined),
+    )
+
+    const result = await dispatch(createContext('workflow_run', notifier), {
+      name: 'workflow_run',
+      payload: workflowRunPayload({
+        conclusion: 'success',
+        repoOwner: 'sample-org',
+        repoName: 'ci-app',
+        workflowId: 73,
+        runId: 500,
+      }),
+    })
+    const error = result._unsafeUnwrapErr()
+    expect(
+      observeWorkflowUpdateFailures(error, notifier.updateMessage.mock.calls),
+    ).toEqual({
+      error: {
+        name: 'SlackApiError',
+        message: 'failed to update 1 GitHub workflow alerts',
+        cause: {
+          name: 'AggregateError',
+          message: 'failed to update 1 GitHub workflow alerts',
+          errors: [{ name: 'SlackApiError', message: 'first update failed' }],
+        },
+      },
+      updateCalls: [
+        [
+          { channel: 'C1', ts: 'first-alert' },
+          normalizeAlertContent(foldedWorkflowAlertContent(firstAlert)),
+        ],
+        [
+          { channel: 'C1', ts: 'second-alert' },
+          normalizeAlertContent(foldedWorkflowAlertContent(secondAlert)),
+        ],
+      ],
     })
   })
 })

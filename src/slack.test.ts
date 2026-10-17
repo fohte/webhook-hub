@@ -569,6 +569,84 @@ describe('findMessageByMetadata', () => {
   })
 })
 
+describe('findMessagesByMetadata', () => {
+  it('collects all matching messages within the requested page bound', async () => {
+    conversationsHistory
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            ts: 'first-ts',
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: { alert_id: 'alert-first' },
+            },
+          },
+          {
+            ts: 'unmatched-ts',
+            metadata: {
+              event_type: 'other_alert',
+              event_payload: { alert_id: 'alert-other' },
+            },
+          },
+        ],
+        response_metadata: { next_cursor: 'page-two' },
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            ts: 'second-ts',
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: { alert_id: 'alert-second' },
+            },
+          },
+        ],
+        response_metadata: { next_cursor: 'page-three' },
+      })
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier
+      .findMessagesByMetadata(
+        'alert_task',
+        (payload) => typeof payload['alert_id'] === 'string',
+        { maxPages: 2 },
+      )
+      .match(
+        (matches) => matches,
+        () => [],
+      )
+
+    expect(observe(result, conversationsHistory.mock.calls)).toEqual({
+      result: [
+        {
+          ref: { channel: 'CDEFAULT', ts: 'first-ts' },
+          eventPayload: { alert_id: 'alert-first' },
+        },
+        {
+          ref: { channel: 'CDEFAULT', ts: 'second-ts' },
+          eventPayload: { alert_id: 'alert-second' },
+        },
+      ],
+      calls: [
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+          },
+        ],
+        [
+          {
+            channel: 'CDEFAULT',
+            limit: 200,
+            include_all_metadata: true,
+            cursor: 'page-two',
+          },
+        ],
+      ],
+    })
+  })
+})
+
 describe('buildPayload', () => {
   it('returns a plain text payload when no color is set', () => {
     const content: SlackMessageContent = { text: 'hello' }

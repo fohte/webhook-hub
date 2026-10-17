@@ -7,7 +7,7 @@ import type {
   StarCreatedEvent,
   WorkflowRunCompletedEvent,
 } from '@octokit/webhooks-types'
-import { okAsync, type ResultAsync } from 'neverthrow'
+import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
 
 import type { GitHubClient } from '#github-client'
 import { logger } from '#logger'
@@ -15,11 +15,11 @@ import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
 import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
 import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
 import { type TqClient } from '#plugins/tq/tq-client'
-import type {
+import {
   SlackApiError,
-  SlackMessageContent,
-  SlackMessageMetadata,
-  SlackNotifier,
+  type SlackMessageContent,
+  type SlackMessageMetadata,
+  type SlackNotifier,
 } from '#slack'
 import {
   buildIssueNotification,
@@ -80,61 +80,74 @@ const resolveWorkflowRunAlerts = (
 ): ResultAsync<DispatchOutcome, SlackApiError> => {
   if (!isEligibleWorkflowRun(input)) return okAsync('filtered')
 
-  const skippedAlertIds = new Set<unknown>()
   let resolvedAny = false
-  const finish = (): ResultAsync<DispatchOutcome, SlackApiError> =>
-    okAsync(resolvedAny ? 'notified' : 'filtered')
+  const updateFailures: SlackApiError[] = []
 
-  const resolveNext = (): ResultAsync<DispatchOutcome, SlackApiError> =>
-    ctx.notifier
-      .findMessageByMetadata(
-        'alert_task',
-        (payload) => {
-          const alertId = payload['github_alert_id']
-          const alertRunId = payload['github_workflow_run_id']
-          return (
-            payload['github_repo'] === input.repo &&
-            payload['github_workflow_id'] === input.workflowId &&
-            payload['github_branch'] === input.branch &&
-            typeof alertRunId === 'number' &&
-            alertRunId <= input.runId &&
-            typeof alertId === 'string' &&
-            !skippedAlertIds.has(alertId) &&
-            payload[TQ_ORIGINAL_CONTENT_KEY] === undefined
+  return ctx.notifier
+    .findMessagesByMetadata(
+      'alert_task',
+      (payload) => {
+        const alertId = payload['github_alert_id']
+        const alertRunId = payload['github_workflow_run_id']
+        return (
+          payload['github_repo'] === input.repo &&
+          payload['github_workflow_id'] === input.workflowId &&
+          payload['github_branch'] === input.branch &&
+          typeof alertRunId === 'number' &&
+          alertRunId <= input.runId &&
+          typeof alertId === 'string' &&
+          payload[TQ_ORIGINAL_CONTENT_KEY] === undefined
+        )
+      },
+      { maxPages: 2 },
+    )
+    .andThen((messages) => {
+      const updates = messages.reduce<ResultAsync<void, SlackApiError>>(
+        (pending, message) => {
+          if (message.content === undefined) return pending
+
+          const content = setSourceAlertResolved(message.content, true)
+          if (content === message.content) return pending
+
+          return pending.andThen(() =>
+            ctx.notifier
+              .updateMessage(message.ref, content)
+              .map(() => {
+                resolvedAny = true
+                logger.info(
+                  {
+                    delivery_id: ctx.deliveryId,
+                    event: 'workflow_run',
+                    repo: input.repo,
+                    workflow: input.workflow,
+                    branch: input.branch,
+                    run_id: input.runId,
+                  },
+                  'github_workflow_alert_resolved',
+                )
+              })
+              .orElse((error) => {
+                updateFailures.push(error)
+                return okAsync(undefined)
+              }),
           )
         },
-        { maxPages: 2 },
+        okAsync(undefined),
       )
-      .andThen((message) => {
-        if (message === null) {
-          return finish()
-        }
 
-        skippedAlertIds.add(message.eventPayload['github_alert_id'])
-
-        if (message.content === undefined) return resolveNext()
-
-        const content = setSourceAlertResolved(message.content, true)
-        if (content === message.content) return resolveNext()
-
-        return ctx.notifier.updateMessage(message.ref, content).andThen(() => {
-          resolvedAny = true
-          logger.info(
-            {
-              delivery_id: ctx.deliveryId,
-              event: 'workflow_run',
-              repo: input.repo,
-              workflow: input.workflow,
-              branch: input.branch,
-              run_id: input.runId,
-            },
-            'github_workflow_alert_resolved',
+      return updates.andThen(() => {
+        if (updateFailures.length > 0) {
+          const message = `failed to update ${String(updateFailures.length)} GitHub workflow alerts`
+          return errAsync(
+            new SlackApiError(
+              message,
+              new AggregateError(updateFailures, message),
+            ),
           )
-          return resolveNext()
-        })
+        }
+        return okAsync<DispatchOutcome>(resolvedAny ? 'notified' : 'filtered')
       })
-
-  return resolveNext()
+    })
 }
 
 const hasAnyAction = (
