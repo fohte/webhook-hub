@@ -244,46 +244,48 @@ const dispatchAlert = (
         const contentWithoutPanelImage = withSourceStatus(
           withTaskStatus(baseContent),
         )
-        return addPanelImage(ctx, alert, baseContent, panelImageFileId).andThen(
-          (contentWithImage) => {
-            const notificationContent = withSourceStatus(
-              withTaskStatus(contentWithImage),
+        const imageContent =
+          alert.status === 'resolved' && panelImageFileId === undefined
+            ? okAsync(baseContent)
+            : addPanelImage(ctx, alert, baseContent, panelImageFileId)
+        return imageContent.andThen((contentWithImage) => {
+          const notificationContent = withSourceStatus(
+            withTaskStatus(contentWithImage),
+          )
+          const notify = (messageContent: SlackMessageContent) =>
+            existing === null
+              ? ctx.notifier.postMessage(messageContent).map(() => undefined)
+              : ctx.notifier.updateMessage(existing.ref, messageContent)
+
+          const notification = notify(notificationContent).orElse((error) => {
+            const attachedFileId = readPanelImageFileId(
+              notificationContent.metadata?.event_payload,
             )
-            const notify = (messageContent: SlackMessageContent) =>
-              existing === null
-                ? ctx.notifier.postMessage(messageContent).map(() => undefined)
-                : ctx.notifier.updateMessage(existing.ref, messageContent)
+            if (attachedFileId === undefined) return errAsync(error)
 
-            const notification = notify(notificationContent).orElse((error) => {
-              const attachedFileId = readPanelImageFileId(
-                notificationContent.metadata?.event_payload,
-              )
-              if (attachedFileId === undefined) return errAsync(error)
+            reportPanelImageFailure(
+              alert,
+              error,
+              existing === null ? 'post' : 'update',
+            )
+            return notify(contentWithoutPanelImage)
+          })
 
-              reportPanelImageFailure(
-                alert,
-                error,
-                existing === null ? 'post' : 'update',
-              )
-              return notify(contentWithoutPanelImage)
-            })
-
-            return notification.map((): DispatchOutcome => {
-              logger.info(
-                {
-                  delivery_id: ctx.deliveryId,
-                  event: ctx.eventName,
-                  fingerprint: alert.fingerprint,
-                  starts_at: alert.startsAt,
-                  title: note.alertName,
-                  status: note.status,
-                },
-                'slack_notified',
-              )
-              return 'notified'
-            })
-          },
-        )
+          return notification.map((): DispatchOutcome => {
+            logger.info(
+              {
+                delivery_id: ctx.deliveryId,
+                event: ctx.eventName,
+                fingerprint: alert.fingerprint,
+                starts_at: alert.startsAt,
+                title: note.alertName,
+                status: note.status,
+              },
+              'slack_notified',
+            )
+            return 'notified'
+          })
+        })
       })
     })
 }

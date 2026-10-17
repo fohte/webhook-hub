@@ -28,17 +28,15 @@ export interface GrafanaAlertNotification {
 const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 
-const escapeValue = (value: string, maxLength: number): string =>
-  escapeSlackMrkdwn(truncate(value, maxLength))
-
 const slackLink = (url: string | undefined, label: string): string | null => {
   if (url === undefined || !/^https?:\/\/[^\s<>|]+$/i.test(url)) return null
   return `<${escapeSlackMrkdwn(url)}|${escapeSlackMrkdwn(label)}>`
 }
 
 const renderAlertDetails = (
-  alert: GrafanaAlert,
   alertName: string,
+  summary: string | undefined,
+  panelURL: string | undefined,
 ): SlackBlock[] => {
   const blocks: SlackBlock[] = [
     {
@@ -50,15 +48,14 @@ const renderAlertDetails = (
     },
   ]
 
-  const summary = alert.annotations['summary']
-  if (summary !== undefined && summary !== '') {
+  if (summary !== undefined) {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: escapeValue(summary, 500) },
+      text: { type: 'mrkdwn', text: escapeSlackMrkdwn(summary) },
     })
   }
 
-  const panelLink = slackLink(alert.panelURL, 'Panel')
+  const panelLink = slackLink(panelURL, 'Panel')
   if (panelLink !== null) {
     blocks.push({
       type: 'context',
@@ -103,14 +100,15 @@ export const buildGrafanaAlertNotification = (
   alert: GrafanaAlert,
 ): GrafanaAlertNotification => {
   const alertName = alert.labels['alertname'] ?? 'Grafana alert'
-  const summary = alert.annotations['summary']
+  const rawSummary = alert.annotations['summary']
+  const summary =
+    rawSummary === undefined || rawSummary === ''
+      ? undefined
+      : truncate(rawSummary, 500)
   const content: SlackMessageContent = {
-    text: [
-      alertName,
-      ...(summary === undefined || summary === '' ? [] : [summary]),
-    ].join('\n'),
+    text: [alertName, ...(summary === undefined ? [] : [summary])].join('\n'),
     color: TODO_ALERT_COLOR,
-    blocks: renderAlertDetails(alert, alertName),
+    blocks: renderAlertDetails(alertName, summary, alert.panelURL),
     username: GRAFANA_USERNAME,
     iconUrl: GRAFANA_ICON_URL,
   }

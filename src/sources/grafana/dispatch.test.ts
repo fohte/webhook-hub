@@ -340,6 +340,77 @@ describe('dispatch', () => {
     })
   })
 
+  it('posts resolved alerts folded without rendering an undisplayed panel image', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const alertName = 'Worker retry surge'
+    const summary = 'Retries exceeded the rolling budget'
+    const startsAt = '2026-07-08T14:15:16Z'
+    const panelURL =
+      'https://observability.example.test/d/worker-retries?viewPanel=4'
+    const alert = {
+      status: 'resolved',
+      labels: { alertname: alertName },
+      annotations: { summary },
+      fingerprint: 'fp-worker-retry',
+      startsAt,
+      panelURL,
+    }
+    const panelImageRenderer = {
+      render: vi
+        .fn()
+        .mockReturnValue(
+          okAsync({ buffer: Buffer.from('png-data'), panelId: '7' }),
+        ),
+    }
+    const outcome = await dispatchOutcome(
+      createContext(notifier, tqClient, panelImageRenderer),
+      { alerts: [alert] },
+    )
+
+    expect(
+      observeDispatch(outcome, {
+        taskCalls: tqClient.createTask.mock.calls,
+        renderCalls: panelImageRenderer.render.mock.calls,
+        uploadCalls: notifier.uploadImage.mock.calls,
+        postCalls: notifier.postMessage.mock.calls,
+        updateCalls: notifier.updateMessage.mock.calls,
+      }),
+    ).toEqual({
+      outcome: 'notified',
+      taskCalls: [
+        [
+          {
+            title: `Grafana alert: ${alertName}`,
+            description: [
+              `Alert: ${alertName}`,
+              'Status: resolved',
+              `Started at: ${startsAt}`,
+              `Labels:\n- alertname: ${alertName}`,
+              `Annotations:\n- summary: ${summary}`,
+              `Panel URL: ${panelURL}`,
+            ].join('\n\n'),
+            context: 'personal',
+          },
+        ],
+      ],
+      renderCalls: [],
+      uploadCalls: [],
+      postCalls: [
+        [
+          expectedFoldedGrafanaContent({
+            alertName,
+            fingerprint: 'fp-worker-retry',
+            startsAt,
+            summary,
+            panelURL,
+          }),
+        ],
+      ],
+      updateCalls: [],
+    })
+  })
+
   it('adds an uploaded panel image to the Slack alert blocks', async () => {
     const notifier = createNotifier()
     const imageBuffer = Buffer.from('png-data')
@@ -570,10 +641,27 @@ describe('dispatch', () => {
 
   it('unfolds the existing alert when the same fingerprint fires again', async () => {
     const notifier = createNotifier()
-    const panelURL = 'https://grafana.example.test/d/worker-queue?viewPanel=7'
-    const alert = { ...ALERT, panelURL }
+    const alertName = 'Stream parser reconnects'
+    const summary = 'Reconnect attempts exceeded the target'
+    const startsAt = '2026-07-09T15:16:17Z'
+    const panelURL =
+      'https://observability.example.test/d/stream-parser?viewPanel=6'
+    const alert = {
+      status: 'firing',
+      labels: { alertname: alertName },
+      annotations: { summary },
+      fingerprint: 'fp-stream-reconnect',
+      startsAt,
+      panelURL,
+    }
     const tqClient = createTqClient()
-    const firingContent = expectedAlertContent(undefined, { panelURL })
+    const firingContent = expectedTodoGrafanaContent({
+      alertName,
+      fingerprint: 'fp-stream-reconnect',
+      startsAt,
+      summary,
+      panelURL,
+    })
     const firingMetadata = firingContent.metadata
     const ref = { channel: 'C9', ts: 'existing-ts' }
     notifier.findMessageByMetadata.mockReturnValueOnce(
@@ -617,14 +705,23 @@ describe('dispatch', () => {
         [
           ref,
           expectedFoldedGrafanaContent({
-            alertName: 'Queue depth',
-            fingerprint: 'fp-queue',
-            startsAt: INCIDENT_START,
-            summary: 'Queue is growing',
+            alertName,
+            fingerprint: 'fp-stream-reconnect',
+            startsAt,
+            summary,
             panelURL,
           }),
         ],
-        [ref, expectedAlertContent(undefined, { panelURL })],
+        [
+          ref,
+          expectedTodoGrafanaContent({
+            alertName,
+            fingerprint: 'fp-stream-reconnect',
+            startsAt,
+            summary,
+            panelURL,
+          }),
+        ],
       ],
     })
   })
