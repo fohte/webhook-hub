@@ -149,12 +149,14 @@ const findStacktraceFrames = (
     .find((frames) => frames.some((frame) => frame.in_app === true))
     ?.filter((frame) => frame.in_app === true) ?? []
 
+const neutralizeBackticks = (text: string): string => text.replace(/`/gu, 'ˋ')
+
 const renderRequest = (method: string, url: string): string =>
   [method, url].filter((value) => value !== '').join(' ')
 
 const renderContextText = (text: string): string =>
   escapeAndTruncateSlackMrkdwn(
-    text.replace(/`/gu, 'ˋ'),
+    neutralizeBackticks(text),
     CONTEXT_VALUE_MAX_LENGTH,
   )
 
@@ -163,21 +165,22 @@ const renderInlineCode = (text: string): string =>
 
 const renderFrame = (frame: SentryStacktraceFrame): string => {
   const location = [
-    (frame.filename ?? '').replace(/`/gu, 'ˋ'),
+    frame.filename ?? '',
     frame.lineno === undefined || frame.lineno === null
       ? ''
       : String(frame.lineno),
   ]
     .filter((value) => value !== '')
     .join(':')
-  const parts = [
-    location,
-    (frame.context_line ?? '').trimStart().replace(/`/gu, 'ˋ'),
-  ].filter((value) => value !== '')
-  const line = parts.join('  ')
+  const line = [location, (frame.context_line ?? '').trimStart()]
+    .filter((value) => value !== '')
+    .join('  ')
   return line === ''
     ? ''
-    : escapeAndTruncateSlackMrkdwn(line, STACKTRACE_LINE_MAX_LENGTH)
+    : escapeAndTruncateSlackMrkdwn(
+        neutralizeBackticks(line),
+        STACKTRACE_LINE_MAX_LENGTH,
+      )
 }
 
 const renderStacktrace = (frames: SentryStacktraceFrame[]): string => {

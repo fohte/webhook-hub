@@ -178,6 +178,71 @@ describe('extractIssueAlertInput', () => {
     })
   })
 
+  it('falls back to cause frames when the primary exception has no in-app frames', () => {
+    expect(
+      extractIssueAlertInput({
+        action: 'triggered',
+        data: {
+          event: {
+            exception: {
+              values: [
+                {
+                  type: 'OlderFault',
+                  value: 'connection unavailable',
+                  stacktrace: {
+                    frames: [
+                      {
+                        in_app: true,
+                        filename: 'src/widgets/cause.ts',
+                        lineno: 12,
+                        context_line: 'return connect()',
+                      },
+                    ],
+                  },
+                },
+                {
+                  type: 'WidgetFault',
+                  value: 'request failed',
+                  stacktrace: {
+                    frames: [
+                      {
+                        in_app: false,
+                        filename: 'vendor/runtime.js',
+                        lineno: 31,
+                        context_line: 'throw error',
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      action: 'triggered',
+      app: '',
+      culprit: '',
+      title: 'Sentry issue alert',
+      level: '',
+      webUrl: '',
+      triggeredRule: '',
+      environment: '',
+      handled: '',
+      requestMethod: '',
+      requestUrl: '',
+      causes: ['OlderFault: connection unavailable'],
+      stacktraceFrames: [
+        {
+          in_app: true,
+          filename: 'src/widgets/cause.ts',
+          lineno: 12,
+          context_line: 'return connect()',
+        },
+      ],
+    })
+  })
+
   it('uses safe defaults when event details are missing', () => {
     expect(extractIssueAlertInput({ action: 'triggered' })).toEqual({
       action: 'triggered',
