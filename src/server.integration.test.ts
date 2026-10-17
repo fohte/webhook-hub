@@ -189,7 +189,7 @@ const sentryIssueAlertTriggeredContent = {
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: 'widget-service' },
+      text: { type: 'mrkdwn', text: '`widget-service`' },
     },
     {
       type: 'context',

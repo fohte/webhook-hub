@@ -78,6 +78,10 @@ const DEFAULT_ISSUE_TITLE = 'Sentry issue alert'
 // Slack header blocks use plain_text and are limited to 150 characters.
 const HEADER_TEXT_MAX_LENGTH = 150
 const SECTION_TEXT_MAX_LENGTH = 3000
+// Four context values, separators, and code delimiters stay below the section limit.
+const CONTEXT_VALUE_MAX_LENGTH = 700
+// Three capped frame lines and the surrounding code fences stay below the section limit.
+const STACKTRACE_LINE_MAX_LENGTH = 996
 
 const extractProjectSlug = (eventUrl: string | null | undefined): string =>
   eventUrl?.split('/projects/')[1]?.split('/')[1] ?? ''
@@ -87,14 +91,17 @@ const truncateHeaderText = (text: string): string =>
     ? `${text.slice(0, HEADER_TEXT_MAX_LENGTH - 1)}…`
     : text
 
-const escapeAndTruncateSlackMrkdwn = (text: string): string => {
+const escapeAndTruncateSlackMrkdwn = (
+  text: string,
+  maxLength = SECTION_TEXT_MAX_LENGTH,
+): string => {
   const escapedText = escapeSlackMrkdwn(text)
-  if (escapedText.length <= SECTION_TEXT_MAX_LENGTH) return escapedText
+  if (escapedText.length <= maxLength) return escapedText
 
   let result = ''
   for (const character of text) {
     const escapedCharacter = escapeSlackMrkdwn(character)
-    if (result.length + escapedCharacter.length > SECTION_TEXT_MAX_LENGTH - 1) {
+    if (result.length + escapedCharacter.length > maxLength - 1) {
       break
     }
     result += escapedCharacter
@@ -145,19 +152,32 @@ const findStacktraceFrames = (
 const renderRequest = (method: string, url: string): string =>
   [method, url].filter((value) => value !== '').join(' ')
 
+const renderContextText = (text: string): string =>
+  escapeAndTruncateSlackMrkdwn(
+    text.replace(/`/gu, 'ˋ'),
+    CONTEXT_VALUE_MAX_LENGTH,
+  )
+
+const renderInlineCode = (text: string): string =>
+  `\`${renderContextText(text)}\``
+
 const renderFrame = (frame: SentryStacktraceFrame): string => {
   const location = [
-    frame.filename ?? '',
+    (frame.filename ?? '').replace(/`/gu, 'ˋ'),
     frame.lineno === undefined || frame.lineno === null
       ? ''
       : String(frame.lineno),
   ]
     .filter((value) => value !== '')
     .join(':')
-  const parts = [location, (frame.context_line ?? '').replace(/`/gu, 'ˋ')]
-    .filter((value) => value !== '')
-    .map(escapeSlackMrkdwn)
-  return parts.length === 0 ? '' : `\`${parts.join('  ')}\``
+  const parts = [
+    location,
+    (frame.context_line ?? '').trimStart().replace(/`/gu, 'ˋ'),
+  ].filter((value) => value !== '')
+  const line = parts.join('  ')
+  return line === ''
+    ? ''
+    : escapeAndTruncateSlackMrkdwn(line, STACKTRACE_LINE_MAX_LENGTH)
 }
 
 const renderStacktrace = (frames: SentryStacktraceFrame[]): string => {
@@ -166,7 +186,7 @@ const renderStacktrace = (frames: SentryStacktraceFrame[]): string => {
     .slice(0, 3)
     .map(renderFrame)
     .filter((frame) => frame !== '')
-  return lines.join('\n')
+  return lines.length === 0 ? '' : `\`\`\`\n${lines.join('\n')}\n\`\`\``
 }
 
 const buildTaskDescription = (input: IssueAlertInput): string =>
@@ -214,11 +234,12 @@ export const buildIssueAlertNotification = (
 ): IssueAlertNotification | null => {
   if (input.action !== 'triggered') return null
 
+  const request = renderRequest(input.requestMethod, input.requestUrl)
   const contextLine = [
-    input.app,
-    input.environment,
-    input.handled,
-    renderRequest(input.requestMethod, input.requestUrl),
+    input.app === '' ? '' : renderInlineCode(input.app),
+    input.environment === '' ? '' : renderContextText(input.environment),
+    input.handled === '' ? '' : renderContextText(input.handled),
+    request === '' ? '' : renderInlineCode(request),
   ]
     .filter((value) => value !== '')
     .join(' · ')
@@ -235,7 +256,7 @@ export const buildIssueAlertNotification = (
             type: 'section' as const,
             text: {
               type: 'mrkdwn' as const,
-              text: escapeSlackMrkdwn(contextLine),
+              text: contextLine,
             },
           },
         ]),

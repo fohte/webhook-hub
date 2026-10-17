@@ -93,7 +93,7 @@ const expectedSourceContent = {
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: 'widget-service' },
+      text: { type: 'mrkdwn', text: '`widget-service`' },
     },
     {
       type: 'context',
@@ -218,7 +218,7 @@ describe('dispatch', () => {
     })
   })
 
-  it('posts the Sentry alert without a task link when TQ task creation fails', async () => {
+  it('posts the Sentry alert without a task link when tq task creation fails', async () => {
     const notifier = createNotifier()
     const tqClient = createTqClient(
       errAsync(new TqApiError('TQ API unavailable', undefined)),

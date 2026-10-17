@@ -65,6 +65,16 @@ const issueAlertPayload = (): SentryIssueAlertEvent => ({
           {
             type: 'RemoteNodeFault',
             value: 'connection refused',
+            stacktrace: {
+              frames: [
+                {
+                  in_app: true,
+                  filename: 'src/network/legacy.ts',
+                  lineno: 4,
+                  context_line: 'return openConnection()',
+                },
+              ],
+            },
           },
           {
             type: 'DataFetchFault',
@@ -274,7 +284,7 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'widget-service · staging · handled · GET /api/widgets',
+              text: '`widget-service` · staging · handled · `GET /api/widgets`',
             },
           },
           {
@@ -289,9 +299,11 @@ describe('buildIssueAlertNotification', () => {
             text: {
               type: 'mrkdwn',
               text: [
-                '`src/network/request.ts:91  return transport(url)`',
-                '`src/widgets/client.ts:58  return fetch(url)`',
-                '`src/widgets/cache.ts:34  const item = cache.get(key)`',
+                '```',
+                'src/network/request.ts:91  return transport(url)',
+                'src/widgets/client.ts:58  return fetch(url)',
+                'src/widgets/cache.ts:34  const item = cache.get(key)',
+                '```',
               ].join('\n'),
             },
           },
@@ -388,7 +400,7 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'widget-service · staging · handled · GET /api/widgets',
+              text: '`widget-service` · staging · handled · `GET /api/widgets`',
             },
           },
           {
@@ -402,7 +414,11 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '`src/widgets/read.ts:23  return await client.get(path)`',
+              text: [
+                '```',
+                'src/widgets/read.ts:23  return await client.get(path)',
+                '```',
+              ].join('\n'),
             },
           },
           {
@@ -435,6 +451,150 @@ describe('buildIssueAlertNotification', () => {
     })
   })
 
+  it('caps the context row while keeping app and request in inline code', () => {
+    const app = 'a'.repeat(1000)
+    const environment = 'e'.repeat(1000)
+    const handled = 'h'.repeat(1000)
+    const requestUrl = `/${'p'.repeat(1000)}`
+
+    expect(
+      buildIssueAlertNotification(
+        baseInput({
+          app,
+          environment,
+          handled,
+          requestMethod: 'GET',
+          requestUrl,
+          causes: [],
+          stacktraceFrames: [],
+          webUrl: '',
+        }),
+      ),
+    ).toEqual({
+      content: {
+        text: ISSUE_TITLE,
+        color: '#d73a49',
+        username: 'Sentry',
+        iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: ISSUE_TITLE },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: [
+                `\`${'a'.repeat(699)}…\``,
+                `${'e'.repeat(699)}…`,
+                `${'h'.repeat(699)}…`,
+                `\`GET /${'p'.repeat(694)}…\``,
+              ].join(' · '),
+            },
+          },
+        ],
+      },
+      task: {
+        title: `Sentry alert: ${ISSUE_TITLE}`,
+        description: [
+          `Application: ${app}`,
+          `Issue: ${ISSUE_TITLE}`,
+          'Level: error',
+          'Location: src/widgets/read.ts in readWidget',
+          'Rule: widget failures',
+        ].join('\n'),
+        context: 'personal',
+      },
+      title: ISSUE_TITLE,
+      level: 'error',
+      webUrl: '',
+      triggeredRule: 'widget failures',
+    })
+  })
+
+  it('truncates long stack frames inside one bounded code block', () => {
+    const contextLine = `      ${'x'.repeat(2000)}`
+    const frameLine = (filename: string, lineno: number): string => {
+      const prefix = `${filename}:${String(lineno)}  `
+      return `${prefix}${'x'.repeat(996 - prefix.length - 1)}…`
+    }
+
+    expect(
+      buildIssueAlertNotification(
+        baseInput({
+          app: '',
+          environment: '',
+          handled: '',
+          requestMethod: '',
+          requestUrl: '',
+          causes: [],
+          stacktraceFrames: [
+            {
+              in_app: true,
+              filename: 'src/widgets/old.ts',
+              lineno: 5,
+              context_line: contextLine,
+            },
+            {
+              in_app: true,
+              filename: 'src/widgets/mid.ts',
+              lineno: 8,
+              context_line: contextLine,
+            },
+            {
+              in_app: true,
+              filename: 'src/widgets/new.ts',
+              lineno: 13,
+              context_line: contextLine,
+            },
+          ],
+          webUrl: '',
+        }),
+      ),
+    ).toEqual({
+      content: {
+        text: ISSUE_TITLE,
+        color: '#d73a49',
+        username: 'Sentry',
+        iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: ISSUE_TITLE },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: [
+                '```',
+                frameLine('src/widgets/new.ts', 13),
+                frameLine('src/widgets/mid.ts', 8),
+                frameLine('src/widgets/old.ts', 5),
+                '```',
+              ].join('\n'),
+            },
+          },
+        ],
+      },
+      task: {
+        title: `Sentry alert: ${ISSUE_TITLE}`,
+        description: [
+          `Issue: ${ISSUE_TITLE}`,
+          'Level: error',
+          'Location: src/widgets/read.ts in readWidget',
+          'Rule: widget failures',
+        ].join('\n'),
+        context: 'personal',
+      },
+      title: ISSUE_TITLE,
+      level: 'error',
+      webUrl: '',
+      triggeredRule: 'widget failures',
+    })
+  })
+
   it('truncates a long title to fit a Slack header block', () => {
     const title = 'WidgetReadFault '.repeat(12)
     const headerText = `${title.slice(0, 149)}…`
@@ -454,7 +614,7 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'widget-service · staging · handled · GET /api/widgets',
+              text: '`widget-service` · staging · handled · `GET /api/widgets`',
             },
           },
           {
@@ -468,7 +628,11 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '`src/widgets/read.ts:23  return await client.get(path)`',
+              text: [
+                '```',
+                'src/widgets/read.ts:23  return await client.get(path)',
+                '```',
+              ].join('\n'),
             },
           },
           {
@@ -510,7 +674,7 @@ describe('buildIssueAlertNotification', () => {
           stacktraceFrames: [
             {
               in_app: true,
-              filename: 'src/widgets/read.ts',
+              filename: 'src/widgets/`read`.ts',
               lineno: 23,
               context_line: 'return `item` < max && ready',
             },
@@ -532,7 +696,7 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'widget-service · stage&lt;&amp; · handled · GET /api/widgets',
+              text: '`widget-service` · stage&lt;&amp; · handled · `GET /api/widgets`',
             },
           },
           {
@@ -546,7 +710,11 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '`src/widgets/read.ts:23  return ˋitemˋ &lt; max &amp;&amp; ready`',
+              text: [
+                '```',
+                'src/widgets/ˋreadˋ.ts:23  return ˋitemˋ &lt; max &amp;&amp; ready',
+                '```',
+              ].join('\n'),
             },
           },
           {
