@@ -5,6 +5,7 @@ import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import {
   SlackApiError,
+  type SlackHistorySearchOptions,
   type SlackMessageContent,
   type SlackNotifier,
 } from '#slack'
@@ -57,55 +58,74 @@ const workflowAlertContent = (options: {
   taskId?: string
   taskNumber?: number
   resolved?: boolean
-}): SlackMessageContent => ({
-  text: 'CI failed',
-  color: '#d73a49',
-  blocks: [
-    { type: 'header', text: { type: 'plain_text', text: 'CI failed' } },
-    { type: 'section', text: { type: 'mrkdwn', text: 'Failure details' } },
-    {
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: '<https://ci.example.test/runs/42|View run>',
-        },
-      ],
+}): SlackMessageContent => {
+  const taskId = options.taskId ?? '00000000-0000-4000-8000-000000000007'
+  const taskNumber = options.taskNumber ?? 7
+  const taskLink = `<https://tasks.example.test/tasks/${taskId}|tq #${String(taskNumber)}>`
+
+  return {
+    text: 'CI failed',
+    color: '#d73a49',
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: 'CI failed' } },
+      { type: 'section', text: { type: 'mrkdwn', text: 'Failure details' } },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '<https://ci.example.test/runs/42|View run>',
+          },
+        ],
+      },
+    ],
+    metadata: {
+      event_type: 'alert_task',
+      event_payload: {
+        task_id: taskId,
+        tq_task_status: 'todo',
+        tq_task_status_reason: 'none',
+        github_repo: options.repo ?? 'sample-org/ci-app',
+        github_workflow_id: options.workflowId ?? 73,
+        github_branch: options.branch ?? 'main',
+        github_workflow_run_id: options.runId,
+        github_alert_id: options.alertId,
+        ...(options.resolved === true
+          ? { [TQ_ORIGINAL_CONTENT_KEY]: 'stored-snapshot' }
+          : {}),
+      },
     },
-  ],
-  metadata: {
-    event_type: 'alert_task',
-    event_payload: {
-      task_id: options.taskId ?? '00000000-0000-4000-8000-000000000007',
-      tq_task_status: 'todo',
-      tq_task_status_reason: 'none',
-      github_repo: options.repo ?? 'sample-org/ci-app',
-      github_workflow_id: options.workflowId ?? 73,
-      github_branch: options.branch ?? 'main',
-      github_workflow_run_id: options.runId,
-      github_alert_id: options.alertId,
-      ...(options.resolved === true
-        ? { [TQ_ORIGINAL_CONTENT_KEY]: 'stored-snapshot' }
-        : {}),
-    },
-  },
-  additionalAttachments: [
-    {
-      text: `<https://tasks.example.test/tasks/${options.taskId ?? '00000000-0000-4000-8000-000000000007'}|tq #${String(options.taskNumber ?? 7)}> · todo`,
-      color: '#2eb67d',
-      blocks: [
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `<https://tasks.example.test/tasks/${options.taskId ?? '00000000-0000-4000-8000-000000000007'}|tq #${String(options.taskNumber ?? 7)}> · todo`,
-            },
-          ],
-        },
-      ],
-    },
-  ],
+    additionalAttachments: [
+      {
+        text: `${taskLink} · todo`,
+        color: '#2eb67d',
+        blocks: [
+          {
+            type: 'context',
+            elements: [{ type: 'mrkdwn', text: `${taskLink} · todo` }],
+          },
+        ],
+      },
+    ],
+  }
+}
+
+interface WorkflowAlertMessage {
+  eventType: string
+  ref: { channel: string; ts: string }
+  eventPayload: Record<string, unknown>
+  content: SlackMessageContent | undefined
+}
+
+const workflowAlertMessage = (
+  alertId: string,
+  content: SlackMessageContent | undefined,
+  eventPayload = content?.metadata?.event_payload ?? {},
+): WorkflowAlertMessage => ({
+  eventType: 'alert_task',
+  ref: { channel: 'C1', ts: alertId },
+  eventPayload,
+  content,
 })
 
 const normalizeAlertContent = (
@@ -564,52 +584,38 @@ describe('dispatch (workflow_run)', () => {
       runId: 405,
       repo: 'sample-org/other-app',
     })
+    const metadataOnlyAlert = workflowAlertContent({
+      alertId: 'alert-metadata-only',
+      runId: 399,
+    })
+    const newerAlert = workflowAlertContent({
+      alertId: 'alert-after-success',
+      runId: 501,
+    })
     const messages = [
-      {
-        eventType: 'alert_task',
-        ref: { channel: 'C1', ts: 'first-alert' },
-        eventPayload: firstAlert.metadata?.event_payload ?? {},
-        content: firstAlert,
-      },
-      {
-        eventType: 'alert_task',
-        ref: { channel: 'C1', ts: 'second-alert' },
-        eventPayload: secondAlert.metadata?.event_payload ?? {},
-        content: secondAlert,
-      },
-      {
-        eventType: 'alert_task',
-        ref: { channel: 'C1', ts: 'folded-alert' },
-        eventPayload: alreadyFoldedAlert.metadata?.event_payload ?? {},
-        content: alreadyFoldedAlert,
-      },
-      {
-        eventType: 'alert_task',
-        ref: { channel: 'C1', ts: 'other-branch-alert' },
-        eventPayload: otherBranchAlert.metadata?.event_payload ?? {},
-        content: otherBranchAlert,
-      },
-      {
-        eventType: 'alert_task',
-        ref: { channel: 'C1', ts: 'other-workflow-alert' },
-        eventPayload: otherWorkflowAlert.metadata?.event_payload ?? {},
-        content: otherWorkflowAlert,
-      },
-      {
-        eventType: 'alert_task',
-        ref: { channel: 'C1', ts: 'other-repo-alert' },
-        eventPayload: otherRepoAlert.metadata?.event_payload ?? {},
-        content: otherRepoAlert,
-      },
+      workflowAlertMessage(
+        'alert-metadata-only',
+        undefined,
+        metadataOnlyAlert.metadata?.event_payload ?? {},
+      ),
+      workflowAlertMessage('first-alert', firstAlert),
+      workflowAlertMessage('second-alert', secondAlert),
+      workflowAlertMessage('folded-alert', alreadyFoldedAlert),
+      workflowAlertMessage('other-branch-alert', otherBranchAlert),
+      workflowAlertMessage('other-workflow-alert', otherWorkflowAlert),
+      workflowAlertMessage('other-repo-alert', otherRepoAlert),
+      workflowAlertMessage('newer-alert', newerAlert),
     ]
     const searchCalls: Array<{
       eventTypes: string[]
+      options: SlackHistorySearchOptions | undefined
       matchingAlertIds: string[]
     }> = []
     notifier.findMessageByMetadata.mockImplementation(
       (
         eventType: string | readonly string[],
         payloadMatcher: (payload: Record<string, unknown>) => boolean,
+        options?: SlackHistorySearchOptions,
       ) => {
         const eventTypes =
           typeof eventType === 'string' ? [eventType] : [...eventType]
@@ -620,6 +626,7 @@ describe('dispatch (workflow_run)', () => {
         )
         searchCalls.push({
           eventTypes,
+          options,
           matchingAlertIds: matches.map((message) =>
             String(message.eventPayload['github_alert_id']),
           ),
@@ -631,7 +638,9 @@ describe('dispatch (workflow_run)', () => {
             : {
                 ref: match.ref,
                 eventPayload: match.eventPayload,
-                content: match.content,
+                ...(match.content === undefined
+                  ? {}
+                  : { content: match.content }),
               },
         )
       },
@@ -678,10 +687,28 @@ describe('dispatch (workflow_run)', () => {
       searchCalls: [
         {
           eventTypes: ['alert_task'],
+          options: { maxPages: 2 },
+          matchingAlertIds: [
+            'alert-metadata-only',
+            'alert-first',
+            'alert-second',
+          ],
+        },
+        {
+          eventTypes: ['alert_task'],
+          options: { maxPages: 2 },
           matchingAlertIds: ['alert-first', 'alert-second'],
         },
-        { eventTypes: ['alert_task'], matchingAlertIds: ['alert-second'] },
-        { eventTypes: ['alert_task'], matchingAlertIds: [] },
+        {
+          eventTypes: ['alert_task'],
+          options: { maxPages: 2 },
+          matchingAlertIds: ['alert-second'],
+        },
+        {
+          eventTypes: ['alert_task'],
+          options: { maxPages: 2 },
+          matchingAlertIds: [],
+        },
       ],
       updateCalls: [
         [
@@ -693,6 +720,57 @@ describe('dispatch (workflow_run)', () => {
           normalizeAlertContent(foldedWorkflowAlertContent(secondAlert)),
         ],
       ],
+      postMessageCalls: [],
+      taskCalls: [],
+    })
+  })
+
+  it('returns filtered without posting when a successful run has no unresolved alert', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const searchCalls: Array<{
+      eventTypes: string[]
+      options: SlackHistorySearchOptions | undefined
+      matchingAlertIds: string[]
+    }> = []
+    notifier.findMessageByMetadata.mockImplementation(
+      (eventType, _payloadMatcher, options) => {
+        searchCalls.push({
+          eventTypes:
+            typeof eventType === 'string' ? [eventType] : [...eventType],
+          options,
+          matchingAlertIds: [],
+        })
+        return okAsync(null)
+      },
+    )
+
+    const outcome = await dispatchOutcome(
+      createContext('workflow_run', notifier, tqClient),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({ conclusion: 'success', runId: 500 }),
+      },
+    )
+
+    expect(
+      observeWorkflowResolution(
+        outcome,
+        searchCalls,
+        notifier.updateMessage.mock.calls,
+        notifier.postMessage.mock.calls,
+        tqClient.createTask.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'filtered',
+      searchCalls: [
+        {
+          eventTypes: ['alert_task'],
+          options: { maxPages: 2 },
+          matchingAlertIds: [],
+        },
+      ],
+      updateCalls: [],
       postMessageCalls: [],
       taskCalls: [],
     })

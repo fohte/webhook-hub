@@ -61,14 +61,13 @@ interface ParsedEvent {
 
 const createWorkflowRunAlertMetadata = (
   input: WorkflowRunInput,
-  workflowId: number,
   taskId: string | null,
 ): SlackMessageMetadata => ({
   event_type: 'alert_task',
   event_payload: {
     ...(taskId === null ? {} : { task_id: taskId }),
     github_repo: input.repo,
-    github_workflow_id: workflowId,
+    github_workflow_id: input.workflowId,
     github_branch: input.branch,
     github_workflow_run_id: input.runId,
     github_alert_id: randomUUID(),
@@ -78,36 +77,40 @@ const createWorkflowRunAlertMetadata = (
 const resolveWorkflowRunAlerts = (
   ctx: DispatchContext,
   input: WorkflowRunInput,
-  workflowId: number,
 ): ResultAsync<DispatchOutcome, SlackApiError> => {
   if (!isEligibleWorkflowRun(input)) return okAsync('filtered')
 
-  const skippedAlertIds = new Set<string>()
+  const skippedAlertIds = new Set<unknown>()
   let resolvedAny = false
+  const finish = (): ResultAsync<DispatchOutcome, SlackApiError> =>
+    okAsync(resolvedAny ? 'notified' : 'filtered')
 
   const resolveNext = (): ResultAsync<DispatchOutcome, SlackApiError> =>
     ctx.notifier
-      .findMessageByMetadata('alert_task', (payload) => {
-        const alertId = payload['github_alert_id']
-        return (
-          payload['github_repo'] === input.repo &&
-          payload['github_workflow_id'] === workflowId &&
-          payload['github_branch'] === input.branch &&
-          typeof alertId === 'string' &&
-          !skippedAlertIds.has(alertId) &&
-          payload[TQ_ORIGINAL_CONTENT_KEY] === undefined
-        )
-      })
+      .findMessageByMetadata(
+        'alert_task',
+        (payload) => {
+          const alertId = payload['github_alert_id']
+          const alertRunId = payload['github_workflow_run_id']
+          return (
+            payload['github_repo'] === input.repo &&
+            payload['github_workflow_id'] === input.workflowId &&
+            payload['github_branch'] === input.branch &&
+            typeof alertRunId === 'number' &&
+            alertRunId <= input.runId &&
+            typeof alertId === 'string' &&
+            !skippedAlertIds.has(alertId) &&
+            payload[TQ_ORIGINAL_CONTENT_KEY] === undefined
+          )
+        },
+        { maxPages: 2 },
+      )
       .andThen((message) => {
         if (message === null) {
-          return okAsync<DispatchOutcome>(resolvedAny ? 'notified' : 'filtered')
+          return finish()
         }
 
-        const alertId = message.eventPayload['github_alert_id']
-        if (typeof alertId !== 'string') {
-          return okAsync<DispatchOutcome>(resolvedAny ? 'notified' : 'filtered')
-        }
-        skippedAlertIds.add(alertId)
+        skippedAlertIds.add(message.eventPayload['github_alert_id'])
 
         if (message.content === undefined) return resolveNext()
 
@@ -156,11 +159,7 @@ export const dispatch = (
       const typed = parsed.payload as WorkflowRunCompletedEvent
       const input = extractWorkflowRunInput(typed)
       if (input.conclusion === 'success') {
-        return resolveWorkflowRunAlerts(
-          ctx,
-          input,
-          typed.workflow_run.workflow_id,
-        )
+        return resolveWorkflowRunAlerts(ctx, input)
       }
       return buildWorkflowRunNotification(input, {
         githubClient: ctx.githubClient,
@@ -176,11 +175,7 @@ export const dispatch = (
               note.content,
               task,
               ctx.tqWebUrl,
-              createWorkflowRunAlertMetadata(
-                input,
-                typed.workflow_run.workflow_id,
-                task?.id ?? null,
-              ),
+              createWorkflowRunAlertMetadata(input, task?.id ?? null),
             )
             return ctx.notifier.postMessage(content)
           })

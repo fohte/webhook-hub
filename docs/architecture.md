@@ -77,7 +77,7 @@ Header: `X-Tq-Signature-256` in `sha256=<hex>` form. The signature is an HMAC-SH
 
 ### `workflow_run`
 
-A Slack message is posted only when **all** of the following are true:
+A new Slack message is posted only when **all** of the following are true:
 
 - `action === "completed"`
 - `workflow_run.conclusion === "failure"`
@@ -101,6 +101,8 @@ The message is posted as a Slack attachment with a red border, containing Block 
 The message is posted with a custom bot identity (username `GitHub CI`, GitHub Actions' avatar), requiring the `chat:write.customize` Slack scope.
 
 The PR and failed-step lookups use the GitHub REST API via octo-sts. A failed PR lookup on `push` falls back to the commit message's first line, and an unavailable failed step displays `不明`; the notification still posts in either case.
+
+A successful run on the default branch folds unresolved failure alerts for the same repository, workflow, and branch. It only folds alerts from runs whose run ID is less than or equal to the successful run, so a delayed success cannot fold a newer failure. A later failure posts a new alert and leaves earlier folded alerts folded. Slack history lookup is limited to the latest 400 channel messages.
 
 ### `pull_request`
 

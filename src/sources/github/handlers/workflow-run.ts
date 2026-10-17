@@ -23,6 +23,7 @@ export interface WorkflowRunInput {
   workflow: string
   branch: string
   defaultBranch: string
+  workflowId: number
   conclusion: WorkflowRunCompletedEvent['workflow_run']['conclusion']
   sha: string
   runId: number
@@ -55,6 +56,7 @@ export const extractWorkflowRunInput = (
   workflow: payload.workflow_run.name,
   branch: payload.workflow_run.head_branch,
   defaultBranch: payload.repository.default_branch,
+  workflowId: payload.workflow_run.workflow_id,
   conclusion: payload.workflow_run.conclusion,
   sha: payload.workflow_run.head_sha,
   runId: payload.workflow_run.id,
