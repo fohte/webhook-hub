@@ -155,6 +155,8 @@ A Slack message is posted only when **both** of the following are true:
 
 The red attachment uses the issue title in a header, the project slug, level, culprit, and triggered rule in section fields, and a link to the issue page in a context block. Empty project slug and culprit values are omitted.
 
+The alert's Sentry issue ID is stored in Slack message metadata. For `Sentry-Hook-Resource === "issue"`, `action === "resolved"` folds every matching source attachment among up to the 1,000 most recent channel messages, while `action === "unresolved"` restores it. Messages without readable content are skipped.
+
 Every matching CI, Sentry, or Grafana alert attempts to create a personal-context tq task with the alert details and source URL in its description. The Slack notification keeps the source alert in one attachment and, on successful task creation, adds a separate attachment with the `todo` status and a link to the task. Slack message metadata contains the task ID. Task creation failures are logged and captured, while the source alert still posts without a tq attachment. Grafana processes every alert in a grouped payload even if one alert's Slack delivery fails.
 
-All other resources and actions short-circuit to `ignored`. No further filtering is applied on top of this — every verified, triggered issue alert is forwarded.
+Other Sentry resources and unsupported actions short-circuit to `ignored`. Triggered issue alerts are forwarded without additional filtering.

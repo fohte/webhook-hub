@@ -54,10 +54,19 @@ const createNotifier = () => {
   const findMessageByMetadata = vi
     .fn<SlackNotifier['findMessageByMetadata']>()
     .mockReturnValue(okAsync(null))
+  const findMessagesByMetadata = vi
+    .fn<SlackNotifier['findMessagesByMetadata']>()
+    .mockReturnValue(okAsync([]))
   const uploadImage = vi
     .fn<SlackNotifier['uploadImage']>()
     .mockReturnValue(okAsync('FIMAGE'))
-  return { postMessage, updateMessage, findMessageByMetadata, uploadImage }
+  return {
+    postMessage,
+    updateMessage,
+    findMessageByMetadata,
+    findMessagesByMetadata,
+    uploadImage,
+  }
 }
 
 const createTqClient = (

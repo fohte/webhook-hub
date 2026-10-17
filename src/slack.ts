@@ -4,6 +4,7 @@ import { err, ok, type Result, ResultAsync } from 'neverthrow'
 import type { SlackBlock, SlackMessageContent } from '#slack-message-content'
 import {
   buildPayload,
+  isRecord,
   readMessageContent,
   readMessageMetadata,
 } from '#slack-message-content'
@@ -70,6 +71,11 @@ export interface SlackNotifier {
     payloadMatcher: (payload: Record<string, unknown>) => boolean,
     options?: SlackHistorySearchOptions,
   ): ResultAsync<SlackMessageMatch | null, SlackApiError>
+  findMessagesByMetadata(
+    eventType: string | readonly string[],
+    payloadMatcher: (payload: Record<string, unknown>) => boolean,
+    options?: SlackHistorySearchOptions,
+  ): ResultAsync<SlackMessageMatch[], SlackApiError>
   uploadImage(image: SlackImageUpload): ResultAsync<string, SlackApiError>
 }
 
@@ -141,6 +147,35 @@ export const createSlackNotifier = (
     return resolved
   }
 
+  const readMatchingMessages = (
+    channelId: string,
+    messages: readonly unknown[] | undefined,
+    eventType: string | readonly string[],
+    payloadMatcher: (payload: Record<string, unknown>) => boolean,
+  ): SlackMessageMatch[] =>
+    (messages ?? []).flatMap((message) => {
+      const timestamp = isRecord(message) ? message['ts'] : undefined
+      const metadata = readMessageMetadata(message)
+      if (
+        typeof timestamp !== 'string' ||
+        metadata === null ||
+        (typeof eventType === 'string'
+          ? metadata.event_type !== eventType
+          : !eventType.includes(metadata.event_type)) ||
+        !payloadMatcher(metadata.event_payload)
+      ) {
+        return []
+      }
+      const content = readMessageContent(message)
+      return [
+        {
+          ref: { channel: channelId, ts: timestamp },
+          eventPayload: metadata.event_payload,
+          ...(content === null ? {} : { content }),
+        },
+      ]
+    })
+
   const findMessageInHistory = (
     channelId: string,
     eventType: string | readonly string[],
@@ -160,27 +195,12 @@ export const createSlackNotifier = (
       }),
       'failed to fetch Slack conversation history',
     ).andThen((res) => {
-      const match = res.messages?.flatMap((message) => {
-        const metadata = readMessageMetadata(message)
-        if (
-          message.ts === undefined ||
-          metadata === null ||
-          (typeof eventType === 'string'
-            ? metadata.event_type !== eventType
-            : !eventType.includes(metadata.event_type)) ||
-          !payloadMatcher(metadata.event_payload)
-        ) {
-          return []
-        }
-        const content = readMessageContent(message)
-        return [
-          {
-            ref: { channel: channelId, ts: message.ts },
-            eventPayload: metadata.event_payload,
-            ...(content === null ? {} : { content }),
-          },
-        ]
-      })[0]
+      const match = readMatchingMessages(
+        channelId,
+        res.messages,
+        eventType,
+        payloadMatcher,
+      )[0]
       if (match !== undefined) return ok(match)
 
       const nextCursor = res.response_metadata?.next_cursor ?? ''
@@ -194,6 +214,44 @@ export const createSlackNotifier = (
             nextCursor,
             page + 1,
           )
+    })
+
+  const findMessagesInHistory = (
+    channelId: string,
+    eventType: string | readonly string[],
+    payloadMatcher: (payload: Record<string, unknown>) => boolean,
+    options: SlackHistorySearchOptions,
+    cursor = '',
+    page = 1,
+  ): ResultAsync<SlackMessageMatch[], SlackApiError> =>
+    wrapSlackApi(
+      client.conversations.history({
+        channel: channelId,
+        limit: 200,
+        include_all_metadata: true,
+        ...(options.oldest === undefined ? {} : { oldest: options.oldest }),
+        ...(options.latest === undefined ? {} : { latest: options.latest }),
+        ...(cursor === '' ? {} : { cursor }),
+      }),
+      'failed to fetch Slack conversation history',
+    ).andThen((res) => {
+      const matches = readMatchingMessages(
+        channelId,
+        res.messages,
+        eventType,
+        payloadMatcher,
+      )
+      const nextCursor = res.response_metadata?.next_cursor ?? ''
+      return nextCursor === '' || page >= (options.maxPages ?? 5)
+        ? ok(matches)
+        : findMessagesInHistory(
+            channelId,
+            eventType,
+            payloadMatcher,
+            options,
+            nextCursor,
+            page + 1,
+          ).map((nextMatches) => [...matches, ...nextMatches])
     })
 
   return {
@@ -244,6 +302,11 @@ export const createSlackNotifier = (
     findMessageByMetadata(eventType, payloadMatcher, options = {}) {
       return resolveChannelId(defaultChannel).andThen((channelId) =>
         findMessageInHistory(channelId, eventType, payloadMatcher, options),
+      )
+    },
+    findMessagesByMetadata(eventType, payloadMatcher, options = {}) {
+      return resolveChannelId(defaultChannel).andThen((channelId) =>
+        findMessagesInHistory(channelId, eventType, payloadMatcher, options),
       )
     },
     uploadImage(image) {

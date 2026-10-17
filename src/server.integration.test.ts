@@ -33,6 +33,7 @@ const createNotifier = () => {
     postMessage,
     updateMessage: vi.fn(),
     findMessageByMetadata: vi.fn(),
+    findMessagesByMetadata: vi.fn(),
     uploadImage: vi.fn(),
   }
   return {

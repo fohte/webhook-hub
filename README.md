@@ -11,7 +11,7 @@ Only the following events are forwarded to Slack; everything else is acknowledge
 
 - **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change.
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
-- **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`.
+- **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`. `issue` webhooks with `action=resolved` or `action=unresolved` fold or restore every matching notification among up to the 1,000 most recent Slack messages.
 - **Grafana alerts** — each firing or resolved alert is posted separately. Redeliveries with the same fingerprint and `startsAt` update the existing Slack message without creating another tq task; a later incident with the same fingerprint gets its own message and task.
 - **tq task status changes** — `task.status_changed` webhooks update the lower Slack attachment to `todo`, `completed`, `not planned`, or `duplicate of #N <title>` while preserving the source alert above it. The lookup searches the most recent 1,000 Slack channel messages.
 
@@ -78,7 +78,7 @@ To run the service against real deliveries, these things need to be wired up.
    - Secret: same value as `GITHUB_WEBHOOK_SECRET`
    - Events: `Workflow runs` and `Pull requests` (or `Send me everything` — non-matching events are ignored)
 
-3. **Register the webhook in Sentry** (Settings → Developer Settings → Internal Integrations), enabling the `Issue` webhook resource and an `Issue Alert` action:
+3. **Register the webhook in Sentry** (Settings → Developer Settings → Internal Integrations), enabling the `Issue` webhook resource for status updates and an `Issue Alert` action:
    - Webhook URL: `https://<your-host>/sentry`
    - Secret: same value as `SENTRY_WEBHOOK_SECRET`
 
