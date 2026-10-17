@@ -3,6 +3,10 @@ import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 
+const GRAFANA_USERNAME = 'Grafana'
+const GRAFANA_ICON_URL = 'https://grafana.com/static/assets/img/fav32.png'
+const PANEL_LINK_LABEL = 'Panel'
+
 export interface GrafanaAlert {
   status: 'firing' | 'resolved'
   labels: Record<string, string>
@@ -25,88 +29,47 @@ export interface GrafanaAlertNotification {
 const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 
-const escapeValue = (value: string, maxLength: number): string =>
-  escapeSlackMrkdwn(truncate(value, maxLength))
-
 const slackLink = (url: string | undefined, label: string): string | null => {
   if (url === undefined || !/^https?:\/\/[^\s<>|]+$/i.test(url)) return null
   return `<${escapeSlackMrkdwn(url)}|${escapeSlackMrkdwn(label)}>`
 }
 
+export const isGrafanaPanelLinkBlock = (block: SlackBlock): boolean =>
+  block.type === 'context' &&
+  block.elements.some(
+    (element) =>
+      'text' in element &&
+      typeof element.text === 'string' &&
+      element.text.endsWith(`|${PANEL_LINK_LABEL}>`),
+  )
+
 const renderAlertDetails = (
-  alert: GrafanaAlert,
   alertName: string,
-  statusIcon: string,
+  summary: string | undefined,
+  panelURL: string | undefined,
 ): SlackBlock[] => {
-  const fields = [
-    ...(alert.labels['severity'] === undefined
-      ? []
-      : [
-          {
-            type: 'mrkdwn' as const,
-            text: `*Severity*\n${escapeValue(alert.labels['severity'], 250)}`,
-          },
-        ]),
-  ]
-
-  const otherLabels = Object.entries(alert.labels)
-    .filter(([key]) => key !== 'alertname' && key !== 'severity')
-    .sort(([left], [right]) => left.localeCompare(right))
-  const hasOtherLabels = otherLabels.length > 10 - fields.length
-  const visibleLabels = otherLabels.slice(
-    0,
-    10 - fields.length - (hasOtherLabels ? 1 : 0),
-  )
-  fields.push(
-    ...visibleLabels.map(([key, value]) => ({
-      type: 'mrkdwn' as const,
-      text: `*${escapeValue(key, 100)}*\n${escapeValue(value, 250)}`,
-    })),
-  )
-  if (hasOtherLabels) {
-    fields.push({
-      type: 'mrkdwn' as const,
-      text: `*その他のラベル*\n${String(otherLabels.length - visibleLabels.length)} 件`,
-    })
-  }
-
   const blocks: SlackBlock[] = [
     {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: truncate(`${statusIcon} ${alertName}`, 150),
+        text: truncate(alertName, 150),
       },
     },
-    ...(fields.length === 0 ? [] : [{ type: 'section' as const, fields }]),
   ]
 
-  for (const [key, label] of [
-    ['summary', '概要'],
-    ['description', '説明'],
-  ] as const) {
-    const value = alert.annotations[key]
-    if (value !== undefined && value !== '') {
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*${label}*\n${escapeValue(value, 500)}`,
-        },
-      })
-    }
+  if (summary !== undefined) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: escapeSlackMrkdwn(summary) },
+    })
   }
 
-  const links = [
-    slackLink(alert.panelURL, 'Panel'),
-    slackLink(alert.dashboardURL, 'Dashboard'),
-    slackLink(alert.generatorURL, 'Rule'),
-    slackLink(alert.annotations['runbook_url'], 'Runbook'),
-  ].filter((link) => link !== null)
-  if (links.length > 0) {
+  const panelLink = slackLink(panelURL, PANEL_LINK_LABEL)
+  if (panelLink !== null) {
     blocks.push({
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: links.join(' · ') }],
+      elements: [{ type: 'mrkdwn', text: panelLink }],
     })
   }
 
@@ -147,12 +110,17 @@ export const buildGrafanaAlertNotification = (
   alert: GrafanaAlert,
 ): GrafanaAlertNotification => {
   const alertName = alert.labels['alertname'] ?? 'Grafana alert'
-  const statusLabel = alert.status === 'firing' ? '発生中' : '解決'
-  const statusIcon = alert.status === 'firing' ? '🚨' : '✅'
+  const rawSummary = alert.annotations['summary']
+  const summary =
+    rawSummary === undefined || rawSummary === ''
+      ? undefined
+      : truncate(rawSummary, 500)
   const content: SlackMessageContent = {
-    text: `${statusIcon} ${alertName} (${statusLabel})`,
+    text: [alertName, ...(summary === undefined ? [] : [summary])].join('\n'),
     color: TODO_ALERT_COLOR,
-    blocks: renderAlertDetails(alert, alertName, statusIcon),
+    blocks: renderAlertDetails(alertName, summary, alert.panelURL),
+    username: GRAFANA_USERNAME,
+    iconUrl: GRAFANA_ICON_URL,
   }
 
   return {

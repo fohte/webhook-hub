@@ -100,7 +100,7 @@ To run the service against real deliveries, these things need to be wired up.
 
 7. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
    - `chat:write` — post and edit messages
-   - `chat:write.customize` — post CI-failure notifications under a custom username/icon
+   - `chat:write.customize` — post CI-failure and Grafana-alert notifications under a custom username/icon
    - `channels:history` and `channels:read` (public channel) or `groups:history` and `groups:read` (private channel) — look up messages and resolve the channel name
    - `metadata.message:read` — read embedded alert fingerprints, task references, and PR identifiers on history items
    - `files:write` — upload Grafana panel images
