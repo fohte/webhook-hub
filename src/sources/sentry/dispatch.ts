@@ -1,10 +1,12 @@
-import { isDeepStrictEqual } from 'node:util'
-
 import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
 
 import { logger } from '#logger'
 import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
-import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
+import {
+  addTqTaskStatus,
+  createAlertTask,
+  TQ_ORIGINAL_CONTENT_KEY,
+} from '#plugins/tq/alert-task'
 import { type TqClient } from '#plugins/tq/tq-client'
 import {
   SlackApiError,
@@ -68,13 +70,15 @@ const dispatchIssueStateChange = (
           result.andThen((state) => {
             if (existing.content === undefined) return okAsync(state)
 
+            const isFolded =
+              existing.eventPayload[TQ_ORIGINAL_CONTENT_KEY] !== undefined
+            if (isFolded === stateChange.resolved) return okAsync(state)
+
             const updatedContent = setSourceAlertResolved(
               existing.content,
               stateChange.resolved,
             )
-            if (isDeepStrictEqual(existing.content, updatedContent)) {
-              return okAsync(state)
-            }
+            if (updatedContent === existing.content) return okAsync(state)
 
             return ctx.notifier
               .updateMessage(existing.ref, updatedContent)

@@ -2,6 +2,7 @@ import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
 import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
+import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import { SlackApiError, type SlackMessageContent } from '#slack'
 import type { DispatchContext } from '#sources/sentry/dispatch'
@@ -589,8 +590,8 @@ describe('dispatch', () => {
     expect(
       observeIssueStateDispatch(
         summary,
-        notifier.updateMessage.mock.calls,
         null,
+        notifier.updateMessage.mock.calls,
       ),
     ).toEqual({
       outcome: {
@@ -600,24 +601,29 @@ describe('dispatch', () => {
           failures: ['first update failed', 'third update failed'],
         },
       },
-      search: [
+      search: null,
+      updateCalls: [
         [firstRef, setSourceAlertResolved(firstContent, true)],
         [secondRef, setSourceAlertResolved(secondContent, true)],
         [thirdRef, setSourceAlertResolved(thirdContent, true)],
       ],
-      updateCalls: null,
     })
   })
 
   it('skips an issue notification that is already folded', async () => {
     const notifier = createNotifier()
-    const foldedContent = setSourceAlertResolved(existingSentryContent(), true)
+    const sourceContent = existingSentryContent()
+    const foldedContent = setSourceAlertResolved(sourceContent, true)
+    const historyContent = {
+      ...foldedContent,
+      text: 'Slack fallback text for folded content',
+    }
     notifier.findMessagesByMetadata.mockReturnValue(
       okAsync([
         {
           ref: SENTRY_MESSAGE_REF,
           eventPayload: foldedContent.metadata?.event_payload ?? {},
-          content: foldedContent,
+          content: historyContent,
         },
       ]),
     )
@@ -703,6 +709,49 @@ describe('dispatch', () => {
         options: {},
       },
       updateCalls: [],
+    })
+  })
+
+  it('skips unreadable matching messages and updates the remaining matches', async () => {
+    const notifier = createNotifier()
+    const content = existingSentryContent()
+    const unreadableRef = { channel: 'C-TEST', ts: '1700000000.000000' }
+    const readableRef = { channel: 'C-TEST', ts: '1700000000.000001' }
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: unreadableRef,
+          eventPayload: {
+            sentry_issue_id: SENTRY_ISSUE_ID,
+            [TQ_ORIGINAL_CONTENT_KEY]: 'encoded-original-content',
+          },
+        },
+        {
+          ref: readableRef,
+          eventPayload: content.metadata?.event_payload ?? {},
+          content,
+        },
+      ]),
+    )
+
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      resource: 'issue',
+      payload: {
+        action: 'resolved',
+        data: { issue: { id: SENTRY_ISSUE_ID } },
+      },
+    })
+
+    expect(
+      observeIssueStateDispatch(
+        outcome,
+        null,
+        notifier.updateMessage.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'notified',
+      search: null,
+      updateCalls: [[readableRef, setSourceAlertResolved(content, true)]],
     })
   })
 
