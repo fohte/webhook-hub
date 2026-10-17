@@ -42,7 +42,6 @@ export const dispatch = (
   if (parsed.resource !== 'event_alert') return okAsync('ignored')
   if (!hasAction(parsed.payload, 'triggered')) return okAsync('ignored')
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- payload shape refinement
   const typed = parsed.payload as SentryIssueAlertEvent
   const note = buildIssueAlertNotification(extractIssueAlertInput(typed))
   if (note === null) return okAsync('ignored')

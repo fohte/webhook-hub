@@ -9,188 +9,377 @@ import {
   extractIssueAlertInput,
 } from '#sources/sentry/handlers/issue-alert'
 
+const ISSUE_TITLE = 'WidgetReadFault: catalog request failed'
+const ISSUE_URL = 'https://monitoring.example.test/issues/456'
+const EVENT_URL =
+  'https://monitoring.example.test/api/0/projects/demo-team/widget-service/events/abc'
+
 const baseInput = (
   overrides: Partial<IssueAlertInput> = {},
 ): IssueAlertInput => ({
   action: 'triggered',
-  app: 'sample-app',
-  culprit: 'src/example.ts in runTask',
-  title: 'TypeError: Cannot read properties of undefined',
+  app: 'widget-service',
+  culprit: 'src/widgets/read.ts in readWidget',
+  title: ISSUE_TITLE,
   level: 'error',
-  webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
-  triggeredRule: 'sample-rule',
+  webUrl: ISSUE_URL,
+  triggeredRule: 'widget failures',
+  environment: 'staging',
+  handled: 'handled',
+  requestMethod: 'GET',
+  requestUrl: '/api/widgets',
+  causes: [
+    'DataFetchFault: service response unavailable',
+    'RemoteNodeFault: connection refused',
+  ],
+  stacktraceFrames: [
+    {
+      in_app: true,
+      filename: 'src/widgets/read.ts',
+      lineno: 23,
+      context_line: 'return await client.get(path)',
+    },
+  ],
   ...overrides,
 })
 
-describe('extractIssueAlertInput', () => {
-  it('maps a Sentry issue alert payload to IssueAlertInput', () => {
-    const payload: SentryIssueAlertEvent = {
-      action: 'triggered',
-      data: {
-        event: {
-          title: 'TypeError: Cannot read properties of undefined',
-          level: 'error',
-          web_url: 'https://sentry.io/organizations/example-org/issues/123/',
-          url: 'https://sentry.io/api/0/projects/example-org/sample-app/events/456/',
-          culprit: 'src/example.ts in runTask',
-        },
-        triggered_rule: 'sample-rule',
-      },
-    }
-
-    expect(extractIssueAlertInput(payload)).toEqual({
-      action: 'triggered',
-      app: 'sample-app',
-      culprit: 'src/example.ts in runTask',
-      title: 'TypeError: Cannot read properties of undefined',
+const issueAlertPayload = (): SentryIssueAlertEvent => ({
+  action: 'triggered',
+  data: {
+    event: {
+      title: ISSUE_TITLE,
       level: 'error',
-      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
-      triggeredRule: 'sample-rule',
+      web_url: ISSUE_URL,
+      url: EVENT_URL,
+      culprit: 'src/widgets/read.ts in readWidget',
+      request: {
+        method: 'GET',
+        url: 'https://api.example.test/api/widgets?limit=5',
+      },
+      tags: [
+        { key: 'environment', value: 'staging' },
+        { key: 'handled', value: 'yes' },
+      ],
+      exception: {
+        values: [
+          {
+            type: 'WidgetReadFault',
+            value: 'catalog request failed',
+            stacktrace: {
+              frames: [
+                {
+                  in_app: false,
+                  filename: 'vendor/runtime.js',
+                  lineno: 6,
+                  context_line: 'raise error',
+                },
+                {
+                  in_app: true,
+                  filename: 'src/widgets/read.ts',
+                  lineno: 23,
+                  context_line: 'return await client.get(path)',
+                },
+                {
+                  in_app: true,
+                  filename: 'src/widgets/cache.ts',
+                  lineno: 34,
+                  context_line: 'const item = cache.get(key)',
+                },
+                {
+                  in_app: true,
+                  filename: 'src/widgets/client.ts',
+                  lineno: 58,
+                  context_line: 'return fetch(url)',
+                },
+                {
+                  in_app: true,
+                  filename: 'src/network/request.ts',
+                  lineno: 91,
+                  context_line: 'return transport(url)',
+                },
+                {
+                  in_app: false,
+                  filename: 'vendor/http.js',
+                  lineno: 11,
+                  context_line: 'throw error',
+                },
+              ],
+            },
+          },
+          {
+            type: 'DataFetchFault',
+            value: 'service response unavailable',
+          },
+          {
+            type: 'RemoteNodeFault',
+            value: 'connection refused',
+          },
+        ],
+      },
+    },
+    triggered_rule: 'widget failures',
+  },
+})
+
+describe('extractIssueAlertInput', () => {
+  it('extracts C3 details from the Sentry event alert payload', () => {
+    expect(extractIssueAlertInput(issueAlertPayload())).toEqual({
+      action: 'triggered',
+      app: 'widget-service',
+      culprit: 'src/widgets/read.ts in readWidget',
+      title: ISSUE_TITLE,
+      level: 'error',
+      webUrl: ISSUE_URL,
+      triggeredRule: 'widget failures',
+      environment: 'staging',
+      handled: 'handled',
+      requestMethod: 'GET',
+      requestUrl: '/api/widgets',
+      causes: [
+        'DataFetchFault: service response unavailable',
+        'RemoteNodeFault: connection refused',
+      ],
+      stacktraceFrames: [
+        {
+          in_app: true,
+          filename: 'src/widgets/read.ts',
+          lineno: 23,
+          context_line: 'return await client.get(path)',
+        },
+        {
+          in_app: true,
+          filename: 'src/widgets/cache.ts',
+          lineno: 34,
+          context_line: 'const item = cache.get(key)',
+        },
+        {
+          in_app: true,
+          filename: 'src/widgets/client.ts',
+          lineno: 58,
+          context_line: 'return fetch(url)',
+        },
+        {
+          in_app: true,
+          filename: 'src/network/request.ts',
+          lineno: 91,
+          context_line: 'return transport(url)',
+        },
+      ],
     })
   })
 
-  it('uses empty app and culprit values when the event omits them', () => {
-    const payload: SentryIssueAlertEvent = {
-      action: 'triggered',
-      data: {
-        event: {
-          title: 'TypeError: Cannot read properties of undefined',
-          level: 'error',
-          web_url: 'https://sentry.io/organizations/example-org/issues/123/',
-          culprit: null,
-        },
-        triggered_rule: 'sample-rule',
-      },
-    }
-
-    expect(extractIssueAlertInput(payload)).toEqual({
+  it('uses safe defaults when event details are missing', () => {
+    expect(extractIssueAlertInput({ action: 'triggered' })).toEqual({
       action: 'triggered',
       app: '',
       culprit: '',
-      title: 'TypeError: Cannot read properties of undefined',
-      level: 'error',
-      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
-      triggeredRule: 'sample-rule',
+      title: 'Sentry issue alert',
+      level: '',
+      webUrl: '',
+      triggeredRule: '',
+      environment: '',
+      handled: '',
+      requestMethod: '',
+      requestUrl: '',
+      causes: [],
+      stacktraceFrames: [],
+    })
+  })
+
+  it('reads environment and handled tags when tags are string pairs', () => {
+    expect(
+      extractIssueAlertInput({
+        action: 'triggered',
+        data: {
+          event: {
+            tags: [
+              ['environment', 'canary'],
+              ['handled', 'no'],
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      action: 'triggered',
+      app: '',
+      culprit: '',
+      title: 'Sentry issue alert',
+      level: '',
+      webUrl: '',
+      triggeredRule: '',
+      environment: 'canary',
+      handled: 'unhandled',
+      requestMethod: '',
+      requestUrl: '',
+      causes: [],
+      stacktraceFrames: [],
     })
   })
 })
 
 describe('buildIssueAlertNotification', () => {
-  it('returns a notification for a triggered issue alert', () => {
-    expect(buildIssueAlertNotification(baseInput())).toEqual({
+  it('renders the source attachment with the C3 details', () => {
+    expect(
+      buildIssueAlertNotification(
+        baseInput({
+          stacktraceFrames: [
+            {
+              in_app: true,
+              filename: 'src/widgets/read.ts',
+              lineno: 23,
+              context_line: 'return await client.get(path)',
+            },
+            {
+              in_app: false,
+              filename: 'vendor/http.js',
+              lineno: 11,
+              context_line: 'throw error',
+            },
+            {
+              in_app: true,
+              filename: 'src/widgets/cache.ts',
+              lineno: 34,
+              context_line: 'const item = cache.get(key)',
+            },
+            {
+              in_app: true,
+              filename: 'src/widgets/client.ts',
+              lineno: 58,
+              context_line: 'return fetch(url)',
+            },
+            {
+              in_app: true,
+              filename: 'src/network/request.ts',
+              lineno: 91,
+              context_line: 'return transport(url)',
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
       content: {
-        text: '🐛 TypeError: Cannot read properties of undefined',
+        text: ISSUE_TITLE,
         color: '#d73a49',
+        username: 'Sentry',
+        iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
         blocks: [
           {
             type: 'header',
             text: {
               type: 'plain_text',
-              text: '🐛 TypeError: Cannot read properties of undefined',
+              text: ISSUE_TITLE,
             },
           },
           {
             type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
-              { type: 'mrkdwn', text: '*Level*\nerror' },
-              {
-                type: 'mrkdwn',
-                text: '*発生箇所*\n`src/example.ts in runTask`',
-              },
-              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
-            ],
+            text: {
+              type: 'mrkdwn',
+              text: 'widget-service · staging · handled · GET /api/widgets',
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '原因: DataFetchFault: service response unavailable › RemoteNodeFault: connection refused',
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: [
+                '`src/network/request.ts:91  return transport(url)`',
+                '`src/widgets/client.ts:58  return fetch(url)`',
+                '`src/widgets/cache.ts:34  const item = cache.get(key)`',
+              ].join('\n'),
+            },
           },
           {
             type: 'context',
             elements: [
               {
                 type: 'mrkdwn',
-                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+                text: '<https://monitoring.example.test/issues/456|View issue>',
               },
             ],
           },
         ],
       },
       task: {
-        title: 'Sentry alert: TypeError: Cannot read properties of undefined',
+        title: `Sentry alert: ${ISSUE_TITLE}`,
         description: [
-          'Application: sample-app',
-          'Issue: TypeError: Cannot read properties of undefined',
+          'Application: widget-service',
+          `Issue: ${ISSUE_TITLE}`,
           'Level: error',
-          'Location: src/example.ts in runTask',
-          'Rule: sample-rule',
-          'Issue URL: https://sentry.io/organizations/example-org/issues/123/',
+          'Location: src/widgets/read.ts in readWidget',
+          'Rule: widget failures',
+          `Issue URL: ${ISSUE_URL}`,
         ].join('\n'),
         context: 'personal',
       },
-      title: 'TypeError: Cannot read properties of undefined',
+      title: ISSUE_TITLE,
       level: 'error',
-      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
-      triggeredRule: 'sample-rule',
+      webUrl: ISSUE_URL,
+      triggeredRule: 'widget failures',
     })
   })
 
-  it('omits empty app and culprit fields', () => {
+  it('omits rows for absent optional details', () => {
     expect(
-      buildIssueAlertNotification(baseInput({ app: '', culprit: '' })),
+      buildIssueAlertNotification(
+        baseInput({
+          app: '',
+          culprit: '',
+          level: '',
+          webUrl: '',
+          triggeredRule: '',
+          environment: '',
+          handled: '',
+          requestMethod: '',
+          requestUrl: '',
+          causes: [],
+          stacktraceFrames: [],
+        }),
+      ),
     ).toEqual({
       content: {
-        text: '🐛 TypeError: Cannot read properties of undefined',
+        text: ISSUE_TITLE,
         color: '#d73a49',
+        username: 'Sentry',
+        iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
         blocks: [
           {
             type: 'header',
             text: {
               type: 'plain_text',
-              text: '🐛 TypeError: Cannot read properties of undefined',
+              text: ISSUE_TITLE,
             },
-          },
-          {
-            type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: '*Level*\nerror' },
-              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
-            ],
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
-              },
-            ],
           },
         ],
       },
       task: {
-        title: 'Sentry alert: TypeError: Cannot read properties of undefined',
-        description: [
-          'Application: Unknown',
-          'Issue: TypeError: Cannot read properties of undefined',
-          'Level: error',
-          'Location: Unknown',
-          'Rule: sample-rule',
-          'Issue URL: https://sentry.io/organizations/example-org/issues/123/',
-        ].join('\n'),
+        title: `Sentry alert: ${ISSUE_TITLE}`,
+        description: `Issue: ${ISSUE_TITLE}`,
         context: 'personal',
       },
-      title: 'TypeError: Cannot read properties of undefined',
-      level: 'error',
-      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
-      triggeredRule: 'sample-rule',
+      title: ISSUE_TITLE,
+      level: '',
+      webUrl: '',
+      triggeredRule: '',
     })
   })
 
   it('truncates a long title to fit a Slack header block', () => {
-    const title = 'A'.repeat(160)
-    const headerText = `🐛 ${'A'.repeat(146)}…`
+    const title = 'WidgetReadFault '.repeat(12)
+    const headerText = `${title.slice(0, 149)}…`
 
     expect(buildIssueAlertNotification(baseInput({ title }))).toEqual({
       content: {
-        text: `🐛 ${title}`,
+        text: title,
         color: '#d73a49',
+        username: 'Sentry',
+        iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
         blocks: [
           {
             type: 'header',
@@ -198,22 +387,31 @@ describe('buildIssueAlertNotification', () => {
           },
           {
             type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
-              { type: 'mrkdwn', text: '*Level*\nerror' },
-              {
-                type: 'mrkdwn',
-                text: '*発生箇所*\n`src/example.ts in runTask`',
-              },
-              { type: 'mrkdwn', text: '*Rule*\nsample-rule' },
-            ],
+            text: {
+              type: 'mrkdwn',
+              text: 'widget-service · staging · handled · GET /api/widgets',
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '原因: DataFetchFault: service response unavailable › RemoteNodeFault: connection refused',
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '`src/widgets/read.ts:23  return await client.get(path)`',
+            },
           },
           {
             type: 'context',
             elements: [
               {
                 type: 'mrkdwn',
-                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+                text: '<https://monitoring.example.test/issues/456|View issue>',
               },
             ],
           },
@@ -222,87 +420,103 @@ describe('buildIssueAlertNotification', () => {
       task: {
         title: `Sentry alert: ${title}`,
         description: [
-          'Application: sample-app',
+          'Application: widget-service',
           `Issue: ${title}`,
           'Level: error',
-          'Location: src/example.ts in runTask',
-          'Rule: sample-rule',
-          'Issue URL: https://sentry.io/organizations/example-org/issues/123/',
+          'Location: src/widgets/read.ts in readWidget',
+          'Rule: widget failures',
+          `Issue URL: ${ISSUE_URL}`,
         ].join('\n'),
         context: 'personal',
       },
       title,
       level: 'error',
-      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
-      triggeredRule: 'sample-rule',
+      webUrl: ISSUE_URL,
+      triggeredRule: 'widget failures',
     })
   })
 
-  it('escapes Slack mrkdwn metacharacters in title, level and triggered rule', () => {
+  it('escapes Slack mrkdwn characters in event details', () => {
     expect(
       buildIssueAlertNotification(
         baseInput({
-          title: 'Error: <script> & "quotes"',
-          app: 'app<&',
-          culprit: 'src/<script>.ts & runTask',
-          level: '<b>error</b>',
-          triggeredRule: 'A & B',
+          environment: 'stage<&',
+          causes: ['WidgetFetchFault: value < 5 & retry'],
+          stacktraceFrames: [
+            {
+              in_app: true,
+              filename: 'src/widgets/read.ts',
+              lineno: 23,
+              context_line: 'return item < max && ready',
+            },
+          ],
         }),
       ),
     ).toEqual({
       content: {
-        text: '🐛 Error: <script> & "quotes"',
+        text: ISSUE_TITLE,
         color: '#d73a49',
+        username: 'Sentry',
+        iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
         blocks: [
           {
             type: 'header',
-            text: { type: 'plain_text', text: '🐛 Error: <script> & "quotes"' },
+            text: { type: 'plain_text', text: ISSUE_TITLE },
           },
           {
             type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: '*アプリ*\napp&lt;&amp;' },
-              { type: 'mrkdwn', text: '*Level*\n&lt;b&gt;error&lt;/b&gt;' },
-              {
-                type: 'mrkdwn',
-                text: '*発生箇所*\n`src/&lt;script&gt;.ts &amp; runTask`',
-              },
-              { type: 'mrkdwn', text: '*Rule*\nA &amp; B' },
-            ],
+            text: {
+              type: 'mrkdwn',
+              text: 'widget-service · stage&lt;&amp; · handled · GET /api/widgets',
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '原因: WidgetFetchFault: value &lt; 5 &amp; retry',
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '`src/widgets/read.ts:23  return item &lt; max &amp;&amp; ready`',
+            },
           },
           {
             type: 'context',
             elements: [
               {
                 type: 'mrkdwn',
-                text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
+                text: '<https://monitoring.example.test/issues/456|View issue>',
               },
             ],
           },
         ],
       },
       task: {
-        title: 'Sentry alert: Error: <script> & "quotes"',
+        title: `Sentry alert: ${ISSUE_TITLE}`,
         description: [
-          'Application: app<&',
-          'Issue: Error: <script> & "quotes"',
-          'Level: <b>error</b>',
-          'Location: src/<script>.ts & runTask',
-          'Rule: A & B',
-          'Issue URL: https://sentry.io/organizations/example-org/issues/123/',
+          'Application: widget-service',
+          `Issue: ${ISSUE_TITLE}`,
+          'Level: error',
+          'Location: src/widgets/read.ts in readWidget',
+          'Rule: widget failures',
+          `Issue URL: ${ISSUE_URL}`,
         ].join('\n'),
         context: 'personal',
       },
-      title: 'Error: <script> & "quotes"',
-      level: '<b>error</b>',
-      webUrl: 'https://sentry.io/organizations/example-org/issues/123/',
-      triggeredRule: 'A & B',
+      title: ISSUE_TITLE,
+      level: 'error',
+      webUrl: ISSUE_URL,
+      triggeredRule: 'widget failures',
     })
   })
 
   it('returns null when action is not triggered', () => {
-    expect(
-      buildIssueAlertNotification(baseInput({ action: 'resolved' })),
-    ).toBeNull()
+    expect(buildIssueAlertNotification(baseInput({ action: 'resolved' }))).toBe(
+      null,
+    )
   })
 })

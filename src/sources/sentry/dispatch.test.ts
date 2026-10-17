@@ -11,17 +11,21 @@ vi.mock('@fohte/service-kit/observability', () => ({
 }))
 
 const createNotifier = () => ({
-  postMessage: vi.fn().mockReturnValue(okAsync({ channel: 'C1', ts: '1' })),
+  postMessage: vi
+    .fn()
+    .mockReturnValue(okAsync({ channel: 'C-FAKE', ts: '1720000000.000001' })),
   updateMessage: vi.fn(),
   findMessageByMetadata: vi.fn(),
   uploadImage: vi.fn().mockReturnValue(okAsync('FIMAGE')),
 })
 
 const TQ_TASK_REF = {
-  id: '00000000-0000-4000-8000-000000000001',
-  number: 42,
+  id: '11111111-1111-4111-8111-111111111111',
+  number: 7319,
 }
-const TQ_WEB_URL = 'https://tq.fohte.net'
+const TQ_WEB_URL = 'https://tq.example.test'
+const ISSUE_TITLE = 'WidgetReadFault: catalog request failed'
+const ISSUE_URL = 'https://monitoring.example.test/issues/456'
 
 const createTqClient = (
   result: ReturnType<TqClient['createTask']> = okAsync(TQ_TASK_REF),
@@ -33,7 +37,12 @@ const createContext = (
   notifier: DispatchContext['notifier'],
   tqClient = createTqClient(),
   tqWebUrl = TQ_WEB_URL,
-): DispatchContext => ({ deliveryId: 'req-1', notifier, tqClient, tqWebUrl })
+): DispatchContext => ({
+  deliveryId: 'delivery-example',
+  notifier,
+  tqClient,
+  tqWebUrl,
+})
 
 const dispatchOutcome = async (
   ...args: Parameters<typeof dispatch>
@@ -45,22 +54,77 @@ const observeDispatch = <TOutcome, TTaskCalls, TPostMessageCalls>(
   postMessageCalls: TPostMessageCalls,
 ) => ({ outcome, taskCalls, postMessageCalls })
 
-const issueAlertPayload = (overrides: { action?: string } = {}): unknown => ({
-  action: overrides.action ?? 'triggered',
+const issueAlertPayload = (): unknown => ({
+  action: 'triggered',
   data: {
     event: {
-      title: 'TypeError: Cannot read properties of undefined',
+      title: ISSUE_TITLE,
       level: 'error',
-      web_url: 'https://sentry.io/organizations/example-org/issues/123/',
-      url: 'https://sentry.io/api/0/projects/example-org/sample-app/events/456/',
-      culprit: 'src/example.ts in runTask',
+      web_url: ISSUE_URL,
+      url: 'https://monitoring.example.test/api/0/projects/demo-team/widget-service/events/abc',
+      culprit: 'src/widgets/read.ts in readWidget',
     },
-    triggered_rule: 'Production errors',
+    triggered_rule: 'widget failures',
   },
 })
 
+const expectedTaskRequest = {
+  title: `Sentry alert: ${ISSUE_TITLE}`,
+  description: [
+    'Application: widget-service',
+    `Issue: ${ISSUE_TITLE}`,
+    'Level: error',
+    'Location: src/widgets/read.ts in readWidget',
+    'Rule: widget failures',
+    `Issue URL: ${ISSUE_URL}`,
+  ].join('\n'),
+  context: 'personal',
+}
+
+const expectedSourceContent = {
+  text: ISSUE_TITLE,
+  color: '#d73a49',
+  username: 'Sentry',
+  iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
+  blocks: [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: ISSUE_TITLE },
+    },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: 'widget-service' },
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '<https://monitoring.example.test/issues/456|View issue>',
+        },
+      ],
+    },
+  ],
+}
+
+const expectedTqAttachment = {
+  text: '<https://tq.example.test/tasks/11111111-1111-4111-8111-111111111111|tq #7319> · todo',
+  color: '#2eb67d',
+  blocks: [
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '<https://tq.example.test/tasks/11111111-1111-4111-8111-111111111111|tq #7319> · todo',
+        },
+      ],
+    },
+  ],
+}
+
 describe('dispatch', () => {
-  it('posts to Slack and returns notified for a triggered event_alert', async () => {
+  it('posts a triggered event_alert and returns notified', async () => {
     const notifier = createNotifier()
     const tqClient = createTqClient()
 
@@ -77,79 +141,16 @@ describe('dispatch', () => {
       ),
     ).toEqual({
       outcome: 'notified',
-      taskCalls: [
-        [
-          {
-            title:
-              'Sentry alert: TypeError: Cannot read properties of undefined',
-            description: [
-              'Application: sample-app',
-              'Issue: TypeError: Cannot read properties of undefined',
-              'Level: error',
-              'Location: src/example.ts in runTask',
-              'Rule: Production errors',
-              'Issue URL: https://sentry.io/organizations/example-org/issues/123/',
-            ].join('\n'),
-            context: 'personal',
-          },
-        ],
-      ],
+      taskCalls: [[expectedTaskRequest]],
       postMessageCalls: [
         [
           {
-            text: '🐛 TypeError: Cannot read properties of undefined',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: {
-                  type: 'plain_text',
-                  text: '🐛 TypeError: Cannot read properties of undefined',
-                },
-              },
-              {
-                type: 'section',
-                fields: [
-                  { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
-                  { type: 'mrkdwn', text: '*Level*\nerror' },
-                  {
-                    type: 'mrkdwn',
-                    text: '*発生箇所*\n`src/example.ts in runTask`',
-                  },
-                  { type: 'mrkdwn', text: '*Rule*\nProduction errors' },
-                ],
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
-                  },
-                ],
-              },
-            ],
-            additionalAttachments: [
-              {
-                text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
-                color: '#2eb67d',
-                blocks: [
-                  {
-                    type: 'context',
-                    elements: [
-                      {
-                        type: 'mrkdwn',
-                        text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
+            ...expectedSourceContent,
+            additionalAttachments: [expectedTqAttachment],
             metadata: {
               event_type: 'alert_task',
               event_payload: {
-                task_id: '00000000-0000-4000-8000-000000000001',
+                task_id: '11111111-1111-4111-8111-111111111111',
                 tq_task_status: 'todo',
                 tq_task_status_reason: 'none',
               },
@@ -160,7 +161,64 @@ describe('dispatch', () => {
     })
   })
 
-  it('posts the Sentry alert without a task link when tq task creation fails', async () => {
+  it('posts a triggered event_alert when its event details are missing', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+
+    const outcome = await dispatchOutcome(createContext(notifier, tqClient), {
+      resource: 'event_alert',
+      payload: { action: 'triggered' },
+    })
+
+    expect(
+      observeDispatch(
+        outcome,
+        tqClient.createTask.mock.calls,
+        notifier.postMessage.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'notified',
+      taskCalls: [
+        [
+          {
+            title: 'Sentry alert: Sentry issue alert',
+            description: 'Issue: Sentry issue alert',
+            context: 'personal',
+          },
+        ],
+      ],
+      postMessageCalls: [
+        [
+          {
+            text: 'Sentry issue alert',
+            color: '#d73a49',
+            username: 'Sentry',
+            iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
+            blocks: [
+              {
+                type: 'header',
+                text: {
+                  type: 'plain_text',
+                  text: 'Sentry issue alert',
+                },
+              },
+            ],
+            additionalAttachments: [expectedTqAttachment],
+            metadata: {
+              event_type: 'alert_task',
+              event_payload: {
+                task_id: '11111111-1111-4111-8111-111111111111',
+                tq_task_status: 'todo',
+                tq_task_status_reason: 'none',
+              },
+            },
+          },
+        ],
+      ],
+    })
+  })
+
+  it('posts the Sentry alert without a task link when TQ task creation fails', async () => {
     const notifier = createNotifier()
     const tqClient = createTqClient(
       errAsync(new TqApiError('TQ API unavailable', undefined)),
@@ -179,97 +237,62 @@ describe('dispatch', () => {
       ),
     ).toEqual({
       outcome: 'notified',
-      taskCalls: [
-        [
-          {
-            title:
-              'Sentry alert: TypeError: Cannot read properties of undefined',
-            description: [
-              'Application: sample-app',
-              'Issue: TypeError: Cannot read properties of undefined',
-              'Level: error',
-              'Location: src/example.ts in runTask',
-              'Rule: Production errors',
-              'Issue URL: https://sentry.io/organizations/example-org/issues/123/',
-            ].join('\n'),
-            context: 'personal',
-          },
-        ],
-      ],
-      postMessageCalls: [
-        [
-          {
-            text: '🐛 TypeError: Cannot read properties of undefined',
-            color: '#d73a49',
-            blocks: [
-              {
-                type: 'header',
-                text: {
-                  type: 'plain_text',
-                  text: '🐛 TypeError: Cannot read properties of undefined',
-                },
-              },
-              {
-                type: 'section',
-                fields: [
-                  { type: 'mrkdwn', text: '*アプリ*\nsample-app' },
-                  { type: 'mrkdwn', text: '*Level*\nerror' },
-                  {
-                    type: 'mrkdwn',
-                    text: '*発生箇所*\n`src/example.ts in runTask`',
-                  },
-                  { type: 'mrkdwn', text: '*Rule*\nProduction errors' },
-                ],
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: '<https://sentry.io/organizations/example-org/issues/123/|View issue>',
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      ],
+      taskCalls: [[expectedTaskRequest]],
+      postMessageCalls: [[expectedSourceContent]],
     })
   })
 
   it('returns ignored without posting when the action is not triggered', async () => {
     const notifier = createNotifier()
+    const tqClient = createTqClient()
 
-    const outcome = await dispatchOutcome(createContext(notifier), {
+    const outcome = await dispatchOutcome(createContext(notifier, tqClient), {
       resource: 'event_alert',
-      payload: issueAlertPayload({ action: 'resolved' }),
+      payload: { action: 'resolved' },
     })
 
-    expect(outcome).toBe('ignored')
-    expect(notifier.postMessage).not.toHaveBeenCalled()
+    expect(
+      observeDispatch(
+        outcome,
+        tqClient.createTask.mock.calls,
+        notifier.postMessage.mock.calls,
+      ),
+    ).toEqual({ outcome: 'ignored', taskCalls: [], postMessageCalls: [] })
   })
 
   it('returns ignored without posting when the resource is not event_alert', async () => {
     const notifier = createNotifier()
+    const tqClient = createTqClient()
 
-    const outcome = await dispatchOutcome(createContext(notifier), {
+    const outcome = await dispatchOutcome(createContext(notifier, tqClient), {
       resource: 'installation',
       payload: {},
     })
 
-    expect(outcome).toBe('ignored')
-    expect(notifier.postMessage).not.toHaveBeenCalled()
+    expect(
+      observeDispatch(
+        outcome,
+        tqClient.createTask.mock.calls,
+        notifier.postMessage.mock.calls,
+      ),
+    ).toEqual({ outcome: 'ignored', taskCalls: [], postMessageCalls: [] })
   })
 
-  it('returns ignored without posting when action is missing from an unrelated event_alert payload shape', async () => {
+  it('returns ignored when action is missing from an event_alert payload', async () => {
     const notifier = createNotifier()
+    const tqClient = createTqClient()
 
-    const outcome = await dispatchOutcome(createContext(notifier), {
+    const outcome = await dispatchOutcome(createContext(notifier, tqClient), {
       resource: 'event_alert',
       payload: { foo: 'bar' },
     })
 
-    expect(outcome).toBe('ignored')
-    expect(notifier.postMessage).not.toHaveBeenCalled()
+    expect(
+      observeDispatch(
+        outcome,
+        tqClient.createTask.mock.calls,
+        notifier.postMessage.mock.calls,
+      ),
+    ).toEqual({ outcome: 'ignored', taskCalls: [], postMessageCalls: [] })
   })
 })
