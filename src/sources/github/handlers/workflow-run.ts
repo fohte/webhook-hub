@@ -65,6 +65,12 @@ export const extractWorkflowRunInput = (
   triggeringActor: payload.workflow_run.triggering_actor.login,
 })
 
+export const isEligibleWorkflowRun = (input: WorkflowRunInput): boolean => {
+  // Fork-originated runs can expose the fork's branch alongside the upstream
+  // repository's default branch, so the head repository must also match.
+  return input.headRepo === input.repo && input.branch === input.defaultBranch
+}
+
 // octo-sts token acquisition failing is a persistent auth outage, not a
 // one-off API blip, so it gets its own fingerprint: the same issue keeps
 // accumulating events instead of getting lost among transient GitHub API
@@ -201,10 +207,7 @@ export const buildWorkflowRunNotification = (
   deps: WorkflowRunNotificationDeps,
 ): ResultAsync<WorkflowRunNotification | null, never> => {
   if (input.conclusion !== 'failure') return okAsync(null)
-  // Fork-originated runs surface upstream's `repository.default_branch` with the
-  // fork's `head_branch` (often also `main`), which would otherwise pass the branch check.
-  if (input.headRepo !== input.repo) return okAsync(null)
-  if (input.branch !== input.defaultBranch) return okAsync(null)
+  if (!isEligibleWorkflowRun(input)) return okAsync(null)
 
   const failedStep = deps.githubClient
     .findFailedStep(input.repoOwner, input.repoName, input.runId)

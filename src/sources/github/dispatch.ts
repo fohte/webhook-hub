@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type {
   IssuesOpenedEvent,
   PullRequestClosedEvent,
@@ -9,9 +11,16 @@ import { okAsync, type ResultAsync } from 'neverthrow'
 
 import type { GitHubClient } from '#github-client'
 import { logger } from '#logger'
+import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
 import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
+import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
 import { type TqClient } from '#plugins/tq/tq-client'
-import type { SlackApiError, SlackMessageContent, SlackNotifier } from '#slack'
+import type {
+  SlackApiError,
+  SlackMessageContent,
+  SlackMessageMetadata,
+  SlackNotifier,
+} from '#slack'
 import {
   buildIssueNotification,
   extractIssueInput,
@@ -29,6 +38,8 @@ import {
 import {
   buildWorkflowRunNotification,
   extractWorkflowRunInput,
+  isEligibleWorkflowRun,
+  type WorkflowRunInput,
 } from '#sources/github/handlers/workflow-run'
 import { isThirdParty } from '#sources/github/third-party'
 import type { DispatchOutcome } from '#webhook-source'
@@ -46,6 +57,81 @@ export interface DispatchContext {
 interface ParsedEvent {
   name: string
   payload: unknown
+}
+
+const createWorkflowRunAlertMetadata = (
+  input: WorkflowRunInput,
+  workflowId: number,
+  taskId: string | null,
+): SlackMessageMetadata => ({
+  event_type: 'alert_task',
+  event_payload: {
+    ...(taskId === null ? {} : { task_id: taskId }),
+    github_repo: input.repo,
+    github_workflow_id: workflowId,
+    github_branch: input.branch,
+    github_workflow_run_id: input.runId,
+    github_alert_id: randomUUID(),
+  },
+})
+
+const resolveWorkflowRunAlerts = (
+  ctx: DispatchContext,
+  input: WorkflowRunInput,
+  workflowId: number,
+): ResultAsync<DispatchOutcome, SlackApiError> => {
+  if (!isEligibleWorkflowRun(input)) return okAsync('filtered')
+
+  const skippedAlertIds = new Set<string>()
+  let resolvedAny = false
+
+  const resolveNext = (): ResultAsync<DispatchOutcome, SlackApiError> =>
+    ctx.notifier
+      .findMessageByMetadata('alert_task', (payload) => {
+        const alertId = payload['github_alert_id']
+        return (
+          payload['github_repo'] === input.repo &&
+          payload['github_workflow_id'] === workflowId &&
+          payload['github_branch'] === input.branch &&
+          typeof alertId === 'string' &&
+          !skippedAlertIds.has(alertId) &&
+          payload[TQ_ORIGINAL_CONTENT_KEY] === undefined
+        )
+      })
+      .andThen((message) => {
+        if (message === null) {
+          return okAsync<DispatchOutcome>(resolvedAny ? 'notified' : 'filtered')
+        }
+
+        const alertId = message.eventPayload['github_alert_id']
+        if (typeof alertId !== 'string') {
+          return okAsync<DispatchOutcome>(resolvedAny ? 'notified' : 'filtered')
+        }
+        skippedAlertIds.add(alertId)
+
+        if (message.content === undefined) return resolveNext()
+
+        const content = setSourceAlertResolved(message.content, true)
+        if (content === message.content) return resolveNext()
+
+        return ctx.notifier.updateMessage(message.ref, content).andThen(() => {
+          resolvedAny = true
+          logger.info(
+            {
+              delivery_id: ctx.deliveryId,
+              event: 'workflow_run',
+              repo: input.repo,
+              workflow: input.workflow,
+              branch: input.branch,
+              run_id: input.runId,
+            },
+            'github_workflow_alert_resolved',
+          )
+          return resolveNext()
+        })
+      })
+
+  return resolveNext()
 }
 
 const hasAnyAction = (
@@ -69,6 +155,13 @@ export const dispatch = (
       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- payload union refinement
       const typed = parsed.payload as WorkflowRunCompletedEvent
       const input = extractWorkflowRunInput(typed)
+      if (input.conclusion === 'success') {
+        return resolveWorkflowRunAlerts(
+          ctx,
+          input,
+          typed.workflow_run.workflow_id,
+        )
+      }
       return buildWorkflowRunNotification(input, {
         githubClient: ctx.githubClient,
       }).andThen((note) => {
@@ -78,11 +171,19 @@ export const dispatch = (
           event: 'workflow_run',
           repo: note.repo,
         })
-          .andThen((task) =>
-            ctx.notifier.postMessage(
-              addTqTaskStatus(note.content, task, ctx.tqWebUrl),
-            ),
-          )
+          .andThen((task) => {
+            const content = addTqTaskStatus(
+              note.content,
+              task,
+              ctx.tqWebUrl,
+              createWorkflowRunAlertMetadata(
+                input,
+                typed.workflow_run.workflow_id,
+                task?.id ?? null,
+              ),
+            )
+            return ctx.notifier.postMessage(content)
+          })
           .map((): DispatchOutcome => {
             logger.info(
               {
