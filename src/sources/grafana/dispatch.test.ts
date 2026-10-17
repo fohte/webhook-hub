@@ -161,6 +161,15 @@ const expectedTodoGrafanaContent = (options: {
               },
             },
           ]),
+      ...(options.imageFileId === undefined
+        ? []
+        : [
+            {
+              type: 'image' as const,
+              slack_file: { id: options.imageFileId },
+              alt_text: `Grafana panel ${options.panelId ?? '13'}`,
+            },
+          ]),
       ...(options.panelURL === undefined
         ? []
         : [
@@ -172,15 +181,6 @@ const expectedTodoGrafanaContent = (options: {
                   text: `<${options.panelURL}|Panel>`,
                 },
               ],
-            },
-          ]),
-      ...(options.imageFileId === undefined
-        ? []
-        : [
-            {
-              type: 'image' as const,
-              slack_file: { id: options.imageFileId },
-              alt_text: `Grafana panel ${options.panelId ?? '13'}`,
             },
           ]),
     ],
@@ -411,9 +411,11 @@ describe('dispatch', () => {
     })
   })
 
-  it('adds an uploaded panel image to the Slack alert blocks', async () => {
+  it('places an uploaded panel image before the Panel link', async () => {
     const notifier = createNotifier()
     const imageBuffer = Buffer.from('png-data')
+    const panelURL =
+      'https://observability.example.test/d/queue-depth?viewPanel=13'
     const panelImageRenderer = {
       render: vi
         .fn()
@@ -421,7 +423,7 @@ describe('dispatch', () => {
     }
     const outcome = await dispatchOutcome(
       createContext(notifier, createTqClient(), panelImageRenderer),
-      { alerts: [ALERT] },
+      { alerts: [{ ...ALERT, panelURL }] },
     )
 
     expect(
@@ -432,7 +434,7 @@ describe('dispatch', () => {
       }),
     ).toEqual({
       outcome: 'notified',
-      renderCalls: [[ALERT]],
+      renderCalls: [[{ ...ALERT, panelURL }]],
       uploadCalls: [
         [
           {
@@ -442,7 +444,7 @@ describe('dispatch', () => {
           },
         ],
       ],
-      postCalls: [[expectedAlertContent('FIMAGE')]],
+      postCalls: [[expectedAlertContent('FIMAGE', { panelURL })]],
     })
   })
 

@@ -144,28 +144,39 @@ const addPanelImage = (
   const addImageBlock = (
     fileId: string,
     panelId: string,
-  ): SlackMessageContent => ({
-    ...content,
-    ...(content.metadata === undefined
-      ? {}
-      : {
-          metadata: {
-            ...content.metadata,
-            event_payload: {
-              ...content.metadata.event_payload,
-              panel_image_file_id: fileId,
+  ): SlackMessageContent => {
+    const blocks = content.blocks ?? []
+    const panelLinkIndex = blocks.findIndex((block) => block.type === 'context')
+    const imageBlock = {
+      type: 'image' as const,
+      slack_file: { id: fileId },
+      alt_text: `Grafana panel ${panelId}`,
+    }
+    const blocksWithImage =
+      panelLinkIndex === -1
+        ? [...blocks, imageBlock]
+        : [
+            ...blocks.slice(0, panelLinkIndex),
+            imageBlock,
+            ...blocks.slice(panelLinkIndex),
+          ]
+
+    return {
+      ...content,
+      ...(content.metadata === undefined
+        ? {}
+        : {
+            metadata: {
+              ...content.metadata,
+              event_payload: {
+                ...content.metadata.event_payload,
+                panel_image_file_id: fileId,
+              },
             },
-          },
-        }),
-    blocks: [
-      ...(content.blocks ?? []),
-      {
-        type: 'image' as const,
-        slack_file: { id: fileId },
-        alt_text: `Grafana panel ${panelId}`,
-      },
-    ],
-  })
+          }),
+      blocks: blocksWithImage,
+    }
+  }
 
   if (existingPanelImageFileId !== undefined) {
     return okAsync(
