@@ -23,6 +23,7 @@ export interface WorkflowRunInput {
   workflow: string
   branch: string
   defaultBranch: string
+  workflowId: number
   conclusion: WorkflowRunCompletedEvent['workflow_run']['conclusion']
   sha: string
   runId: number
@@ -55,6 +56,7 @@ export const extractWorkflowRunInput = (
   workflow: payload.workflow_run.name,
   branch: payload.workflow_run.head_branch,
   defaultBranch: payload.repository.default_branch,
+  workflowId: payload.workflow_run.workflow_id,
   conclusion: payload.workflow_run.conclusion,
   sha: payload.workflow_run.head_sha,
   runId: payload.workflow_run.id,
@@ -64,6 +66,12 @@ export const extractWorkflowRunInput = (
   commitMessage: payload.workflow_run.head_commit.message,
   triggeringActor: payload.workflow_run.triggering_actor.login,
 })
+
+export const isEligibleWorkflowRun = (input: WorkflowRunInput): boolean => {
+  // Fork-originated runs can expose the fork's branch alongside the upstream
+  // repository's default branch, so the head repository must also match.
+  return input.headRepo === input.repo && input.branch === input.defaultBranch
+}
 
 // octo-sts token acquisition failing is a persistent auth outage, not a
 // one-off API blip, so it gets its own fingerprint: the same issue keeps
@@ -201,10 +209,7 @@ export const buildWorkflowRunNotification = (
   deps: WorkflowRunNotificationDeps,
 ): ResultAsync<WorkflowRunNotification | null, never> => {
   if (input.conclusion !== 'failure') return okAsync(null)
-  // Fork-originated runs surface upstream's `repository.default_branch` with the
-  // fork's `head_branch` (often also `main`), which would otherwise pass the branch check.
-  if (input.headRepo !== input.repo) return okAsync(null)
-  if (input.branch !== input.defaultBranch) return okAsync(null)
+  if (!isEligibleWorkflowRun(input)) return okAsync(null)
 
   const failedStep = deps.githubClient
     .findFailedStep(input.repoOwner, input.repoName, input.runId)

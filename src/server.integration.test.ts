@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import { createApp } from '#server'
 import { requestJson, requestText } from '#server-test-support'
-import type { SlackMessageRef, SlackNotifier } from '#slack'
+import type { SlackNotifier } from '#slack'
 import { SlackApiError } from '#slack'
 import { createGithubSource } from '#sources/github/index'
 import { createSentrySource } from '#sources/sentry/index'
@@ -26,9 +26,9 @@ const TQ_TASK_REF = {
 }
 
 const createNotifier = () => {
-  const postMessage = vi.fn((): ResultAsync<SlackMessageRef, SlackApiError> => {
-    return okAsync({ channel: 'C1', ts: '1' })
-  })
+  const postMessage = vi
+    .fn<SlackNotifier['postMessage']>()
+    .mockReturnValue(okAsync({ channel: 'C1', ts: '1' }))
   const notifier: SlackNotifier = {
     postMessage,
     updateMessage: vi.fn(),
@@ -80,6 +80,30 @@ const observePostMessage = <TResult, TCalls>(
   postMessageCalls: TCalls,
 ) => ({ result, postMessageCalls })
 
+const normalizeGithubAlertIds = (
+  calls: Array<Parameters<SlackNotifier['postMessage']>>,
+): Array<Parameters<SlackNotifier['postMessage']>> =>
+  calls.map(([content]): Parameters<SlackNotifier['postMessage']> => {
+    const metadata = content.metadata
+    if (metadata === undefined) return [content]
+
+    const alertId = metadata.event_payload['github_alert_id']
+    if (typeof alertId !== 'string') return [content]
+
+    return [
+      {
+        ...content,
+        metadata: {
+          ...metadata,
+          event_payload: {
+            ...metadata.event_payload,
+            github_alert_id: 'normalized-alert-id',
+          },
+        },
+      },
+    ]
+  })
+
 const observeWithEvents = <TResult>(result: TResult, events: string[]) => ({
   result,
   events,
@@ -95,6 +119,7 @@ const githubWorkflowRunFailureBody = JSON.stringify({
   },
   workflow_run: {
     id: 1,
+    workflow_id: 101,
     name: 'CI',
     event: 'push',
     head_branch: 'main',
@@ -157,6 +182,11 @@ const githubWorkflowRunFailureContent = {
       task_id: '00000000-0000-4000-8000-000000000001',
       tq_task_status: 'todo',
       tq_task_status_reason: 'none',
+      github_repo: 'fohte/example',
+      github_workflow_id: 101,
+      github_branch: 'main',
+      github_workflow_run_id: 1,
+      github_alert_id: 'normalized-alert-id',
     },
   },
   username: 'GitHub CI',
@@ -251,7 +281,9 @@ describe('createApp with the real GitHub and Sentry sources', () => {
       status: 200,
       body: { ok: true, outcome: 'notified' },
     })
-    expect(postMessage.mock.calls).toEqual([[githubWorkflowRunFailureContent]])
+    expect(normalizeGithubAlertIds(postMessage.mock.calls)).toEqual([
+      [githubWorkflowRunFailureContent],
+    ])
   })
 
   it('notifies Slack for POST /sentry with a valid signature and a triggered event_alert', async () => {
@@ -464,7 +496,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
     })
     await app.drainBackgroundDispatches()
 
-    expect(postMessage.mock.calls).toEqual([
+    expect(normalizeGithubAlertIds(postMessage.mock.calls)).toEqual([
       [githubWorkflowRunFailureContent],
       [sentryIssueAlertTriggeredContent],
     ])

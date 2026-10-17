@@ -28,6 +28,7 @@ const baseInput = (
   workflow: 'CI',
   branch: 'main',
   defaultBranch: 'main',
+  workflowId: 101,
   conclusion: 'failure',
   sha: 'abcdef1234567890abcdef1234567890abcdef12',
   runId: 42,
