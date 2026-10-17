@@ -10,6 +10,7 @@ import {
 
 export type {
   SlackBlock,
+  SlackMessageAttachmentContent,
   SlackMessageContent,
   SlackMessageMetadata,
 } from '#slack-message-content'
@@ -224,7 +225,12 @@ export const createSlackNotifier = (
       )
     },
     updateMessage(ref, content) {
-      const fileIds = collectSlackFileIds(content.blocks ?? [])
+      const fileIds = collectSlackFileIds([
+        ...(content.blocks ?? []),
+        ...(content.additionalAttachments ?? []).flatMap(
+          (attachment) => attachment.blocks ?? [],
+        ),
+      ])
 
       return wrapSlackApi(
         client.chat.update({

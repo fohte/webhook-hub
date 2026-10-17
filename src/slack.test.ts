@@ -200,6 +200,62 @@ describe('updateMessage', () => {
       ],
     ])
   })
+
+  it('updates multiple coloured attachments and shares image files from each', async () => {
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const sourceBlocks: SlackBlock[] = [
+      {
+        type: 'image',
+        slack_file: { id: 'FSOURCE' },
+        alt_text: 'Source image',
+      },
+    ]
+    const statusBlocks: SlackBlock[] = [
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: 'tq #9 · todo' }],
+      },
+      {
+        type: 'image',
+        slack_file: { id: 'FSTATUS' },
+        alt_text: 'Status image',
+      },
+    ]
+
+    await notifier.updateMessage(
+      { channel: 'C1', ts: '1' },
+      {
+        text: 'Alert',
+        color: '#d73a49',
+        blocks: sourceBlocks,
+        additionalAttachments: [
+          {
+            text: 'tq #9 · todo',
+            color: '#2eb67d',
+            blocks: statusBlocks,
+          },
+        ],
+      },
+    )
+
+    expect(chatUpdate.mock.calls).toEqual([
+      [
+        {
+          channel: 'C1',
+          ts: '1',
+          attachments: [
+            { color: '#d73a49', blocks: sourceBlocks, fallback: 'Alert' },
+            {
+              color: '#2eb67d',
+              blocks: statusBlocks,
+              fallback: 'tq #9 · todo',
+            },
+          ],
+          file_ids: ['FSOURCE', 'FSTATUS'],
+        },
+      ],
+    ])
+  })
 })
 
 describe('findMessageByMetadata', () => {
@@ -320,6 +376,86 @@ describe('findMessageByMetadata', () => {
           },
         ],
       ],
+    })
+  })
+
+  it('reads the source and task status from separate attachments', async () => {
+    const sourceBlocks: SlackBlock[] = [
+      { type: 'header', text: { type: 'plain_text', text: 'Alert details' } },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '<https://alerts.example.test/1|View alert>',
+          },
+        ],
+      },
+    ]
+    const statusBlocks: SlackBlock[] = [
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '<https://tasks.example.test/tasks/task-example-id|tq #9> · todo',
+          },
+        ],
+      },
+    ]
+    conversationsHistory.mockResolvedValue({
+      messages: [
+        {
+          ts: 'message-ts',
+          metadata: {
+            event_type: 'alert_task',
+            event_payload: { task_id: 'task-example-id' },
+          },
+          attachments: [
+            {
+              color: '#d73a49',
+              fallback: 'Alert details',
+              blocks: sourceBlocks,
+            },
+            {
+              color: '#2eb67d',
+              fallback: 'tq #9 · todo',
+              blocks: statusBlocks,
+            },
+          ],
+        },
+      ],
+    })
+    const notifier = createSlackNotifier('token', '#default-channel')
+    const result = await notifier
+      .findMessageByMetadata(
+        'alert_task',
+        (payload) => payload['task_id'] === 'task-example-id',
+      )
+      .match(
+        (match) => match,
+        () => null,
+      )
+
+    expect(result).toEqual({
+      ref: { channel: 'CDEFAULT', ts: 'message-ts' },
+      eventPayload: { task_id: 'task-example-id' },
+      content: {
+        text: 'Alert details',
+        color: '#d73a49',
+        blocks: sourceBlocks,
+        additionalAttachments: [
+          {
+            text: 'tq #9 · todo',
+            color: '#2eb67d',
+            blocks: statusBlocks,
+          },
+        ],
+        metadata: {
+          event_type: 'alert_task',
+          event_payload: { task_id: 'task-example-id' },
+        },
+      },
     })
   })
 
@@ -507,6 +643,42 @@ describe('buildPayload', () => {
         event_type: 'security_pr',
         event_payload: { pr_url: 'https://example.com' },
       },
+    })
+  })
+
+  it('keeps both source and task status attachments in the payload', () => {
+    const sourceBlocks: SlackBlock[] = [
+      { type: 'header', text: { type: 'plain_text', text: 'Alert' } },
+    ]
+    const statusBlocks: SlackBlock[] = [
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: 'tq #9 · todo' }],
+      },
+    ]
+
+    expect(
+      buildPayload({
+        text: 'Alert',
+        color: '#d73a49',
+        blocks: sourceBlocks,
+        additionalAttachments: [
+          {
+            text: 'tq #9 · todo',
+            color: '#2eb67d',
+            blocks: statusBlocks,
+          },
+        ],
+      }),
+    ).toEqual({
+      attachments: [
+        { color: '#d73a49', blocks: sourceBlocks, fallback: 'Alert' },
+        {
+          color: '#2eb67d',
+          blocks: statusBlocks,
+          fallback: 'tq #9 · todo',
+        },
+      ],
     })
   })
 })

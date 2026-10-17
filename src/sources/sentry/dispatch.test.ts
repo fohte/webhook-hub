@@ -97,7 +97,7 @@ describe('dispatch', () => {
       postMessageCalls: [
         [
           {
-            text: '🐛 TypeError: Cannot read properties of undefined\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+            text: '🐛 TypeError: Cannot read properties of undefined',
             color: '#d73a49',
             blocks: [
               {
@@ -128,12 +128,20 @@ describe('dispatch', () => {
                   },
                 ],
               },
+            ],
+            additionalAttachments: [
               {
-                type: 'context',
-                elements: [
+                text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+                color: '#2eb67d',
+                blocks: [
                   {
-                    type: 'mrkdwn',
-                    text: '*状態*\n未対応 · <https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42>',
+                    type: 'context',
+                    elements: [
+                      {
+                        type: 'mrkdwn',
+                        text: '<https://tq.fohte.net/tasks/00000000-0000-4000-8000-000000000001|tq #42> · todo',
+                      },
+                    ],
                   },
                 ],
               },
@@ -191,7 +199,7 @@ describe('dispatch', () => {
       postMessageCalls: [
         [
           {
-            text: '🐛 TypeError: Cannot read properties of undefined\n未対応',
+            text: '🐛 TypeError: Cannot read properties of undefined',
             color: '#d73a49',
             blocks: [
               {
@@ -222,9 +230,17 @@ describe('dispatch', () => {
                   },
                 ],
               },
+            ],
+            additionalAttachments: [
               {
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: '*状態*\n未対応' }],
+                text: '未対応',
+                color: '#2eb67d',
+                blocks: [
+                  {
+                    type: 'context',
+                    elements: [{ type: 'mrkdwn', text: '未対応' }],
+                  },
+                ],
               },
             ],
           },

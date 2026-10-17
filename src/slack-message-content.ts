@@ -14,6 +14,12 @@ export interface SlackMessageMetadata {
 
 export type SlackBlock = HeaderBlock | SectionBlock | ContextBlock | ImageBlock
 
+export interface SlackMessageAttachmentContent {
+  text: string
+  color?: string
+  blocks?: SlackBlock[]
+}
+
 export interface SlackMessageContent {
   text: string
   color?: string
@@ -21,6 +27,7 @@ export interface SlackMessageContent {
   /** Channel to post to. Falls back to the notifier's default channel when omitted. */
   channel?: string
   blocks?: SlackBlock[]
+  additionalAttachments?: SlackMessageAttachmentContent[]
   /** Only honoured by postMessage — chat.update cannot change a message's authorship. */
   username?: string
   /** Only honoured by postMessage — chat.update cannot change a message's authorship. */
@@ -28,11 +35,11 @@ export interface SlackMessageContent {
 }
 
 type SlackAttachment =
-  | { color: string; text: string; mrkdwn_in: ['text']; fallback: string }
-  | { color: string; blocks: SlackBlock[]; fallback: string }
+  | { color?: string; text: string; mrkdwn_in: ['text']; fallback: string }
+  | { color?: string; blocks: SlackBlock[]; fallback: string }
 
 type MessagePayload = { metadata?: SlackMessageMetadata } & (
-  | { text: string; attachments?: never; blocks?: SlackBlock[] }
+  | { text: string; attachments?: SlackAttachment[]; blocks?: SlackBlock[] }
   | { attachments: SlackAttachment[]; text?: never }
 )
 
@@ -97,12 +104,11 @@ const readMessageMetadata = (message: unknown): SlackMessageMetadata | null => {
   return { event_type: eventType, event_payload: normalizedPayload }
 }
 
-const readMessageContent = (message: unknown): SlackMessageContent | null => {
-  if (!isRecord(message)) return null
-  const attachment = Array.isArray(message['attachments'])
-    ? message['attachments'].find(isRecord)
-    : undefined
-  const rawBlocks = attachment?.['blocks'] ?? message['blocks']
+const readAttachmentContent = (
+  attachment: unknown,
+): SlackMessageAttachmentContent | null => {
+  if (!isRecord(attachment)) return null
+  const rawBlocks = attachment['blocks']
   if (rawBlocks !== undefined && !Array.isArray(rawBlocks)) return null
   const blocks = Array.isArray(rawBlocks)
     ? rawBlocks.every(isSlackBlock)
@@ -112,21 +118,54 @@ const readMessageContent = (message: unknown): SlackMessageContent | null => {
   if (blocks === null) return null
 
   const text =
-    (typeof attachment?.['fallback'] === 'string'
+    (typeof attachment['fallback'] === 'string'
       ? attachment['fallback']
       : undefined) ??
-    (typeof attachment?.['text'] === 'string'
-      ? attachment['text']
-      : undefined) ??
-    (typeof message['text'] === 'string' ? message['text'] : undefined)
+    (typeof attachment['text'] === 'string' ? attachment['text'] : undefined)
   if (text === undefined) return null
 
-  const color = attachment?.['color']
-  const metadata = readMessageMetadata(message)
+  const color = attachment['color']
   return {
     text,
     ...(typeof color === 'string' ? { color } : {}),
     ...(blocks === undefined ? {} : { blocks }),
+  }
+}
+
+const readMessageContent = (message: unknown): SlackMessageContent | null => {
+  if (!isRecord(message)) return null
+  const rawAttachments = Array.isArray(message['attachments'])
+    ? message['attachments']
+    : []
+  const parsedAttachments = rawAttachments.map(readAttachmentContent)
+  if (parsedAttachments.some((attachment) => attachment === null)) return null
+  const attachments = parsedAttachments.filter(
+    (attachment): attachment is SlackMessageAttachmentContent =>
+      attachment !== null,
+  )
+  const [primaryAttachment, ...additionalAttachments] = attachments
+  const rawBlocks = primaryAttachment?.blocks ?? message['blocks']
+  if (rawBlocks !== undefined && !Array.isArray(rawBlocks)) return null
+  const blocks = Array.isArray(rawBlocks)
+    ? rawBlocks.every(isSlackBlock)
+      ? rawBlocks
+      : null
+    : undefined
+  if (blocks === null) return null
+
+  const text =
+    primaryAttachment?.text ??
+    (typeof message['text'] === 'string' ? message['text'] : undefined)
+  if (text === undefined) return null
+
+  const metadata = readMessageMetadata(message)
+  return {
+    text,
+    ...(primaryAttachment?.color === undefined
+      ? {}
+      : { color: primaryAttachment.color }),
+    ...(blocks === undefined ? {} : { blocks }),
+    ...(additionalAttachments.length === 0 ? {} : { additionalAttachments }),
     ...(metadata === null ? {} : { metadata }),
   }
 }
@@ -137,27 +176,55 @@ export const buildPayload = (content: SlackMessageContent): MessagePayload => {
   // Slack still renders top-level `text` as a second, separate message body above
   // it, duplicating the content. `fallback` is the attachment-scoped equivalent
   // for clients that can't render attachments/blocks (push notifications, IRC).
-  const base: MessagePayload =
-    content.color !== undefined
+  const buildAttachment = (attachment: SlackMessageAttachmentContent) =>
+    attachment.blocks !== undefined
       ? {
-          attachments: [
-            content.blocks !== undefined
-              ? {
-                  color: content.color,
-                  blocks: content.blocks,
-                  fallback: toSlackFallbackText(content.text),
-                }
-              : {
-                  color: content.color,
-                  text: content.text,
-                  mrkdwn_in: ['text'],
-                  fallback: toSlackFallbackText(content.text),
-                },
-          ],
+          ...(attachment.color === undefined
+            ? {}
+            : { color: attachment.color }),
+          blocks: attachment.blocks,
+          fallback: toSlackFallbackText(attachment.text),
+        }
+      : {
+          ...(attachment.color === undefined
+            ? {}
+            : { color: attachment.color }),
+          text: attachment.text,
+          mrkdwn_in: ['text'] as ['text'],
+          fallback: toSlackFallbackText(attachment.text),
+        }
+  const primaryAttachment =
+    content.color === undefined
+      ? []
+      : [
+          buildAttachment({
+            text: content.text,
+            color: content.color,
+            ...(content.blocks === undefined ? {} : { blocks: content.blocks }),
+          }),
+        ]
+  const additionalAttachments = (content.additionalAttachments ?? []).map(
+    buildAttachment,
+  )
+  const attachments = [...primaryAttachment, ...additionalAttachments]
+  const base: MessagePayload =
+    attachments.length > 0
+      ? {
+          ...(primaryAttachment.length === 0
+            ? {
+                text: content.text,
+                ...(content.blocks === undefined
+                  ? {}
+                  : { blocks: content.blocks }),
+              }
+            : {}),
+          attachments,
         }
       : { text: content.text }
   const withBlocks =
-    content.color === undefined && content.blocks !== undefined
+    content.color === undefined &&
+    content.blocks !== undefined &&
+    attachments.length === 0
       ? { ...base, blocks: content.blocks }
       : base
   return content.metadata !== undefined
