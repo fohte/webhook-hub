@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
-import type { SlackMessageContent } from '#slack'
+import { SlackApiError, type SlackMessageContent } from '#slack'
 import type { DispatchContext } from '#sources/sentry/dispatch'
 import { dispatch } from '#sources/sentry/dispatch'
 import type { DispatchOutcome } from '#webhook-source'
@@ -480,6 +480,193 @@ describe('dispatch', () => {
         [SENTRY_MESSAGE_REF, setSourceAlertResolved(resolved, false)],
       ],
     })
+  })
+
+  it('matches an issue state webhook by its event group_id', async () => {
+    const notifier = createNotifier()
+    const content = existingSentryContent()
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: SENTRY_MESSAGE_REF,
+          eventPayload: content.metadata?.event_payload ?? {},
+          content,
+        },
+      ]),
+    )
+
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      resource: 'issue',
+      payload: {
+        action: 'resolved',
+        data: { event: { group_id: SENTRY_ISSUE_ID } },
+      },
+    })
+    const searchCall = notifier.findMessagesByMetadata.mock.calls[0]
+    const payloadMatcher = searchCall?.[1]
+
+    expect(
+      observeIssueStateDispatch(
+        outcome,
+        {
+          eventType: searchCall?.[0],
+          matchesTarget:
+            typeof payloadMatcher === 'function'
+              ? payloadMatcher({ sentry_issue_id: SENTRY_ISSUE_ID })
+              : null,
+          options: searchCall?.[2] ?? {},
+        },
+        notifier.updateMessage.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'notified',
+      search: {
+        eventType: 'alert_task',
+        matchesTarget: true,
+        options: {},
+      },
+      updateCalls: [
+        [SENTRY_MESSAGE_REF, setSourceAlertResolved(content, true)],
+      ],
+    })
+  })
+
+  it('attempts every matching notification and aggregates update failures', async () => {
+    const notifier = createNotifier()
+    const firstContent = existingSentryContent()
+    const secondContent = existingSentryContent()
+    const thirdContent = existingSentryContent()
+    const firstRef = { channel: 'C-TEST', ts: '1700000000.000001' }
+    const secondRef = { channel: 'C-TEST', ts: '1700000000.000002' }
+    const thirdRef = { channel: 'C-TEST', ts: '1700000000.000003' }
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: firstRef,
+          eventPayload: firstContent.metadata?.event_payload ?? {},
+          content: firstContent,
+        },
+        {
+          ref: secondRef,
+          eventPayload: secondContent.metadata?.event_payload ?? {},
+          content: secondContent,
+        },
+        {
+          ref: thirdRef,
+          eventPayload: thirdContent.metadata?.event_payload ?? {},
+          content: thirdContent,
+        },
+      ]),
+    )
+    notifier.updateMessage
+      .mockReturnValueOnce(errAsync(new SlackApiError('first update failed')))
+      .mockReturnValueOnce(okAsync(undefined))
+      .mockReturnValueOnce(errAsync(new SlackApiError('third update failed')))
+
+    const result = await dispatch(createContext(notifier), {
+      resource: 'issue',
+      payload: {
+        action: 'resolved',
+        data: { issue: { id: SENTRY_ISSUE_ID } },
+      },
+    })
+    const summary = result.match(
+      (outcome) => ({ outcome, error: null }),
+      (error) => ({
+        outcome: null,
+        error: {
+          message: error.message,
+          failures:
+            error.cause instanceof AggregateError
+              ? error.cause.errors.map((cause) =>
+                  cause instanceof Error ? cause.message : String(cause),
+                )
+              : [],
+        },
+      }),
+    )
+
+    expect(
+      observeIssueStateDispatch(
+        summary,
+        notifier.updateMessage.mock.calls,
+        null,
+      ),
+    ).toEqual({
+      outcome: {
+        outcome: null,
+        error: {
+          message: 'failed to update 2 Sentry issue notifications',
+          failures: ['first update failed', 'third update failed'],
+        },
+      },
+      search: [
+        [firstRef, setSourceAlertResolved(firstContent, true)],
+        [secondRef, setSourceAlertResolved(secondContent, true)],
+        [thirdRef, setSourceAlertResolved(thirdContent, true)],
+      ],
+      updateCalls: null,
+    })
+  })
+
+  it('skips an issue notification that is already folded', async () => {
+    const notifier = createNotifier()
+    const foldedContent = setSourceAlertResolved(existingSentryContent(), true)
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: SENTRY_MESSAGE_REF,
+          eventPayload: foldedContent.metadata?.event_payload ?? {},
+          content: foldedContent,
+        },
+      ]),
+    )
+
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      resource: 'issue',
+      payload: {
+        action: 'resolved',
+        data: { issue: { id: SENTRY_ISSUE_ID } },
+      },
+    })
+
+    expect(
+      observeIssueStateDispatch(
+        outcome,
+        null,
+        notifier.updateMessage.mock.calls,
+      ),
+    ).toEqual({ outcome: 'ignored', search: null, updateCalls: [] })
+  })
+
+  it('skips an issue notification that is already restored', async () => {
+    const notifier = createNotifier()
+    const originalContent = existingSentryContent()
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: SENTRY_MESSAGE_REF,
+          eventPayload: originalContent.metadata?.event_payload ?? {},
+          content: originalContent,
+        },
+      ]),
+    )
+
+    const outcome = await dispatchOutcome(createContext(notifier), {
+      resource: 'issue',
+      payload: {
+        action: 'unresolved',
+        data: { issue: { id: SENTRY_ISSUE_ID } },
+      },
+    })
+
+    expect(
+      observeIssueStateDispatch(
+        outcome,
+        null,
+        notifier.updateMessage.mock.calls,
+      ),
+    ).toEqual({ outcome: 'ignored', search: null, updateCalls: [] })
   })
 
   it('does nothing when no Sentry notification matches the issue', async () => {

@@ -1,10 +1,16 @@
-import { okAsync, type ResultAsync } from 'neverthrow'
+import { isDeepStrictEqual } from 'node:util'
+
+import { errAsync, okAsync, type ResultAsync } from 'neverthrow'
 
 import { logger } from '#logger'
 import { setSourceAlertResolved } from '#plugins/tq/alert-source-appearance'
 import { addTqTaskStatus, createAlertTask } from '#plugins/tq/alert-task'
 import { type TqClient } from '#plugins/tq/tq-client'
-import type { SlackApiError, SlackMessageMetadata, SlackNotifier } from '#slack'
+import {
+  SlackApiError,
+  type SlackMessageMetadata,
+  type SlackNotifier,
+} from '#slack'
 import type { SentryIssueAlertEvent } from '#sources/sentry/handlers/issue-alert'
 import {
   buildIssueAlertNotification,
@@ -49,29 +55,63 @@ const dispatchIssueStateChange = (
       'alert_task',
       (eventPayload) => eventPayload['sentry_issue_id'] === stateChange.issueId,
     )
-    .andThen((existingMessages) =>
-      existingMessages.reduce<ResultAsync<DispatchOutcome, SlackApiError>>(
+    .andThen((existingMessages) => {
+      interface UpdateState {
+        updatedCount: number
+        errors: SlackApiError[]
+      }
+
+      const updateState = existingMessages.reduce<
+        ResultAsync<UpdateState, never>
+      >(
         (result, existing) =>
-          result.andThen((outcome) => {
-            if (existing.content === undefined) {
-              return okAsync<DispatchOutcome>(outcome)
+          result.andThen((state) => {
+            if (existing.content === undefined) return okAsync(state)
+
+            const updatedContent = setSourceAlertResolved(
+              existing.content,
+              stateChange.resolved,
+            )
+            if (isDeepStrictEqual(existing.content, updatedContent)) {
+              return okAsync(state)
             }
 
             return ctx.notifier
-              .updateMessage(
-                existing.ref,
-                setSourceAlertResolved(existing.content, stateChange.resolved),
+              .updateMessage(existing.ref, updatedContent)
+              .map(() => ({
+                updatedCount: state.updatedCount + 1,
+                errors: state.errors,
+              }))
+              .orElse((error) =>
+                okAsync({
+                  updatedCount: state.updatedCount,
+                  errors: [...state.errors, error],
+                }),
               )
-              .map((): DispatchOutcome => 'notified')
           }),
-        okAsync<DispatchOutcome>('ignored'),
-      ),
-    )
+        okAsync<UpdateState>({ updatedCount: 0, errors: [] }),
+      )
+
+      return updateState.andThen(
+        ({
+          updatedCount,
+          errors,
+        }): ResultAsync<DispatchOutcome, SlackApiError> =>
+          errors.length > 0
+            ? errAsync(
+                new SlackApiError(
+                  `failed to update ${String(errors.length)} Sentry issue notifications`,
+                  new AggregateError(
+                    errors,
+                    'Sentry issue notification update failures',
+                  ),
+                ),
+              )
+            : okAsync(updatedCount === 0 ? 'ignored' : 'notified'),
+      )
+    })
 }
 
-// Sentry defines no extra filter stage beyond recognizing a triggered
-// event_alert, so both branches below return "ignored" rather than
-// "filtered" — there is nothing recognized-but-excluded to distinguish.
 export const dispatch = (
   ctx: DispatchContext,
   parsed: ParsedEvent,
