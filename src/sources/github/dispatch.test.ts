@@ -829,7 +829,7 @@ describe('dispatch (workflow_run)', () => {
     })
   })
 
-  it('continues folding remaining alerts and returns all update failures', async () => {
+  it('continues folding alerts and aggregates all update failures', async () => {
     const notifier = createNotifier()
     const firstAlert = workflowAlertContent({
       alertId: 'alert-first',
@@ -838,6 +838,10 @@ describe('dispatch (workflow_run)', () => {
     const secondAlert = workflowAlertContent({
       alertId: 'alert-second',
       runId: 402,
+    })
+    const thirdAlert = workflowAlertContent({
+      alertId: 'alert-third',
+      runId: 403,
     })
     notifier.findMessagesByMetadata.mockReturnValue(
       okAsync([
@@ -851,13 +855,20 @@ describe('dispatch (workflow_run)', () => {
           eventPayload: secondAlert.metadata?.event_payload ?? {},
           content: secondAlert,
         },
+        {
+          ref: { channel: 'C1', ts: 'third-alert' },
+          eventPayload: thirdAlert.metadata?.event_payload ?? {},
+          content: thirdAlert,
+        },
       ]),
     )
-    notifier.updateMessage.mockImplementation((ref) =>
-      ref.ts === 'first-alert'
-        ? errAsync(new SlackApiError('first update failed'))
-        : okAsync(undefined),
-    )
+    notifier.updateMessage.mockImplementation((ref) => {
+      if (ref.ts === 'first-alert')
+        return errAsync(new SlackApiError('first update failed'))
+      if (ref.ts === 'third-alert')
+        return errAsync(new SlackApiError('third update failed'))
+      return okAsync(undefined)
+    })
 
     const result = await dispatch(createContext('workflow_run', notifier), {
       name: 'workflow_run',
@@ -875,11 +886,14 @@ describe('dispatch (workflow_run)', () => {
     ).toEqual({
       error: {
         name: 'SlackApiError',
-        message: 'failed to update 1 GitHub workflow alerts',
+        message: 'failed to update 2 GitHub workflow alerts',
         cause: {
           name: 'AggregateError',
-          message: 'failed to update 1 GitHub workflow alerts',
-          errors: [{ name: 'SlackApiError', message: 'first update failed' }],
+          message: 'failed to update 2 GitHub workflow alerts',
+          errors: [
+            { name: 'SlackApiError', message: 'first update failed' },
+            { name: 'SlackApiError', message: 'third update failed' },
+          ],
         },
       },
       updateCalls: [
@@ -890,6 +904,10 @@ describe('dispatch (workflow_run)', () => {
         [
           { channel: 'C1', ts: 'second-alert' },
           normalizeAlertContent(foldedWorkflowAlertContent(secondAlert)),
+        ],
+        [
+          { channel: 'C1', ts: 'third-alert' },
+          normalizeAlertContent(foldedWorkflowAlertContent(thirdAlert)),
         ],
       ],
     })
