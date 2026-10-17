@@ -153,7 +153,7 @@ A Slack message is posted only when **both** of the following are true:
 - `Sentry-Hook-Resource === "event_alert"`
 - `payload.action === "triggered"`
 
-The red attachment uses the issue title in a header, the project slug, level, culprit, and triggered rule in section fields, and a link to the issue page in a context block. Empty project slug and culprit values are omitted.
+The red attachment uses the issue title in a header. When available, a section shows the project slug, environment, handled status, and request method and path. Further sections show the exception causes and up to three recent in-app stack frames when present. A context block links to the issue when its URL is available. The sender uses Sentry's name and icon.
 
 Every matching CI, Sentry, or Grafana alert attempts to create a personal-context tq task with the alert details and source URL in its description. The Slack notification keeps the source alert in one attachment and, on successful task creation, adds a separate attachment with the `todo` status and a link to the task. Slack message metadata contains the task ID. Task creation failures are logged and captured, while the source alert still posts without a tq attachment. Grafana processes every alert in a grouped payload even if one alert's Slack delivery fails.
 

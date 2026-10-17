@@ -77,6 +77,7 @@ const SENTRY_ICON_URL = 'https://avatars.githubusercontent.com/u/1396951?v=4'
 const DEFAULT_ISSUE_TITLE = 'Sentry issue alert'
 // Slack header blocks use plain_text and are limited to 150 characters.
 const HEADER_TEXT_MAX_LENGTH = 150
+const SECTION_TEXT_MAX_LENGTH = 3000
 
 const extractProjectSlug = (eventUrl: string | null | undefined): string =>
   eventUrl?.split('/projects/')[1]?.split('/')[1] ?? ''
@@ -85,6 +86,21 @@ const truncateHeaderText = (text: string): string =>
   text.length > HEADER_TEXT_MAX_LENGTH
     ? `${text.slice(0, HEADER_TEXT_MAX_LENGTH - 1)}…`
     : text
+
+const escapeAndTruncateSlackMrkdwn = (text: string): string => {
+  const escapedText = escapeSlackMrkdwn(text)
+  if (escapedText.length <= SECTION_TEXT_MAX_LENGTH) return escapedText
+
+  let result = ''
+  for (const character of text) {
+    const escapedCharacter = escapeSlackMrkdwn(character)
+    if (result.length + escapedCharacter.length > SECTION_TEXT_MAX_LENGTH - 1) {
+      break
+    }
+    result += escapedCharacter
+  }
+  return `${result}…`
+}
 
 const getTagValue = (
   tags: SentryEventTag[] | null | undefined,
@@ -120,7 +136,8 @@ const formatExceptionValue = (exception: SentryExceptionValue): string => {
 const findStacktraceFrames = (
   exceptions: SentryExceptionValue[],
 ): SentryStacktraceFrame[] =>
-  exceptions
+  [...exceptions]
+    .reverse()
     .map((exception) => exception.stacktrace?.frames ?? [])
     .find((frames) => frames.some((frame) => frame.in_app === true))
     ?.filter((frame) => frame.in_app === true) ?? []
@@ -137,7 +154,7 @@ const renderFrame = (frame: SentryStacktraceFrame): string => {
   ]
     .filter((value) => value !== '')
     .join(':')
-  const parts = [location, frame.context_line ?? '']
+  const parts = [location, (frame.context_line ?? '').replace(/`/gu, 'ˋ')]
     .filter((value) => value !== '')
     .map(escapeSlackMrkdwn)
   return parts.length === 0 ? '' : `\`${parts.join('  ')}\``
@@ -145,7 +162,6 @@ const renderFrame = (frame: SentryStacktraceFrame): string => {
 
 const renderStacktrace = (frames: SentryStacktraceFrame[]): string => {
   const lines = [...frames]
-    .filter((frame) => frame.in_app === true)
     .reverse()
     .slice(0, 3)
     .map(renderFrame)
@@ -185,7 +201,8 @@ export const extractIssueAlertInput = (
     requestMethod: event?.request?.method ?? '',
     requestUrl: extractRequestPath(event?.request?.url),
     causes: exceptions
-      .slice(1)
+      .slice(0, -1)
+      .reverse()
       .map(formatExceptionValue)
       .filter((value) => value !== ''),
     stacktraceFrames: findStacktraceFrames(exceptions),
@@ -229,7 +246,9 @@ export const buildIssueAlertNotification = (
             type: 'section' as const,
             text: {
               type: 'mrkdwn' as const,
-              text: `原因: ${escapeSlackMrkdwn(input.causes.join(' › '))}`,
+              text: escapeAndTruncateSlackMrkdwn(
+                `原因: ${input.causes.join(' › ')}`,
+              ),
             },
           },
         ]),

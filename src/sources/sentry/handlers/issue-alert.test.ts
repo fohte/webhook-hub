@@ -63,6 +63,14 @@ const issueAlertPayload = (): SentryIssueAlertEvent => ({
       exception: {
         values: [
           {
+            type: 'RemoteNodeFault',
+            value: 'connection refused',
+          },
+          {
+            type: 'DataFetchFault',
+            value: 'service response unavailable',
+          },
+          {
             type: 'WidgetReadFault',
             value: 'catalog request failed',
             stacktrace: {
@@ -105,14 +113,6 @@ const issueAlertPayload = (): SentryIssueAlertEvent => ({
                 },
               ],
             },
-          },
-          {
-            type: 'DataFetchFault',
-            value: 'service response unavailable',
-          },
-          {
-            type: 'RemoteNodeFault',
-            value: 'connection refused',
           },
         ],
       },
@@ -370,6 +370,71 @@ describe('buildIssueAlertNotification', () => {
     })
   })
 
+  it('truncates a long cause row to fit a Slack section block', () => {
+    expect(
+      buildIssueAlertNotification(baseInput({ causes: ['&'.repeat(1000)] })),
+    ).toEqual({
+      content: {
+        text: ISSUE_TITLE,
+        color: '#d73a49',
+        username: 'Sentry',
+        iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: ISSUE_TITLE },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'widget-service · staging · handled · GET /api/widgets',
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `原因: ${'&amp;'.repeat(599)}…`,
+            },
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '`src/widgets/read.ts:23  return await client.get(path)`',
+            },
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://monitoring.example.test/issues/456|View issue>',
+              },
+            ],
+          },
+        ],
+      },
+      task: {
+        title: `Sentry alert: ${ISSUE_TITLE}`,
+        description: [
+          'Application: widget-service',
+          `Issue: ${ISSUE_TITLE}`,
+          'Level: error',
+          'Location: src/widgets/read.ts in readWidget',
+          'Rule: widget failures',
+          `Issue URL: ${ISSUE_URL}`,
+        ].join('\n'),
+        context: 'personal',
+      },
+      title: ISSUE_TITLE,
+      level: 'error',
+      webUrl: ISSUE_URL,
+      triggeredRule: 'widget failures',
+    })
+  })
+
   it('truncates a long title to fit a Slack header block', () => {
     const title = 'WidgetReadFault '.repeat(12)
     const headerText = `${title.slice(0, 149)}…`
@@ -447,7 +512,7 @@ describe('buildIssueAlertNotification', () => {
               in_app: true,
               filename: 'src/widgets/read.ts',
               lineno: 23,
-              context_line: 'return item < max && ready',
+              context_line: 'return `item` < max && ready',
             },
           ],
         }),
@@ -481,7 +546,7 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '`src/widgets/read.ts:23  return item &lt; max &amp;&amp; ready`',
+              text: '`src/widgets/read.ts:23  return ˋitemˋ &lt; max &amp;&amp; ready`',
             },
           },
           {
