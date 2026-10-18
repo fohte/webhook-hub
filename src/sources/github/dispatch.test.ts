@@ -419,15 +419,26 @@ describe('dispatch (workflow_run)', () => {
       taskCalls: [
         [
           {
-            title: 'CI failure: CI (fohte/example)',
-            description: [
-              'Repository: fohte/example',
-              'Workflow: CI',
-              'Branch: main',
-              'Failed step: Unknown',
-              'Run: https://github.com/fohte/example/actions/runs/1',
-            ].join('\n'),
+            title: 'fohte/example: CI が失敗',
+            description: `## なぜやるか
+
+fohte/example の main で CI が失敗している。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: 不明
+- Run: https://github.com/fohte/example/actions/runs/1
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
             context: 'personal',
+            labels: ['alert/ci', 'dev/example'],
           },
         ],
       ],
@@ -522,15 +533,26 @@ describe('dispatch (workflow_run)', () => {
       taskCalls: [
         [
           {
-            title: 'CI failure: CI (fohte/example)',
-            description: [
-              'Repository: fohte/example',
-              'Workflow: CI',
-              'Branch: main',
-              'Failed step: Unknown',
-              'Run: https://github.com/fohte/example/actions/runs/1',
-            ].join('\n'),
+            title: 'fohte/example: CI が失敗',
+            description: `## なぜやるか
+
+fohte/example の main で CI が失敗している。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: 不明
+- Run: https://github.com/fohte/example/actions/runs/1
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
             context: 'personal',
+            labels: ['alert/ci', 'dev/example'],
           },
         ],
       ],
