@@ -81,6 +81,7 @@ const SECTION_TEXT_MAX_LENGTH = 3000
 // Four context values, separators, and code delimiters stay below the section limit.
 const CONTEXT_VALUE_MAX_LENGTH = 700
 // Three capped frame lines and the surrounding code fences stay below the section limit.
+const STACKTRACE_FRAME_LIMIT = 3
 const STACKTRACE_LINE_MAX_LENGTH = 996
 
 const extractProjectSlug = (eventUrl: string | null | undefined): string =>
@@ -140,6 +141,23 @@ const formatExceptionValue = (exception: SentryExceptionValue): string => {
   return `${type}: ${value}`
 }
 
+const getFrameLocation = (frame: SentryStacktraceFrame): string =>
+  [
+    frame.filename ?? '',
+    frame.lineno === undefined || frame.lineno === null
+      ? ''
+      : String(frame.lineno),
+  ]
+    .filter((value) => value !== '')
+    .join(':')
+
+const getTaskAppName = (app: string): string => (app === '' ? 'Sentry' : app)
+
+const getTaskLabels = (app: string): string[] => [
+  'alert/sentry',
+  ...(app === '' ? [] : [`dev/${app}`]),
+]
+
 const findStacktraceFrames = (
   exceptions: SentryExceptionValue[],
 ): SentryStacktraceFrame[] =>
@@ -163,46 +181,122 @@ const renderContextText = (text: string): string =>
 const renderInlineCode = (text: string): string =>
   `\`${renderContextText(text)}\``
 
-const renderFrame = (frame: SentryStacktraceFrame): string => {
-  const location = [
-    frame.filename ?? '',
-    frame.lineno === undefined || frame.lineno === null
-      ? ''
-      : String(frame.lineno),
-  ]
-    .filter((value) => value !== '')
-    .join(':')
-  const line = [location, (frame.context_line ?? '').trimStart()]
-    .filter((value) => value !== '')
-    .join('  ')
-  return line === ''
-    ? ''
-    : escapeAndTruncateSlackMrkdwn(
-        neutralizeBackticks(line),
-        STACKTRACE_LINE_MAX_LENGTH,
-      )
-}
+const selectStacktraceLines = (frames: SentryStacktraceFrame[]): string[] =>
+  [...frames]
+    .reverse()
+    .slice(0, STACKTRACE_FRAME_LIMIT)
+    .map((frame) =>
+      [getFrameLocation(frame), (frame.context_line ?? '').trimStart()]
+        .filter((value) => value !== '')
+        .join('  ')
+        .replace(/\s*\n\s*/gu, ' '),
+    )
+    .filter((line) => line !== '')
 
 const renderStacktrace = (frames: SentryStacktraceFrame[]): string => {
-  const lines = [...frames]
-    .reverse()
-    .slice(0, 3)
-    .map(renderFrame)
-    .filter((frame) => frame !== '')
+  const lines = selectStacktraceLines(frames).map((line) =>
+    escapeAndTruncateSlackMrkdwn(
+      neutralizeBackticks(line),
+      STACKTRACE_LINE_MAX_LENGTH,
+    ),
+  )
   return lines.length === 0 ? '' : `\`\`\`\n${lines.join('\n')}\n\`\`\``
 }
 
-const buildTaskDescription = (input: IssueAlertInput): string =>
-  [
-    input.app === '' ? undefined : `Application: ${input.app}`,
-    `Issue: ${input.title}`,
-    input.level === '' ? undefined : `Level: ${input.level}`,
-    input.culprit === '' ? undefined : `Location: ${input.culprit}`,
-    input.triggeredRule === '' ? undefined : `Rule: ${input.triggeredRule}`,
-    input.webUrl === '' ? undefined : `Issue URL: ${input.webUrl}`,
-  ]
-    .filter((line): line is string => line !== undefined)
-    .join('\n')
+const getLongestBacktickSequence = (text: string): number =>
+  [...text.matchAll(/`+/gu)].reduce(
+    (longest, [sequence]) => Math.max(longest, sequence.length),
+    0,
+  )
+
+const normalizeTaskText = (text: string): string =>
+  text.replace(/\s*\n\s*/gu, ' ').trim()
+
+const truncateTaskText = (
+  text: string,
+  maxLength = CONTEXT_VALUE_MAX_LENGTH,
+): string => {
+  const normalized = normalizeTaskText(text)
+  let result = ''
+  let characterCount = 0
+  for (const character of normalized) {
+    characterCount += 1
+    if (characterCount === maxLength) continue
+    if (characterCount > maxLength) return `${result}…`
+    result += character
+  }
+  return normalized
+}
+
+const renderTaskCode = (text: string): string => {
+  const normalized = truncateTaskText(text)
+  const delimiter = '`'.repeat(getLongestBacktickSequence(normalized) + 1)
+  const needsPadding = normalized.startsWith('`') || normalized.endsWith('`')
+  const content = needsPadding ? ` ${normalized} ` : normalized
+  return `${delimiter}${content}${delimiter}`
+}
+
+const renderTaskStacktrace = (
+  frames: SentryStacktraceFrame[],
+): string | undefined => {
+  const lines = selectStacktraceLines(frames).map((line) =>
+    truncateTaskText(line, STACKTRACE_LINE_MAX_LENGTH),
+  )
+  if (lines.length === 0) return undefined
+
+  const fence = '`'.repeat(
+    Math.max(3, ...lines.map((line) => getLongestBacktickSequence(line) + 1)),
+  )
+  return `- Stacktrace:\n  ${fence}\n${lines
+    .map((line) => `  ${line}`)
+    .join('\n')}\n  ${fence}`
+}
+
+const buildTaskDescription = (input: IssueAlertInput): string => {
+  const app = getTaskAppName(input.app)
+  const request = renderRequest(input.requestMethod, input.requestUrl)
+  const reasonDetails = [
+    input.level === '' ? undefined : `- Level: ${renderTaskCode(input.level)}`,
+    input.triggeredRule === ''
+      ? undefined
+      : `- Rule: ${renderTaskCode(input.triggeredRule)}`,
+  ].filter((line): line is string => line !== undefined)
+  const workDetails = [
+    input.culprit === ''
+      ? undefined
+      : `- 発生箇所: ${renderTaskCode(input.culprit)}`,
+    input.environment === ''
+      ? undefined
+      : `- Environment: ${renderTaskCode(input.environment)}`,
+    input.handled === ''
+      ? undefined
+      : `- Handled: ${renderTaskCode(input.handled)}`,
+    request === '' ? undefined : `- Request: ${renderTaskCode(request)}`,
+    input.causes.length === 0
+      ? undefined
+      : `- Causes:\n${input.causes
+          .map((cause) => `  - ${renderTaskCode(cause)}`)
+          .join('\n')}`,
+    renderTaskStacktrace(input.stacktraceFrames),
+    input.webUrl === '' ? undefined : `- Issue: ${input.webUrl}`,
+  ].filter((line): line is string => line !== undefined)
+
+  return [
+    '## なぜやるか',
+    '',
+    `${app} で ${renderTaskCode(input.title)} が発生している。`,
+    ...(reasonDetails.length === 0 ? [] : ['', ...reasonDetails]),
+    '',
+    '## やること',
+    '',
+    '発生箇所の原因を調べて直す。',
+    ...(workDetails.length === 0 ? [] : ['', ...workDetails]),
+    '',
+    '## 完了条件',
+    '',
+    '- [ ] Sentry の issue が resolved になる',
+  ].join('\n')
+}
 
 export const extractIssueAlertInput = (
   payload: SentryIssueAlertEvent,
@@ -238,6 +332,7 @@ export const buildIssueAlertNotification = (
   if (input.action !== 'triggered') return null
 
   const request = renderRequest(input.requestMethod, input.requestUrl)
+  const app = getTaskAppName(input.app)
   const contextLine = [
     input.app === '' ? '' : renderInlineCode(input.app),
     input.environment === '' ? '' : renderContextText(input.environment),
@@ -309,9 +404,10 @@ export const buildIssueAlertNotification = (
   return {
     content,
     task: {
-      title: `Sentry alert: ${input.title}`,
+      title: `${app}: ${normalizeTaskText(input.title)}`,
       description: buildTaskDescription(input),
       context: 'personal',
+      labels: getTaskLabels(input.app),
     },
     title: input.title,
     level: input.level,
