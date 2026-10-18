@@ -67,7 +67,7 @@ Headers: `Request-ID`, `Sentry-Hook-Resource`, `Sentry-Hook-Signature`. The sign
 
 Header: `X-Grafana-Alerting-Signature`. The signature is an HMAC-SHA256 of the raw body against `GRAFANA_WEBHOOK_SECRET`, compared with `timingSafeEqual` (`src/sources/grafana/verify.ts`); the optional timestamp header is not configured. Each firing or resolved alert with a non-empty fingerprint and valid `startsAt` is dispatched separately. Slack metadata stores the fingerprint, `startsAt`, and tq task reference. Redeliveries for the same incident update its message and reuse its task; a later incident with the same fingerprint creates a new message and task. History lookup is bounded to five pages within one day of the incident start.
 
-Firing notifications show the alert name, summary, available Panel link, and any rendered panel image. Resolved notifications are folded to a struck-through alert name and the Panel link. Full labels, annotations, and Grafana URLs remain in the tq task description.
+Firing notifications show the alert name, summary, available Panel link, and any rendered panel image. Resolved notifications are folded to a struck-through alert name and the Panel link. tq tasks use the standard three-section description with the summary, JST start time, user-defined labels and annotations, a formatted query error when present, and available Panel and Rule URLs; Grafana-managed fields are omitted.
 
 ### tq (`POST /tq`)
 

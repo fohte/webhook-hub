@@ -44,11 +44,11 @@ describe('buildGrafanaAlertNotification', () => {
           grafana_folder: 'operations',
         },
         annotations: {
-          summary: 'The worker backlog crossed its target',
+          summary: 'The worker backlog\ncrossed its target',
           description: 'Pending jobs exceeded the configured limit',
           runbook_url: 'https://grafana.example.test/runbooks/worker-backlog',
           Error:
-            'failed to execute query [A]: { "error": { "code": 400, "message": "Invalid value" } }',
+            'failed to execute query [A]: { "error": { "code": 400, "message": "Invalid ```value```" } }',
           grafana_state_reason: 'Updated',
         },
         fingerprint: 'fp-worker-backlog',
@@ -60,7 +60,7 @@ describe('buildGrafanaAlertNotification', () => {
     ).toEqual({
       alertName: 'Worker backlog rising',
       content: {
-        text: 'Worker backlog rising\nThe worker backlog crossed its target',
+        text: 'Worker backlog rising\nThe worker backlog\ncrossed its target',
         color: '#d73a49',
         blocks: [
           {
@@ -71,7 +71,7 @@ describe('buildGrafanaAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'The worker backlog crossed its target',
+              text: 'The worker backlog\ncrossed its target',
             },
           },
           {
@@ -101,9 +101,9 @@ describe('buildGrafanaAlertNotification', () => {
           '',
           '⚠ ルールのクエリが失敗している',
           '',
-          '```',
-          'failed to execute query [A]: { "error": { "code": 400, "message": "Invalid value" } }',
-          '```',
+          '````',
+          'failed to execute query [A]: { "error": { "code": 400, "message": "Invalid ```value```" } }',
+          '````',
           '',
           '## やること',
           '',
@@ -111,6 +111,61 @@ describe('buildGrafanaAlertNotification', () => {
           '',
           '- Panel: https://grafana.example.test/d/worker-health?viewPanel=8',
           '- Rule: https://grafana.example.test/alerting/rule-9',
+          '',
+          '## 完了条件',
+          '',
+          '- [ ] アラートが resolved になる',
+        ].join('\n'),
+        context: 'personal',
+        labels: ['alert/grafana'],
+      },
+      status: 'firing',
+    })
+  })
+
+  it('keeps required sections when the query error is long', () => {
+    const error = 'x'.repeat(4_001)
+
+    expect(
+      buildGrafanaAlertNotification({
+        status: 'firing',
+        labels: { alertname: 'Query evaluation failed' },
+        annotations: { Error: error },
+        fingerprint: 'fp-query-failure',
+        startsAt: '2026-05-06T00:00:00Z',
+      }),
+    ).toEqual({
+      alertName: 'Query evaluation failed',
+      content: {
+        text: 'Query evaluation failed',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: 'Query evaluation failed' },
+          },
+        ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
+      },
+      task: {
+        title: 'Query evaluation failed',
+        description: [
+          '## なぜやるか',
+          '',
+          'Query evaluation failed',
+          '',
+          '- 開始: 2026-05-06 09:00 JST',
+          '',
+          '⚠ ルールのクエリが失敗している',
+          '',
+          '```',
+          `${'x'.repeat(3_999)}…`,
+          '```',
+          '',
+          '## やること',
+          '',
+          'グラフで状況を確かめ、原因を取り除く。',
           '',
           '## 完了条件',
           '',
@@ -136,7 +191,7 @@ describe('buildGrafanaAlertNotification', () => {
           grafana_state_reason: 'NoData',
         },
         fingerprint: 'fp-message-queue',
-        startsAt: '2026-05-05T11:12:13Z',
+        startsAt: 'invalid timestamp',
       }),
     ).toEqual({
       alertName: 'Message queue pressure',
@@ -159,7 +214,7 @@ describe('buildGrafanaAlertNotification', () => {
           '',
           'Message queue pressure',
           '',
-          '- 開始: 2026-05-05 20:12 JST',
+          '- 開始: invalid timestamp',
           '',
           '## やること',
           '',

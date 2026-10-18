@@ -6,6 +6,7 @@ import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 const GRAFANA_USERNAME = 'Grafana'
 const GRAFANA_ICON_URL = 'https://grafana.com/static/assets/img/fav32.png'
 const PANEL_LINK_LABEL = 'Panel'
+const TASK_ERROR_MAX_LENGTH = 4_000
 
 export interface GrafanaAlert {
   status: 'firing' | 'resolved'
@@ -30,7 +31,10 @@ const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 
 const formatStartedAt = (startsAt: string): string => {
-  const jstDate = new Date(Date.parse(startsAt) + 9 * 60 * 60 * 1000)
+  const timestamp = Date.parse(startsAt)
+  if (!Number.isFinite(timestamp)) return startsAt
+
+  const jstDate = new Date(timestamp + 9 * 60 * 60 * 1000)
   const pad = (value: number): string => String(value).padStart(2, '0')
   const year = String(jstDate.getUTCFullYear()).padStart(4, '0')
   const month = pad(jstDate.getUTCMonth() + 1)
@@ -98,7 +102,7 @@ const renderAlertDetails = (
 
 const renderTaskDescription = (
   alert: GrafanaAlert,
-  alertName: string,
+  taskTitle: string,
 ): string => {
   const labels = Object.entries(alert.labels)
     .filter(([key]) => key !== 'alertname' && !key.startsWith('grafana_'))
@@ -123,7 +127,10 @@ const renderTaskDescription = (
   const errorBlock =
     error === undefined || error === ''
       ? []
-      : ['⚠ ルールのクエリが失敗している', renderCodeBlock(error)]
+      : [
+          '⚠ ルールのクエリが失敗している',
+          renderCodeBlock(truncate(error, TASK_ERROR_MAX_LENGTH)),
+        ]
   const actionDetails = [
     ...(alert.panelURL === undefined ? [] : [`- Panel: ${alert.panelURL}`]),
     ...(alert.generatorURL === undefined
@@ -134,10 +141,7 @@ const renderTaskDescription = (
   const whySection = [
     '## なぜやるか',
     '',
-    alert.annotations['summary'] === undefined ||
-    alert.annotations['summary'] === ''
-      ? alertName
-      : alert.annotations['summary'],
+    taskTitle,
     '',
     details.join('\n'),
   ].join('\n')
@@ -170,6 +174,11 @@ export const buildGrafanaAlertNotification = (
     rawSummary === undefined || rawSummary === ''
       ? undefined
       : truncate(rawSummary, 500)
+  const normalizedSummary = summary?.replace(/\s+/gu, ' ').trim()
+  const taskTitle =
+    normalizedSummary === undefined || normalizedSummary === ''
+      ? alertName
+      : normalizedSummary
   const content: SlackMessageContent = {
     text: [alertName, ...(summary === undefined ? [] : [summary])].join('\n'),
     color: TODO_ALERT_COLOR,
@@ -182,9 +191,8 @@ export const buildGrafanaAlertNotification = (
     alertName,
     content,
     task: {
-      title:
-        rawSummary === undefined || rawSummary === '' ? alertName : rawSummary,
-      description: truncate(renderTaskDescription(alert, alertName), 10_000),
+      title: taskTitle,
+      description: truncate(renderTaskDescription(alert, taskTitle), 10_000),
       context: 'personal',
       labels: ['alert/grafana'],
     },

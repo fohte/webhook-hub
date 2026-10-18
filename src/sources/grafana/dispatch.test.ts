@@ -45,17 +45,14 @@ const ALERT = {
 }
 
 const expectedGrafanaTask = ({
-  alertName,
-  summary,
+  title,
   startedAtJst,
   panelURL,
 }: {
-  alertName: string
-  summary?: string
+  title: string
   startedAtJst: string
   panelURL?: string
 }) => {
-  const title = summary === undefined || summary === '' ? alertName : summary
   const actionDetails = [
     ...(panelURL === undefined ? [] : [`- Panel: ${panelURL}`]),
   ]
@@ -371,8 +368,7 @@ describe('dispatch', () => {
       taskCalls: [
         [
           expectedGrafanaTask({
-            alertName: 'Queue depth',
-            summary: 'Queue is growing',
+            title: 'Queue is growing',
             startedAtJst: '2026-01-01 09:00 JST',
           }),
         ],
@@ -423,8 +419,7 @@ describe('dispatch', () => {
       taskCalls: [
         [
           expectedGrafanaTask({
-            alertName,
-            summary,
+            title: summary,
             startedAtJst: '2026-07-08 23:15 JST',
             panelURL,
           }),
@@ -942,8 +937,7 @@ describe('dispatch', () => {
       taskCalls: [
         [
           expectedGrafanaTask({
-            alertName: 'Queue depth',
-            summary: 'Queue is growing',
+            title: 'Queue is growing',
             startedAtJst: '2026-01-02 09:00 JST',
           }),
         ],
@@ -996,8 +990,7 @@ describe('dispatch', () => {
       taskCalls: [
         [
           expectedGrafanaTask({
-            alertName: 'Queue depth',
-            summary: 'Queue is growing',
+            title: 'Queue is growing',
             startedAtJst: '2026-01-01 09:00 JST',
           }),
         ],
@@ -1039,13 +1032,13 @@ describe('dispatch', () => {
       taskCalls: [
         [
           expectedGrafanaTask({
-            alertName: 'Queue depth',
+            title: 'Queue depth',
             startedAtJst: '2026-01-01 09:00 JST',
           }),
         ],
         [
           expectedGrafanaTask({
-            alertName: 'Disk usage',
+            title: 'Disk usage',
             startedAtJst: '2026-01-01 09:00 JST',
           }),
         ],
@@ -1090,8 +1083,7 @@ describe('dispatch', () => {
       taskCalls: [
         [
           expectedGrafanaTask({
-            alertName: 'Queue depth',
-            summary: 'Queue is growing',
+            title: 'Queue is growing',
             startedAtJst: '2026-01-01 09:00 JST',
           }),
         ],
@@ -1180,13 +1172,13 @@ describe('dispatch', () => {
       taskCalls: [
         [
           expectedGrafanaTask({
-            alertName: 'Grafana alert',
+            title: 'Grafana alert',
             startedAtJst: '2026-01-01 09:00 JST',
           }),
         ],
         [
           expectedGrafanaTask({
-            alertName: 'Grafana alert',
+            title: 'Grafana alert',
             startedAtJst: '2026-01-01 09:00 JST',
           }),
         ],
