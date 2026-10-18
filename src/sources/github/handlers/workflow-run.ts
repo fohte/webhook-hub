@@ -126,9 +126,14 @@ const resolveWorkflowOrigin = (
   }
 }
 
+const normalizeTextLine = (text: string): string =>
+  text.replace(/\s+/g, ' ').trim()
+
 const buildOriginLine = (origin: WorkflowOrigin): string | null => {
   if (origin === null) return null
-  if (origin.type === 'text') return escapeSlackMrkdwn(origin.value)
+  if (origin.type === 'text') {
+    return escapeSlackMrkdwn(normalizeTextLine(origin.value))
+  }
 
   const { number, title, url } = origin.pullRequest
   return `<${url}|#${String(number)} ${escapeSlackMrkdwn(title)}>`
@@ -136,11 +141,20 @@ const buildOriginLine = (origin: WorkflowOrigin): string | null => {
 
 // CommonMark can parse these characters as HTML markup or entities in TQ descriptions.
 const formatTaskDescriptionText = (text: string): string =>
-  text
+  normalizeTextLine(text)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replace(/#\d+\b/g, (reference) => `\`${reference}\``)
+
+const formatTaskDescriptionCode = (text: string): string => {
+  const normalizedText = normalizeTextLine(text)
+  const backtickSequences = normalizedText.match(/`+/g) ?? []
+  const delimiter = '`'.repeat(
+    Math.max(1, ...backtickSequences.map((sequence) => sequence.length + 1)),
+  )
+  return `${delimiter}${normalizedText}${delimiter}`
+}
 
 const buildTaskOrigin = (origin: WorkflowOrigin): string => {
   if (origin === null) return 'なし'
@@ -175,11 +189,12 @@ const buildTriggerLabels = (input: WorkflowRunInput): WorkflowTriggerLabels => {
 }
 
 const stripStepSha = (step: string): string => {
-  const strippedStep = step
+  const normalizedStep = normalizeTextLine(step)
+  const strippedStep = normalizedStep
     .replace(/@[0-9a-f]{7,40}\b/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
-  return strippedStep === '' ? step : strippedStep
+  return strippedStep === '' ? normalizedStep : strippedStep
 }
 
 const buildTaskDescription = (
@@ -194,14 +209,14 @@ const buildTaskDescription = (
   const failedStepDescription =
     failedStep === null
       ? '不明'
-      : `${formatTaskDescriptionText(failedStep.job)} / ${formatTaskDescriptionText(stripStepSha(failedStep.step))}`
+      : `${formatTaskDescriptionCode(failedStep.job)} › ${formatTaskDescriptionCode(stripStepSha(failedStep.step))}`
 
   return [
     '## なぜやるか',
     '',
     `${repo} の ${branch} で ${workflow} が失敗している。`,
     '',
-    `- 起点: ${buildTaskOrigin(origin)}`,
+    `- 起点の PR: ${buildTaskOrigin(origin)}`,
     `- トリガー: ${trigger}`,
     '',
     '## やること',
@@ -226,6 +241,7 @@ const formatWorkflowRunNotification = (
   failedStep: FailedStep | null,
   pullRequest: PullRequestSummary | null,
 ): WorkflowRunNotification => {
+  const workflowName = normalizeTextLine(input.workflow)
   const headerText = truncateHeaderText(`🚨 ${input.workflow} failed`)
   const origin = resolveWorkflowOrigin(input, pullRequest)
   const originLine = buildOriginLine(origin)
@@ -233,7 +249,7 @@ const formatWorkflowRunNotification = (
   const failedStepValue =
     failedStep === null
       ? null
-      : `\`${escapeSlackMrkdwn(failedStep.job)}\` › \`${escapeSlackMrkdwn(failedStep.step)}\``
+      : `\`${escapeSlackMrkdwn(normalizeTextLine(failedStep.job))}\` › \`${escapeSlackMrkdwn(normalizeTextLine(failedStep.step))}\``
 
   const blocks: SlackBlock[] = [
     { type: 'header', text: { type: 'plain_text', text: headerText } },
@@ -273,7 +289,7 @@ const formatWorkflowRunNotification = (
       iconUrl: GITHUB_CI_ICON_URL,
     },
     task: {
-      title: `${input.repo}: ${input.workflow} が失敗`,
+      title: `${input.repo}: ${workflowName} が失敗`,
       description: buildTaskDescription(
         input,
         failedStep,
