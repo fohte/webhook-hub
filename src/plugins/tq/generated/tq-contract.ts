@@ -252,6 +252,130 @@ export const CreateTaskResponse = z
   })
   .passthrough()
 export type CreateTaskResponse = z.infer<typeof CreateTaskResponse>
+export const GithubLinkLookupTaskResponse = z
+  .object({
+    id: z
+      .string()
+      .regex(
+        /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+      )
+      .uuid(),
+    number: z.number().int().gte(-9007199254740991).lte(9007199254740991),
+    title: z.string(),
+    description: z.string().nullable(),
+    status: z.enum(['todo', 'completed']),
+    statusReason: z.enum(['completed', 'not_planned', 'duplicate']).nullable(),
+    context: z.enum(['work', 'personal']),
+    commitment: z.enum(['inbox', 'active', 'someday']),
+    labels: z.array(z.string()),
+    startDate: z.string().nullable(),
+    dueDate: z.string().nullable(),
+    remindAt: z
+      .string()
+      .regex(
+        /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$/,
+      )
+      .datetime({ offset: true })
+      .nullable(),
+    parentId: z
+      .string()
+      .regex(
+        /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+      )
+      .uuid()
+      .nullable(),
+    projectId: z
+      .string()
+      .regex(
+        /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+      )
+      .uuid()
+      .nullable(),
+    recurrenceRuleId: z
+      .string()
+      .regex(
+        /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+      )
+      .uuid()
+      .nullable(),
+    recurrenceRule: z
+      .object({
+        id: z
+          .string()
+          .regex(
+            /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+          )
+          .uuid(),
+        type: z.enum(['daily', 'weekly', 'monthly', 'custom']),
+        interval: z.number().int().gte(1).lte(9007199254740991),
+        daysOfWeek: z.array(z.number().int().gte(0).lte(6)).nullable(),
+        dayOfMonth: z.number().int().gte(1).lte(31).nullable(),
+      })
+      .passthrough()
+      .nullable(),
+    templateId: z
+      .string()
+      .regex(
+        /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+      )
+      .uuid()
+      .nullable(),
+    occurrenceDate: z
+      .string()
+      .regex(
+        /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))$/,
+      )
+      .nullable(),
+    githubLinks: z.array(
+      z
+        .object({
+          id: z
+            .string()
+            .regex(
+              /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+            )
+            .uuid(),
+          owner: z.string(),
+          repo: z.string(),
+          number: z.number().int().gte(-9007199254740991).lte(9007199254740991),
+          kind: z.enum(['issue', 'pull_request']),
+          role: z.enum(['subject', 'blocker']),
+          notifyEvents: z.array(
+            z.enum(['closed', 'reopened', 'comments', 'other']),
+          ),
+          url: z.string().url(),
+          state: z.enum(['open', 'closed', 'merged']),
+          title: z.string(),
+          lastSyncedAt: z
+            .string()
+            .regex(
+              /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$/,
+            )
+            .datetime({ offset: true }),
+        })
+        .passthrough(),
+    ),
+    createdAt: z
+      .string()
+      .regex(
+        /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$/,
+      )
+      .datetime({ offset: true }),
+    updatedAt: z
+      .string()
+      .regex(
+        /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$/,
+      )
+      .datetime({ offset: true }),
+  })
+  .passthrough()
+export type GithubLinkLookupTaskResponse = z.infer<
+  typeof GithubLinkLookupTaskResponse
+>
+export const GithubLinkLookupResponse = z
+  .object({ task: GithubLinkLookupTaskResponse.nullable() })
+  .passthrough()
+export type GithubLinkLookupResponse = z.infer<typeof GithubLinkLookupResponse>
 export const TaskStatusChangedWebhookEvent = z
   .object({
     event: z.literal('task.status_changed'),
