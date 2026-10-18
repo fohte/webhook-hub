@@ -21,22 +21,22 @@ vi.mock('@fohte/service-kit/observability', () => ({
 const baseInput = (
   overrides: Partial<WorkflowRunInput> = {},
 ): WorkflowRunInput => ({
-  repo: 'fohte/example',
-  repoOwner: 'fohte',
-  repoName: 'example',
-  headRepo: 'fohte/example',
+  repo: 'example-owner/example-repo',
+  repoOwner: 'example-owner',
+  repoName: 'example-repo',
+  headRepo: 'example-owner/example-repo',
   workflow: 'CI',
   branch: 'main',
   defaultBranch: 'main',
   workflowId: 101,
   conclusion: 'failure',
-  sha: 'abcdef1234567890abcdef1234567890abcdef12',
+  sha: 'b'.repeat(40),
   runId: 42,
-  url: 'https://github.com/fohte/example/actions/runs/1',
+  url: 'https://github.com/example-owner/example-repo/actions/runs/42',
   event: 'push',
   displayTitle: 'fix: something',
   commitMessage: 'fix: something\n\nlonger body',
-  triggeringActor: 'octocat',
+  triggeringActor: 'ci-user',
   ...overrides,
 })
 
@@ -83,6 +83,10 @@ const expectedNotification = (
   workflow: string,
   fields: [string, string][],
   failedStep: { job: string; step: string } | null = null,
+  taskOrigin = 'fix: something',
+  taskTrigger = 'push',
+  taskFailedStep?: string,
+  defaultBranch = 'main',
 ) => ({
   content: {
     text: `🚨 ${workflow} failed`,
@@ -91,26 +95,39 @@ const expectedNotification = (
       headerBlock(`🚨 ${workflow} failed`),
       fieldsBlock(fields),
       contextBlock(
-        '<https://github.com/fohte/example/actions/runs/1|View run>',
+        '<https://github.com/example-owner/example-repo/actions/runs/42|View run>',
       ),
     ],
     username: 'GitHub CI',
     iconUrl: 'https://avatars.githubusercontent.com/in/15368',
   },
   task: {
-    title: `CI failure: ${workflow} (fohte/example)`,
+    title: `example-owner/example-repo: ${workflow} が失敗`,
     description: [
-      'Repository: fohte/example',
-      `Workflow: ${workflow}`,
-      'Branch: main',
-      `Failed step: ${failedStep === null ? 'Unknown' : `${failedStep.job} / ${failedStep.step}`}`,
-      'Run: https://github.com/fohte/example/actions/runs/1',
+      '## なぜやるか',
+      '',
+      `example-owner/example-repo の ${defaultBranch} で ${workflow} が失敗している。`,
+      '',
+      `- 起点: ${taskOrigin}`,
+      `- トリガー: ${taskTrigger}`,
+      '',
+      '## やること',
+      '',
+      '失敗箇所を直す。',
+      '',
+      `- 失敗箇所: ${taskFailedStep ?? (failedStep === null ? '不明' : `${failedStep.job} / ${failedStep.step}`)}`,
+      '- Run: https://github.com/example-owner/example-repo/actions/runs/42',
+      '',
+      '## 完了条件',
+      '',
+      `- [ ] ${defaultBranch} の ${workflow} が成功する`,
     ].join('\n'),
     context: 'personal',
+    labels: ['alert/ci', 'dev/example-repo'],
   },
-  repo: 'fohte/example',
+  repo: 'example-owner/example-repo',
   workflow,
-  url: 'https://github.com/fohte/example/actions/runs/1',
+  url: 'https://github.com/example-owner/example-repo/actions/runs/42',
 })
 
 describe('buildWorkflowRunNotification', () => {
@@ -118,10 +135,13 @@ describe('buildWorkflowRunNotification', () => {
     const deps = createDeps({
       pullRequest: okAsync({
         number: 128,
-        title: 'Bump aws provider to v5.31.0',
-        url: 'https://github.com/fohte/example/pull/128',
+        title: 'Update infrastructure configuration',
+        url: 'https://github.com/example-owner/example-repo/pull/128',
       }),
-      failedStep: okAsync({ job: 'plan (production)', step: 'terraform plan' }),
+      failedStep: okAsync({
+        job: 'plan (production)',
+        step: 'terraform plan @0123456789abcdef0123456789abcdef01234567',
+      }),
     })
 
     const result = await buildWorkflowRunNotification(baseInput(), deps)
@@ -130,15 +150,24 @@ describe('buildWorkflowRunNotification', () => {
       expectedNotification(
         'CI',
         [
-          ['Repository', 'fohte/example'],
+          ['Repository', 'example-owner/example-repo'],
           [
             '起点の PR',
-            '<https://github.com/fohte/example/pull/128|#128 Bump aws provider to v5.31.0>',
+            '<https://github.com/example-owner/example-repo/pull/128|#128 Update infrastructure configuration>',
           ],
-          ['失敗箇所', '`plan (production)` › `terraform plan`'],
+          [
+            '失敗箇所',
+            '`plan (production)` › `terraform plan @0123456789abcdef0123456789abcdef01234567`',
+          ],
           ['トリガー', 'push'],
         ],
-        { job: 'plan (production)', step: 'terraform plan' },
+        {
+          job: 'plan (production)',
+          step: 'terraform plan @0123456789abcdef0123456789abcdef01234567',
+        },
+        'Update infrastructure configuration https://github.com/example-owner/example-repo/pull/128',
+        'push',
+        'plan (production) / terraform plan',
       ),
     )
   })
@@ -151,13 +180,13 @@ describe('buildWorkflowRunNotification', () => {
     expect(
       deps.githubClient.findPullRequestForCommit,
     ).toHaveBeenCalledExactlyOnceWith(
-      'fohte',
-      'example',
-      'abcdef1234567890abcdef1234567890abcdef12',
+      'example-owner',
+      'example-repo',
+      'b'.repeat(40),
     )
     expect(deps.githubClient.findFailedStep).toHaveBeenCalledExactlyOnceWith(
-      'fohte',
-      'example',
+      'example-owner',
+      'example-repo',
       42,
     )
   })
@@ -169,7 +198,7 @@ describe('buildWorkflowRunNotification', () => {
 
     expect(result._unsafeUnwrap()).toEqual(
       expectedNotification('CI', [
-        ['Repository', 'fohte/example'],
+        ['Repository', 'example-owner/example-repo'],
         ['起点の PR', 'fix: something'],
         ['失敗箇所', '不明'],
         ['トリガー', 'push'],
@@ -186,7 +215,7 @@ describe('buildWorkflowRunNotification', () => {
 
     expect(result._unsafeUnwrap()).toEqual(
       expectedNotification('CI', [
-        ['Repository', 'fohte/example'],
+        ['Repository', 'example-owner/example-repo'],
         ['起点の PR', 'fix: something'],
         ['失敗箇所', '不明'],
         ['トリガー', 'push'],
@@ -208,8 +237,8 @@ describe('buildWorkflowRunNotification', () => {
         'webhook-hub.github-api-lookup-failed',
         {
           extras: {
-            repo: 'fohte/example',
-            sha: 'abcdef1234567890abcdef1234567890abcdef12',
+            repo: 'example-owner/example-repo',
+            sha: 'b'.repeat(40),
           },
         },
       ],
@@ -233,8 +262,8 @@ describe('buildWorkflowRunNotification', () => {
         'webhook-hub.octo-sts-auth-failed',
         {
           extras: {
-            repo: 'fohte/example',
-            sha: 'abcdef1234567890abcdef1234567890abcdef12',
+            repo: 'example-owner/example-repo',
+            sha: 'b'.repeat(40),
           },
         },
       ],
@@ -258,7 +287,7 @@ describe('buildWorkflowRunNotification', () => {
         'webhook-hub.octo-sts-auth-failed',
         {
           extras: {
-            repo: 'fohte/example',
+            repo: 'example-owner/example-repo',
             run_id: 42,
           },
         },
@@ -272,7 +301,12 @@ describe('buildWorkflowRunNotification', () => {
     })
 
     const result = await buildWorkflowRunNotification(
-      baseInput({ event: 'schedule', workflow: 'Boilerplate update' }),
+      baseInput({
+        event: 'schedule',
+        workflow: 'Boilerplate update',
+        branch: 'stable',
+        defaultBranch: 'stable',
+      }),
       deps,
     )
 
@@ -280,12 +314,16 @@ describe('buildWorkflowRunNotification', () => {
       expectedNotification(
         'Boilerplate update',
         [
-          ['Repository', 'fohte/example'],
+          ['Repository', 'example-owner/example-repo'],
           ['起点の PR', 'なし'],
           ['失敗箇所', '`sync` › `Run template sync`'],
           ['トリガー', '定期実行'],
         ],
         { job: 'sync', step: 'Run template sync' },
+        'なし',
+        '定期実行',
+        undefined,
+        'stable',
       ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
@@ -295,17 +333,23 @@ describe('buildWorkflowRunNotification', () => {
     const deps = createDeps()
 
     const result = await buildWorkflowRunNotification(
-      baseInput({ event: 'workflow_dispatch', triggeringActor: 'octocat' }),
+      baseInput({ event: 'workflow_dispatch', triggeringActor: 'ci-user' }),
       deps,
     )
 
     expect(result._unsafeUnwrap()).toEqual(
-      expectedNotification('CI', [
-        ['Repository', 'fohte/example'],
-        ['起点の PR', 'なし'],
-        ['失敗箇所', '不明'],
-        ['トリガー', '`@octocat` が手動実行'],
-      ]),
+      expectedNotification(
+        'CI',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'なし'],
+          ['失敗箇所', '不明'],
+          ['トリガー', '`@ci-user` が手動実行'],
+        ],
+        null,
+        'なし',
+        '@ci-user が手動実行',
+      ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
   })
@@ -316,18 +360,24 @@ describe('buildWorkflowRunNotification', () => {
     const result = await buildWorkflowRunNotification(
       baseInput({
         event: 'issue_comment',
-        displayTitle: 'Bump aws provider (#42)',
+        displayTitle: 'Update dependency group (#42)',
       }),
       deps,
     )
 
     expect(result._unsafeUnwrap()).toEqual(
-      expectedNotification('CI', [
-        ['Repository', 'fohte/example'],
-        ['起点の PR', 'Bump aws provider (#42)'],
-        ['失敗箇所', '不明'],
-        ['トリガー', '`issue_comment` 起因'],
-      ]),
+      expectedNotification(
+        'CI',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'Update dependency group (#42)'],
+          ['失敗箇所', '不明'],
+          ['トリガー', '`issue_comment` 起因'],
+        ],
+        null,
+        'Update dependency group (`#42`)',
+        'issue_comment 起因',
+      ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
   })
@@ -336,23 +386,28 @@ describe('buildWorkflowRunNotification', () => {
     const deps = createDeps({
       pullRequest: okAsync({
         number: 1,
-        title: 'Bump <generics> & things',
-        url: 'https://github.com/fohte/example/pull/1',
+        title: 'Update <workflow> & settings',
+        url: 'https://github.com/example-owner/example-repo/pull/1',
       }),
     })
 
     const result = await buildWorkflowRunNotification(baseInput(), deps)
 
     expect(result._unsafeUnwrap()).toEqual(
-      expectedNotification('CI', [
-        ['Repository', 'fohte/example'],
+      expectedNotification(
+        'CI',
         [
-          '起点の PR',
-          '<https://github.com/fohte/example/pull/1|#1 Bump &lt;generics&gt; &amp; things>',
+          ['Repository', 'example-owner/example-repo'],
+          [
+            '起点の PR',
+            '<https://github.com/example-owner/example-repo/pull/1|#1 Update &lt;workflow&gt; &amp; settings>',
+          ],
+          ['失敗箇所', '不明'],
+          ['トリガー', 'push'],
         ],
-        ['失敗箇所', '不明'],
-        ['トリガー', 'push'],
-      ]),
+        null,
+        'Update &lt;workflow&gt; &amp; settings https://github.com/example-owner/example-repo/pull/1',
+      ),
     )
   })
 
@@ -371,7 +426,7 @@ describe('buildWorkflowRunNotification', () => {
     },
     {
       name: 'head repository differs from the receiving repository (fork)',
-      overrides: { headRepo: 'someone/example' },
+      overrides: { headRepo: 'fork-owner/example-repo' },
     },
   ])(
     'returns null without calling the GitHub API when $name',

@@ -103,35 +103,110 @@ const truncateHeaderText = (text: string): string =>
     ? `${text.slice(0, HEADER_TEXT_MAX_LENGTH - 1)}…`
     : text
 
-const buildOriginLine = (
+type WorkflowOrigin =
+  | { type: 'pull_request'; pullRequest: PullRequestSummary }
+  | { type: 'text'; value: string }
+  | null
+
+const resolveWorkflowOrigin = (
   input: WorkflowRunInput,
   pullRequest: PullRequestSummary | null,
-): string | null => {
+): WorkflowOrigin => {
   switch (input.event) {
     case 'push':
       if (pullRequest !== null) {
-        return `<${pullRequest.url}|#${String(pullRequest.number)} ${escapeSlackMrkdwn(pullRequest.title)}>`
+        return { type: 'pull_request', pullRequest }
       }
-      return escapeSlackMrkdwn(input.commitMessage.split('\n')[0] ?? '')
+      return { type: 'text', value: input.commitMessage.split('\n')[0] ?? '' }
     case 'schedule':
     case 'workflow_dispatch':
       return null
     default:
-      return escapeSlackMrkdwn(input.displayTitle)
+      return { type: 'text', value: input.displayTitle }
   }
 }
 
-const buildTriggerLabel = (input: WorkflowRunInput): string => {
+const buildOriginLine = (origin: WorkflowOrigin): string | null => {
+  if (origin === null) return null
+  if (origin.type === 'text') return escapeSlackMrkdwn(origin.value)
+
+  const { number, title, url } = origin.pullRequest
+  return `<${url}|#${String(number)} ${escapeSlackMrkdwn(title)}>`
+}
+
+const formatTaskText = (text: string): string =>
+  text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replace(/#\d+\b/g, (reference) => `\`${reference}\``)
+
+const buildTaskOrigin = (origin: WorkflowOrigin): string => {
+  if (origin === null) return 'なし'
+  if (origin.type === 'text') return formatTaskText(origin.value)
+
+  const { title, url } = origin.pullRequest
+  return `${formatTaskText(title)} ${url}`
+}
+
+const buildTriggerLabel = (
+  input: WorkflowRunInput,
+  format: 'slack' | 'task' = 'slack',
+): string => {
   switch (input.event) {
     case 'push':
       return 'push'
     case 'schedule':
       return '定期実行'
     case 'workflow_dispatch':
-      return `\`@${escapeSlackMrkdwn(input.triggeringActor)}\` が手動実行`
+      return format === 'slack'
+        ? `\`@${escapeSlackMrkdwn(input.triggeringActor)}\` が手動実行`
+        : `@${formatTaskText(input.triggeringActor)} が手動実行`
     default:
-      return `\`${escapeSlackMrkdwn(input.event)}\` 起因`
+      return format === 'slack'
+        ? `\`${escapeSlackMrkdwn(input.event)}\` 起因`
+        : `${formatTaskText(input.event)} 起因`
   }
+}
+
+const stripStepSha = (step: string): string =>
+  step
+    .replace(/@[0-9a-f]{7,40}\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+
+const buildTaskDescription = (
+  input: WorkflowRunInput,
+  failedStep: FailedStep | null,
+  origin: WorkflowOrigin,
+): string => {
+  const repo = formatTaskText(input.repo)
+  const branch = formatTaskText(input.defaultBranch)
+  const workflow = formatTaskText(input.workflow)
+  const failedStepDescription =
+    failedStep === null
+      ? '不明'
+      : `${formatTaskText(failedStep.job)} / ${formatTaskText(stripStepSha(failedStep.step))}`
+
+  return [
+    '## なぜやるか',
+    '',
+    `${repo} の ${branch} で ${workflow} が失敗している。`,
+    '',
+    `- 起点: ${buildTaskOrigin(origin)}`,
+    `- トリガー: ${buildTriggerLabel(input, 'task')}`,
+    '',
+    '## やること',
+    '',
+    '失敗箇所を直す。',
+    '',
+    `- 失敗箇所: ${failedStepDescription}`,
+    `- Run: ${input.url}`,
+    '',
+    '## 完了条件',
+    '',
+    `- [ ] ${branch} の ${workflow} が成功する`,
+  ].join('\n')
 }
 
 const buildContextText = (input: WorkflowRunInput): string => {
@@ -144,7 +219,8 @@ const formatWorkflowRunNotification = (
   pullRequest: PullRequestSummary | null,
 ): WorkflowRunNotification => {
   const headerText = truncateHeaderText(`🚨 ${input.workflow} failed`)
-  const originLine = buildOriginLine(input, pullRequest)
+  const origin = resolveWorkflowOrigin(input, pullRequest)
+  const originLine = buildOriginLine(origin)
   const failedStepValue =
     failedStep === null
       ? null
@@ -188,15 +264,10 @@ const formatWorkflowRunNotification = (
       iconUrl: GITHUB_CI_ICON_URL,
     },
     task: {
-      title: `CI failure: ${input.workflow} (${input.repo})`,
-      description: [
-        `Repository: ${input.repo}`,
-        `Workflow: ${input.workflow}`,
-        `Branch: ${input.branch}`,
-        `Failed step: ${failedStep === null ? 'Unknown' : `${failedStep.job} / ${failedStep.step}`}`,
-        `Run: ${input.url}`,
-      ].join('\n'),
+      title: `${formatTaskText(input.repo)}: ${formatTaskText(input.workflow)} が失敗`,
+      description: buildTaskDescription(input, failedStep, origin),
       context: 'personal',
+      labels: ['alert/ci', `dev/${input.repoName}`],
     },
     repo: input.repo,
     workflow: input.workflow,
