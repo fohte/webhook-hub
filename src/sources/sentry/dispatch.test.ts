@@ -43,6 +43,9 @@ const createTqClient = (
   result: ReturnType<TqClient['createTask']> = okAsync(TQ_TASK_REF),
 ) => ({
   createTask: vi.fn().mockReturnValue(result),
+  findTaskByGithubUrl: vi
+    .fn<TqClient['findTaskByGithubUrl']>()
+    .mockReturnValue(okAsync(null)),
 })
 
 const createContext = (

@@ -38,6 +38,7 @@ const createNotifier = () => {
 
 const createTqClient = (): TqClient => ({
   createTask: vi.fn().mockReturnValue(okAsync(TQ_TASK_REF)),
+  findTaskByGithubUrl: vi.fn().mockReturnValue(okAsync(null)),
 })
 
 const observeResponses = async (

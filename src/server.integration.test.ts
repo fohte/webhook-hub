@@ -49,6 +49,7 @@ const createGithubClient = () => ({
 
 const createTqClient = (): TqClient => ({
   createTask: vi.fn(() => okAsync(TQ_TASK_REF)),
+  findTaskByGithubUrl: vi.fn(() => okAsync(null)),
 })
 
 const createTestApp = (
@@ -322,6 +323,7 @@ describe('createApp with the real GitHub and Sentry sources', () => {
         taskCreationStarted.resolve(undefined)
         return ResultAsync.fromSafePromise(taskCreation.promise)
       }),
+      findTaskByGithubUrl: vi.fn(() => okAsync(null)),
     }
     const { notifier } = createNotifier()
     const app = createTestApp(notifier, sentryTqClient)

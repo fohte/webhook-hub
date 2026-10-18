@@ -1,6 +1,7 @@
 import { errAsync, okAsync } from 'neverthrow'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { GitHubClient } from '#github-client'
 import { TQ_ORIGINAL_CONTENT_KEY } from '#plugins/tq/alert-task-snapshot'
 import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import {
@@ -35,8 +36,14 @@ const createNotifier = () => ({
     .mockReturnValue(okAsync('FIMAGE')),
 })
 
-const createGithubClient = () => ({
-  findPullRequestForCommit: vi.fn().mockReturnValue(okAsync(null)),
+const createGithubClient = (
+  overrides: {
+    pullRequest?: ReturnType<GitHubClient['findPullRequestForCommit']>
+  } = {},
+) => ({
+  findPullRequestForCommit: vi
+    .fn()
+    .mockReturnValue(overrides.pullRequest ?? okAsync(null)),
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
 })
 
@@ -48,8 +55,12 @@ const TQ_WEB_URL = 'https://tq.fohte.net'
 
 const createTqClient = (
   result: ReturnType<TqClient['createTask']> = okAsync(TQ_TASK_REF),
+  originTask: ReturnType<TqClient['findTaskByGithubUrl']> = okAsync(null),
 ) => ({
   createTask: vi.fn().mockReturnValue(result),
+  findTaskByGithubUrl: vi
+    .fn<TqClient['findTaskByGithubUrl']>()
+    .mockReturnValue(originTask),
 })
 
 const workflowAlertContent = (options: {
@@ -194,12 +205,13 @@ const createContext = (
   notifier: DispatchContext['notifier'],
   tqClient = createTqClient(),
   tqWebUrl = TQ_WEB_URL,
+  githubClient = createGithubClient(),
 ): DispatchContext => ({
   deliveryId: 'delivery-1',
   event,
   notifier,
   activityChannel: '#github_activity',
-  githubClient: createGithubClient(),
+  githubClient,
   tqClient,
   tqWebUrl,
 })
@@ -218,6 +230,17 @@ const observeDispatch = <TOutcome, TTaskCalls>(
   taskCalls,
   postMessageCalls: normalizePostMessageCalls(postMessageCalls),
   findMessageCalls,
+})
+
+const observeWorkflowRunLookupFailure = (
+  outcome: DispatchOutcome,
+  tqClient: ReturnType<typeof createTqClient>,
+  notifier: ReturnType<typeof createNotifier>,
+) => ({
+  outcome,
+  taskCount: tqClient.createTask.mock.calls.length,
+  slackPostCount: notifier.postMessage.mock.calls.length,
+  lookupCalls: tqClient.findTaskByGithubUrl.mock.calls,
 })
 
 const observeWorkflowResolution = <TOutcome, TSearchCalls, TTaskCalls>(
@@ -601,6 +624,50 @@ fohte/example の main で CI が失敗している。
         ],
       ],
       findMessageCalls: 0,
+    })
+  })
+
+  it('creates the CI task and posts to Slack when the origin task lookup fails', async () => {
+    const notifier = createNotifier()
+    const pullRequestUrl = 'https://github.com/sample-owner/sample-repo/pull/73'
+    const tqClient = createTqClient(
+      okAsync(TQ_TASK_REF),
+      errAsync(new TqApiError('TQ API unavailable', undefined)),
+    )
+    const githubClient = createGithubClient({
+      pullRequest: okAsync({
+        number: 73,
+        title: 'Repair dependency metadata',
+        url: pullRequestUrl,
+      }),
+    })
+
+    const outcome = await dispatchOutcome(
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        TQ_WEB_URL,
+        githubClient,
+      ),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({
+          repo: 'sample-owner/sample-repo',
+          repoOwner: 'sample-owner',
+          repoName: 'sample-repo',
+          runUrl: 'https://github.com/sample-owner/sample-repo/actions/runs/1',
+        }),
+      },
+    )
+
+    expect(
+      observeWorkflowRunLookupFailure(outcome, tqClient, notifier),
+    ).toEqual({
+      outcome: 'notified',
+      taskCount: 1,
+      slackPostCount: 1,
+      lookupCalls: [[pullRequestUrl]],
     })
   })
 

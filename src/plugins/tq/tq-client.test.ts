@@ -90,6 +90,99 @@ describe('createTqClient', () => {
     )
   })
 
+  it('finds a task linked to a GitHub URL', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ task: taskResponse }), { status: 200 }),
+      )
+    const client = createTqClient('http://tq.example.test:3001/', fetchImpl)
+
+    const result = await client.findTaskByGithubUrl(
+      'https://github.com/sample-owner/sample-repo/pull/73',
+    )
+
+    expect(observeResult(result._unsafeUnwrap(), fetchImpl.mock.calls)).toEqual(
+      {
+        result: { id: '00000000-0000-4000-8000-000000000001', number: 42 },
+        requests: [
+          {
+            url: 'http://tq.example.test:3001/api/github/link?url=https%3A%2F%2Fgithub.com%2Fsample-owner%2Fsample-repo%2Fpull%2F73',
+            method: 'GET',
+            headers: { 'x-author': 'service:webhook-hub' },
+            body: null,
+            signal: 'timeout',
+          },
+        ],
+      },
+    )
+  })
+
+  it('returns null when a GitHub URL has no linked task', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ task: null }), { status: 200 }),
+      )
+    const client = createTqClient('http://tq.example.test:3001', fetchImpl)
+
+    const result = await client.findTaskByGithubUrl(
+      'https://github.com/sample-owner/sample-repo/pull/73',
+    )
+
+    expect(observeResult(result._unsafeUnwrap(), fetchImpl.mock.calls)).toEqual(
+      {
+        result: null,
+        requests: [
+          {
+            url: 'http://tq.example.test:3001/api/github/link?url=https%3A%2F%2Fgithub.com%2Fsample-owner%2Fsample-repo%2Fpull%2F73',
+            method: 'GET',
+            headers: { 'x-author': 'service:webhook-hub' },
+            body: null,
+            signal: 'timeout',
+          },
+        ],
+      },
+    )
+  })
+
+  it('returns an API error when GitHub URL lookup fails', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 503 }))
+    const client = createTqClient('http://tq.example.test:3001', fetchImpl)
+
+    const result = await client
+      .findTaskByGithubUrl(
+        'https://github.com/sample-owner/sample-repo/pull/73',
+      )
+      .match(
+        (value) => ({ ok: true as const, value }),
+        (error) => ({
+          ok: false as const,
+          name: error.name,
+          message: error.message,
+        }),
+      )
+
+    expect(observeResult(result, fetchImpl.mock.calls)).toEqual({
+      result: {
+        ok: false,
+        name: 'TqApiError',
+        message: 'TQ API returned HTTP 503',
+      },
+      requests: [
+        {
+          url: 'http://tq.example.test:3001/api/github/link?url=https%3A%2F%2Fgithub.com%2Fsample-owner%2Fsample-repo%2Fpull%2F73',
+          method: 'GET',
+          headers: { 'x-author': 'service:webhook-hub' },
+          body: null,
+          signal: 'timeout',
+        },
+      ],
+    })
+  })
+
   it('returns an API error when task creation fails', async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()

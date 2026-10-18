@@ -7,6 +7,7 @@ import {
   GitHubAuthError,
   type GitHubClient,
 } from '#github-client'
+import { TqApiError, type TqClient } from '#plugins/tq/tq-client'
 import type { SlackBlock } from '#slack'
 import type {
   WorkflowRunInput,
@@ -44,11 +45,17 @@ const createDeps = (
   overrides: {
     pullRequest?: ReturnType<GitHubClient['findPullRequestForCommit']>
     failedStep?: ReturnType<GitHubClient['findFailedStep']>
+    originTask?: ReturnType<TqClient['findTaskByGithubUrl']>
   } = {},
 ): WorkflowRunNotificationDeps & {
   githubClient: {
     findPullRequestForCommit: ReturnType<typeof vi.fn>
     findFailedStep: ReturnType<typeof vi.fn>
+  }
+  tqClient: {
+    findTaskByGithubUrl: ReturnType<
+      typeof vi.fn<TqClient['findTaskByGithubUrl']>
+    >
   }
 } => ({
   githubClient: {
@@ -58,6 +65,11 @@ const createDeps = (
     findFailedStep: vi
       .fn()
       .mockReturnValue(overrides.failedStep ?? okAsync(null)),
+  },
+  tqClient: {
+    findTaskByGithubUrl: vi
+      .fn<TqClient['findTaskByGithubUrl']>()
+      .mockReturnValue(overrides.originTask ?? okAsync(null)),
   },
 })
 
@@ -113,13 +125,17 @@ describe('buildWorkflowRunNotification', () => {
   it('links the merged PR title on a push run when one is found', async () => {
     const deps = createDeps({
       pullRequest: okAsync({
-        number: 128,
+        number: 73,
         title: 'Update infrastructure configuration',
-        url: 'https://github.com/example-owner/example-repo/pull/128',
+        url: 'https://github.com/example-owner/example-repo/pull/73',
       }),
       failedStep: okAsync({
         job: 'plan (production)',
         step: 'terraform plan @0123456789abcdef0123456789abcdef01234567',
+      }),
+      originTask: okAsync({
+        id: '00000000-0000-4000-8000-000000000073',
+        number: 73,
       }),
     })
 
@@ -133,7 +149,7 @@ describe('buildWorkflowRunNotification', () => {
           ['Repository', 'example-owner/example-repo'],
           [
             '起点の PR',
-            '<https://github.com/example-owner/example-repo/pull/128|#128 Update infrastructure configuration>',
+            '<https://github.com/example-owner/example-repo/pull/73|#73 Update infrastructure configuration>',
           ],
           [
             '失敗箇所',
@@ -145,7 +161,7 @@ describe('buildWorkflowRunNotification', () => {
 
 example-owner/example-repo の main で CI が失敗している。
 
-- 起点の PR: Update infrastructure configuration https://github.com/example-owner/example-repo/pull/128
+- 起点の PR: Update infrastructure configuration https://github.com/example-owner/example-repo/pull/73 (tq #73)
 - トリガー: push
 
 ## やること
@@ -153,6 +169,102 @@ example-owner/example-repo の main で CI が失敗している。
 失敗箇所を直す。
 
 - 失敗箇所: \`plan (production)\` › \`terraform plan\`
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+      ),
+    )
+  })
+
+  it('omits the tq task mention when the PR has no linked task', async () => {
+    const pullRequestUrl =
+      'https://github.com/example-owner/example-repo/pull/75'
+    const deps = createDeps({
+      pullRequest: okAsync({
+        number: 75,
+        title: 'Refresh package metadata',
+        url: pullRequestUrl,
+      }),
+      originTask: okAsync(null),
+    })
+
+    const result = await buildWorkflowRunNotification(baseInput(), deps)
+
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification(
+        'CI',
+        'example-owner/example-repo: CI が失敗',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          [
+            '起点の PR',
+            '<https://github.com/example-owner/example-repo/pull/75|#75 Refresh package metadata>',
+          ],
+          ['失敗箇所', '不明'],
+          ['トリガー', 'push'],
+        ],
+        `## なぜやるか
+
+example-owner/example-repo の main で CI が失敗している。
+
+- 起点の PR: Refresh package metadata https://github.com/example-owner/example-repo/pull/75
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: 不明
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+      ),
+    )
+  })
+
+  it('omits the tq task mention when the GitHub URL lookup fails', async () => {
+    const pullRequestUrl =
+      'https://github.com/example-owner/example-repo/pull/74'
+    const deps = createDeps({
+      pullRequest: okAsync({
+        number: 74,
+        title: 'Repair dependency metadata',
+        url: pullRequestUrl,
+      }),
+      originTask: errAsync(new TqApiError('TQ API unavailable', undefined)),
+    })
+
+    const result = await buildWorkflowRunNotification(baseInput(), deps)
+
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification(
+        'CI',
+        'example-owner/example-repo: CI が失敗',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          [
+            '起点の PR',
+            '<https://github.com/example-owner/example-repo/pull/74|#74 Repair dependency metadata>',
+          ],
+          ['失敗箇所', '不明'],
+          ['トリガー', 'push'],
+        ],
+        `## なぜやるか
+
+example-owner/example-repo の main で CI が失敗している。
+
+- 起点の PR: Repair dependency metadata https://github.com/example-owner/example-repo/pull/74
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: 不明
 - Run: https://github.com/example-owner/example-repo/actions/runs/42
 
 ## 完了条件
