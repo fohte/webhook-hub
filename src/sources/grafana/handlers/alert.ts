@@ -34,10 +34,7 @@ export interface GrafanaAlertNotification {
 const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 
-const normalizeTaskTitle = (value: string): string =>
-  truncate(value, 500).replace(/\s+/gu, ' ').trim()
-
-const normalizeTaskDetail = (value: string, maxLength: number): string =>
+const normalizeTaskText = (value: string, maxLength: number): string =>
   truncate(value.replace(/\s+/gu, ' ').trim(), maxLength)
 
 const renderTaskDetails = (
@@ -46,7 +43,7 @@ const renderTaskDetails = (
 ): string[] => {
   const lines = details.map(
     ([key, value]) =>
-      `- ${normalizeTaskDetail(key, TASK_DETAIL_KEY_MAX_LENGTH)}: ${normalizeTaskDetail(value, TASK_DETAIL_VALUE_MAX_LENGTH)}`,
+      `- ${normalizeTaskText(key, TASK_DETAIL_KEY_MAX_LENGTH)}: ${normalizeTaskText(value, TASK_DETAIL_VALUE_MAX_LENGTH)}`,
   )
   const result: string[] = []
   let length = 0
@@ -228,8 +225,8 @@ export const buildGrafanaAlertNotification = (
       ? undefined
       : truncate(rawSummary, 500)
   const normalizedSummary =
-    summary === undefined ? undefined : normalizeTaskTitle(summary)
-  const normalizedAlertName = normalizeTaskTitle(alertName)
+    rawSummary === undefined ? undefined : normalizeTaskText(rawSummary, 500)
+  const normalizedAlertName = normalizeTaskText(alertName, 500)
   const taskTitle =
     normalizedSummary === undefined || normalizedSummary === ''
       ? normalizedAlertName || 'Grafana alert'

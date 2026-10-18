@@ -174,6 +174,57 @@ describe('buildGrafanaAlertNotification', () => {
     })
   })
 
+  it('limits the alertname fallback title to 500 characters', () => {
+    const alertName = 'Queue'.repeat(101)
+    const expectedTaskTitle = `${'Queue'.repeat(99)}Queu…`
+    const expectedSlackHeader = `${'Queue'.repeat(29)}Queu…`
+
+    expect(
+      buildGrafanaAlertNotification({
+        status: 'firing',
+        labels: { alertname: alertName },
+        annotations: {},
+        fingerprint: 'fp-queue-title-limit',
+        startsAt: '2026-01-01T00:00:00Z',
+      }),
+    ).toEqual({
+      alertName,
+      content: {
+        text: alertName,
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: expectedSlackHeader },
+          },
+        ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
+      },
+      task: {
+        title: expectedTaskTitle,
+        description: [
+          '## なぜやるか',
+          '',
+          expectedTaskTitle,
+          '',
+          '- 開始: 2026-01-01 09:00 JST',
+          '',
+          '## やること',
+          '',
+          'グラフで状況を確かめ、原因を取り除く。',
+          '',
+          '## 完了条件',
+          '',
+          '- [ ] アラートが resolved になる',
+        ].join('\n'),
+        context: 'personal',
+        labels: ['alert/grafana'],
+      },
+      status: 'firing',
+    })
+  })
+
   it('keeps required sections when the query error is long', () => {
     const error = 'x'.repeat(4_001)
 
