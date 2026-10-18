@@ -123,6 +123,57 @@ describe('buildGrafanaAlertNotification', () => {
     })
   })
 
+  it('normalizes the alertname fallback when the summary is missing', () => {
+    const alertName =
+      'Queue pressure\n## Unexpected heading\n- [ ] Unexpected checklist'
+
+    expect(
+      buildGrafanaAlertNotification({
+        status: 'firing',
+        labels: { alertname: alertName },
+        annotations: {},
+        fingerprint: 'fp-queue-pressure',
+        startsAt: '2026-01-01T00:00:00Z',
+      }),
+    ).toEqual({
+      alertName,
+      content: {
+        text: alertName,
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: alertName },
+          },
+        ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
+      },
+      task: {
+        title:
+          'Queue pressure ## Unexpected heading - [ ] Unexpected checklist',
+        description: [
+          '## なぜやるか',
+          '',
+          'Queue pressure ## Unexpected heading - [ ] Unexpected checklist',
+          '',
+          '- 開始: 2026-01-01 09:00 JST',
+          '',
+          '## やること',
+          '',
+          'グラフで状況を確かめ、原因を取り除く。',
+          '',
+          '## 完了条件',
+          '',
+          '- [ ] アラートが resolved になる',
+        ].join('\n'),
+        context: 'personal',
+        labels: ['alert/grafana'],
+      },
+      status: 'firing',
+    })
+  })
+
   it('keeps required sections when the query error is long', () => {
     const error = 'x'.repeat(4_001)
 

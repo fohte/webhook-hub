@@ -34,6 +34,9 @@ export interface GrafanaAlertNotification {
 const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 
+const normalizeTaskTitle = (value: string): string =>
+  truncate(value, 500).replace(/\s+/gu, ' ').trim()
+
 const normalizeTaskDetail = (value: string, maxLength: number): string =>
   truncate(value.replace(/\s+/gu, ' ').trim(), maxLength)
 
@@ -224,10 +227,12 @@ export const buildGrafanaAlertNotification = (
     rawSummary === undefined || rawSummary === ''
       ? undefined
       : truncate(rawSummary, 500)
-  const normalizedSummary = summary?.replace(/\s+/gu, ' ').trim()
+  const normalizedSummary =
+    summary === undefined ? undefined : normalizeTaskTitle(summary)
+  const normalizedAlertName = normalizeTaskTitle(alertName)
   const taskTitle =
     normalizedSummary === undefined || normalizedSummary === ''
-      ? alertName
+      ? normalizedAlertName || 'Grafana alert'
       : normalizedSummary
   const content: SlackMessageContent = {
     text: [alertName, ...(summary === undefined ? [] : [summary])].join('\n'),
