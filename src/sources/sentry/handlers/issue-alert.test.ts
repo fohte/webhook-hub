@@ -489,7 +489,16 @@ describe('buildIssueAlertNotification', () => {
 
   it('truncates a long cause row to fit a Slack section block', () => {
     expect(
-      buildIssueAlertNotification(baseInput({ causes: ['&'.repeat(1000)] })),
+      buildIssueAlertNotification(
+        baseInput({
+          causes: [
+            '&'.repeat(1000),
+            'SecondFault: retry failed',
+            'ThirdFault: connection closed',
+            'FourthFault: timeout',
+          ],
+        }),
+      ),
     ).toEqual({
       content: {
         text: ISSUE_TITLE,
@@ -556,7 +565,10 @@ describe('buildIssueAlertNotification', () => {
           '- Handled: `handled`',
           '- Request: `GET /api/widgets`',
           '- Causes:',
-          `  - \`${'&'.repeat(1000)}\``,
+          `  - \`${'&'.repeat(699)}…\``,
+          '  - `SecondFault: retry failed`',
+          '  - `ThirdFault: connection closed`',
+          '  - (additional causes omitted)',
           '- Stacktrace:',
           '',
           '  ```',
@@ -637,9 +649,9 @@ describe('buildIssueAlertNotification', () => {
           '発生箇所の原因を調べて直す。',
           '',
           '- 発生箇所: `src/widgets/read.ts in readWidget`',
-          `- Environment: \`${environment}\``,
-          `- Handled: \`${handled}\``,
-          `- Request: \`GET ${requestUrl}\``,
+          `- Environment: \`${'e'.repeat(699)}…\``,
+          `- Handled: \`${'h'.repeat(699)}…\``,
+          `- Request: \`GET /${'p'.repeat(694)}…\``,
           '',
           '## 完了条件',
           '',
@@ -757,9 +769,10 @@ describe('buildIssueAlertNotification', () => {
     })
   })
 
-  it('truncates a long title to fit a Slack header block', () => {
-    const title = 'WidgetReadFault '.repeat(12)
+  it('truncates a long title in the Slack header and task description', () => {
+    const title = 'WidgetReadFault '.repeat(50)
     const headerText = `${title.slice(0, 149)}…`
+    const taskDescriptionTitle = `${title.slice(0, 699)}…`
 
     expect(buildIssueAlertNotification(baseInput({ title }))).toEqual({
       content: {
@@ -813,7 +826,7 @@ describe('buildIssueAlertNotification', () => {
         description: [
           '## なぜやるか',
           '',
-          `widget-service で \`${title}\` が発生している。`,
+          `widget-service で \`${taskDescriptionTitle}\` が発生している。`,
           '',
           '- Level: error',
           '- Rule: widget failures',
@@ -850,32 +863,38 @@ describe('buildIssueAlertNotification', () => {
     })
   })
 
-  it('escapes Slack mrkdwn characters in event details', () => {
+  it('renders event details with safe Slack and task Markdown delimiters', () => {
+    const title = '`WidgetReadFault`\nretrying`'
     expect(
       buildIssueAlertNotification(
         baseInput({
+          title,
+          culprit: 'src/widgets/readWidget\nin readWidget`',
           environment: 'stage<&',
-          causes: ['WidgetFetchFault: value < 5 & retry'],
+          causes: [
+            'WidgetFetchFault: value < 5 & retry',
+            '`RemoteNodeFault`\nconnection refused',
+          ],
           stacktraceFrames: [
             {
               in_app: true,
-              filename: 'src/widgets/`read`.ts',
+              filename: 'src/widgets/```read```.ts',
               lineno: 23,
-              context_line: 'return `item` < max && ready',
+              context_line: 'return ```item``` < max\n && ready',
             },
           ],
         }),
       ),
     ).toEqual({
       content: {
-        text: ISSUE_TITLE,
+        text: title,
         color: '#d73a49',
         username: 'Sentry',
         iconUrl: 'https://avatars.githubusercontent.com/u/1396951?v=4',
         blocks: [
           {
             type: 'header',
-            text: { type: 'plain_text', text: ISSUE_TITLE },
+            text: { type: 'plain_text', text: title },
           },
           {
             type: 'section',
@@ -888,7 +907,7 @@ describe('buildIssueAlertNotification', () => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '原因: WidgetFetchFault: value &lt; 5 &amp; retry',
+              text: '原因: WidgetFetchFault: value &lt; 5 &amp; retry › `RemoteNodeFault`\nconnection refused',
             },
           },
           {
@@ -897,7 +916,7 @@ describe('buildIssueAlertNotification', () => {
               type: 'mrkdwn',
               text: [
                 '```',
-                'src/widgets/ˋreadˋ.ts:23  return ˋitemˋ &lt; max &amp;&amp; ready',
+                'src/widgets/ˋˋˋreadˋˋˋ.ts:23  return ˋˋˋitemˋˋˋ &lt; max &amp;&amp; ready',
                 '```',
               ].join('\n'),
             },
@@ -914,11 +933,11 @@ describe('buildIssueAlertNotification', () => {
         ],
       },
       task: {
-        title: `widget-service: ${ISSUE_TITLE}`,
+        title: `widget-service: ${title}`,
         description: [
           '## なぜやるか',
           '',
-          `widget-service で \`${ISSUE_TITLE}\` が発生している。`,
+          'widget-service で `` `WidgetReadFault` retrying` `` が発生している。',
           '',
           '- Level: error',
           '- Rule: widget failures',
@@ -927,17 +946,18 @@ describe('buildIssueAlertNotification', () => {
           '',
           '発生箇所の原因を調べて直す。',
           '',
-          '- 発生箇所: `src/widgets/read.ts in readWidget`',
+          '- 発生箇所: `` src/widgets/readWidget in readWidget` ``',
           '- Environment: `stage<&`',
           '- Handled: `handled`',
           '- Request: `GET /api/widgets`',
           '- Causes:',
           '  - `WidgetFetchFault: value < 5 & retry`',
+          '  - `` `RemoteNodeFault` connection refused ``',
           '- Stacktrace:',
           '',
-          '  ```',
-          '  src/widgets/`read`.ts:23  return `item` < max && ready',
-          '  ```',
+          '  ````',
+          '  src/widgets/```read```.ts:23  return ```item``` < max && ready',
+          '  ````',
           `- Issue: ${ISSUE_URL}`,
           '',
           '## 完了条件',
@@ -947,7 +967,7 @@ describe('buildIssueAlertNotification', () => {
         context: 'personal',
         labels: ['alert/sentry', 'dev/widget-service'],
       },
-      title: ISSUE_TITLE,
+      title,
       level: 'error',
       webUrl: ISSUE_URL,
       triggeredRule: 'widget failures',
