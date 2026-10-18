@@ -11,6 +11,7 @@ import {
 } from '#github-client'
 import { logger } from '#logger'
 import type { CreateTaskRequest } from '#plugins/tq/generated/tq-contract'
+import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
@@ -44,6 +45,7 @@ export interface WorkflowRunNotification {
 
 export interface WorkflowRunNotificationDeps {
   githubClient: GitHubClient
+  tqClient: Pick<TqClient, 'findTaskByGithubUrl'>
 }
 
 export const extractWorkflowRunInput = (
@@ -160,12 +162,17 @@ const formatTaskDescriptionCode = (text: string): string => {
   return `${delimiter}${content}${delimiter}`
 }
 
-const buildTaskOrigin = (origin: WorkflowOrigin): string => {
+const buildTaskOrigin = (
+  origin: WorkflowOrigin,
+  originTask: TqTaskRef | null,
+): string => {
   if (origin === null) return 'なし'
   if (origin.type === 'text') return formatTaskDescriptionText(origin.value)
 
   const { title, url } = origin.pullRequest
-  return `${formatTaskDescriptionText(title)} ${url}`
+  const taskMention =
+    originTask === null ? '' : ` (tq #${String(originTask.number)})`
+  return `${formatTaskDescriptionText(title)} ${url}${taskMention}`
 }
 
 interface WorkflowTriggerLabels {
@@ -205,6 +212,7 @@ const buildTaskDescription = (
   input: WorkflowRunInput,
   failedStep: FailedStep | null,
   origin: WorkflowOrigin,
+  originTask: TqTaskRef | null,
   trigger: string,
 ): string => {
   const repo = formatTaskDescriptionText(input.repo)
@@ -220,7 +228,7 @@ const buildTaskDescription = (
     '',
     `${repo} の ${branch} で ${workflow} が失敗している。`,
     '',
-    `- 起点の PR: ${buildTaskOrigin(origin)}`,
+    `- 起点の PR: ${buildTaskOrigin(origin, originTask)}`,
     `- トリガー: ${trigger}`,
     '',
     '## やること',
@@ -244,6 +252,7 @@ const formatWorkflowRunNotification = (
   input: WorkflowRunInput,
   failedStep: FailedStep | null,
   pullRequest: PullRequestSummary | null,
+  originTask: TqTaskRef | null,
 ): WorkflowRunNotification => {
   const workflowName = normalizeTextLine(input.workflow)
   const headerText = truncateHeaderText(`🚨 ${input.workflow} failed`)
@@ -298,6 +307,7 @@ const formatWorkflowRunNotification = (
         input,
         failedStep,
         origin,
+        originTask,
         triggerLabels.task,
       ),
       context: 'personal',
@@ -307,6 +317,22 @@ const formatWorkflowRunNotification = (
     workflow: input.workflow,
     url: input.url,
   }
+}
+
+const lookupOriginTask = (
+  input: WorkflowRunInput,
+  pullRequest: PullRequestSummary | null,
+  tqClient: WorkflowRunNotificationDeps['tqClient'],
+): ResultAsync<TqTaskRef | null, never> => {
+  if (input.event !== 'push' || pullRequest === null) return okAsync(null)
+
+  return tqClient.findTaskByGithubUrl(pullRequest.url).orElse((error) => {
+    logger.warn(
+      { err: error, repo: input.repo, url: pullRequest.url },
+      'tq_github_link_lookup_failed',
+    )
+    return okAsync(null)
+  })
 }
 
 export const buildWorkflowRunNotification = (
@@ -352,6 +378,10 @@ export const buildWorkflowRunNotification = (
       : okAsync(null)
 
   return failedStep.andThen((step) =>
-    pullRequest.map((pr) => formatWorkflowRunNotification(input, step, pr)),
+    pullRequest.andThen((pr) =>
+      lookupOriginTask(input, pr, deps.tqClient).map((originTask) =>
+        formatWorkflowRunNotification(input, step, pr, originTask),
+      ),
+    ),
   )
 }

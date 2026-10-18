@@ -176,6 +176,7 @@ export const dispatch = (
       }
       return buildWorkflowRunNotification(input, {
         githubClient: ctx.githubClient,
+        tqClient: ctx.tqClient,
       }).andThen((note) => {
         if (note === null) return okAsync<DispatchOutcome>('filtered')
         return createAlertTask(ctx.tqClient, note.task, {
