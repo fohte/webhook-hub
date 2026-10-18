@@ -139,16 +139,28 @@ const existingSentryContent = (): SlackMessageContent => ({
 })
 
 const expectedTaskRequest = {
-  title: `Sentry alert: ${ISSUE_TITLE}`,
+  title: `widget-service: ${ISSUE_TITLE}`,
   description: [
-    'Application: widget-service',
-    `Issue: ${ISSUE_TITLE}`,
-    'Level: error',
-    'Location: src/widgets/read.ts in readWidget',
-    'Rule: widget failures',
-    `Issue URL: ${ISSUE_URL}`,
+    '## なぜやるか',
+    '',
+    `widget-service で \`${ISSUE_TITLE}\` が発生している。`,
+    '',
+    '- Level: error',
+    '- Rule: widget failures',
+    '',
+    '## やること',
+    '',
+    '発生箇所の原因を調べて直す。',
+    '',
+    '- 発生箇所: `src/widgets/read.ts in readWidget`',
+    `- Issue: ${ISSUE_URL}`,
+    '',
+    '## 完了条件',
+    '',
+    '- [ ] Sentry の issue が resolved になる',
   ].join('\n'),
   context: 'personal',
+  labels: ['alert/sentry', 'dev/widget-service'],
 }
 
 const expectedSourceContent = {
@@ -256,9 +268,22 @@ describe('dispatch', () => {
       taskCalls: [
         [
           {
-            title: 'Sentry alert: Sentry issue alert',
-            description: 'Issue: Sentry issue alert',
+            title: 'Sentry: Sentry issue alert',
+            description: [
+              '## なぜやるか',
+              '',
+              'Sentry で `Sentry issue alert` が発生している。',
+              '',
+              '## やること',
+              '',
+              '発生箇所の原因を調べて直す。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] Sentry の issue が resolved になる',
+            ].join('\n'),
             context: 'personal',
+            labels: ['alert/sentry'],
           },
         ],
       ],
