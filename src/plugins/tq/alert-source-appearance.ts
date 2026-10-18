@@ -13,6 +13,25 @@ import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 
 const RESOLVED_SOURCE_COLOR = '#2eb67d'
 
+// Preserve :emoji: names so their underscores remain part of the shortcode.
+const neutralizeHeadingMarkup = (title: string): string =>
+  title.replace(/(:[a-z0-9_+-]+:)|[~*_`]/giu, (marker) => {
+    if (marker.startsWith(':')) return marker
+
+    switch (marker) {
+      case '~':
+        return '∼'
+      case '*':
+        return '∗'
+      case '_':
+        return '＿'
+      case '`':
+        return 'ˋ'
+      default:
+        return marker
+    }
+  })
+
 const toOriginalContent = (
   content: SlackMessageContent,
 ): TqOriginalContent => ({
@@ -42,13 +61,7 @@ const makeResolvedAppearance = (
   content: TqOriginalContent,
 ): TqOriginalContent => {
   const rawTitle = readTitle(content)
-  const title = escapeSlackMrkdwn(
-    rawTitle
-      .replace(/~/g, '∼')
-      .replace(/\*/g, '∗')
-      .replace(/_/g, '＿')
-      .replace(/`/g, 'ˋ'),
-  )
+  const title = escapeSlackMrkdwn(neutralizeHeadingMarkup(rawTitle))
   const heading = `*~${title}~*`
   const linkBlocks = readLinkBlocks(content.blocks ?? [])
   const linkText = linkBlocks.flatMap((block) =>
