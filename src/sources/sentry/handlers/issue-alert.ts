@@ -83,7 +83,6 @@ const CONTEXT_VALUE_MAX_LENGTH = 700
 // Three capped frame lines and the surrounding code fences stay below the section limit.
 const STACKTRACE_FRAME_LIMIT = 3
 const STACKTRACE_LINE_MAX_LENGTH = 996
-const TASK_CAUSE_LIMIT = 3
 
 const extractProjectSlug = (eventUrl: string | null | undefined): string =>
   eventUrl?.split('/projects/')[1]?.split('/')[1] ?? ''
@@ -248,7 +247,7 @@ const renderTaskStacktrace = (
   const fence = '`'.repeat(
     Math.max(3, ...lines.map((line) => getLongestBacktickSequence(line) + 1)),
   )
-  return `- Stacktrace:\n\n  ${fence}\n${lines
+  return `- Stacktrace:\n  ${fence}\n${lines
     .map((line) => `  ${line}`)
     .join('\n')}\n  ${fence}`
 }
@@ -257,8 +256,10 @@ const buildTaskDescription = (input: IssueAlertInput): string => {
   const app = getTaskAppName(input.app)
   const request = renderRequest(input.requestMethod, input.requestUrl)
   const reasonDetails = [
-    input.level === '' ? undefined : `- Level: ${input.level}`,
-    input.triggeredRule === '' ? undefined : `- Rule: ${input.triggeredRule}`,
+    input.level === '' ? undefined : `- Level: ${renderTaskCode(input.level)}`,
+    input.triggeredRule === ''
+      ? undefined
+      : `- Rule: ${renderTaskCode(input.triggeredRule)}`,
   ].filter((line): line is string => line !== undefined)
   const workDetails = [
     input.culprit === ''
@@ -274,13 +275,7 @@ const buildTaskDescription = (input: IssueAlertInput): string => {
     input.causes.length === 0
       ? undefined
       : `- Causes:\n${input.causes
-          .slice(0, TASK_CAUSE_LIMIT)
           .map((cause) => `  - ${renderTaskCode(cause)}`)
-          .concat(
-            input.causes.length > TASK_CAUSE_LIMIT
-              ? ['  - (additional causes omitted)']
-              : [],
-          )
           .join('\n')}`,
     renderTaskStacktrace(input.stacktraceFrames),
     input.webUrl === '' ? undefined : `- Issue: ${input.webUrl}`,
@@ -409,7 +404,7 @@ export const buildIssueAlertNotification = (
   return {
     content,
     task: {
-      title: `${app}: ${input.title}`,
+      title: `${app}: ${normalizeTaskText(input.title)}`,
       description: buildTaskDescription(input),
       context: 'personal',
       labels: getTaskLabels(input.app),
