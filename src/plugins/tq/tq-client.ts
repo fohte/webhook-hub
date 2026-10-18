@@ -1,4 +1,5 @@
 import { errAsync, okAsync, ResultAsync } from 'neverthrow'
+import type { ZodType } from 'zod'
 
 import { BoundaryError } from '#errors'
 import {
@@ -19,6 +20,43 @@ export interface TqClient {
 
 const TQ_REQUEST_TIMEOUT_MS = 10_000
 
+const requestJson = <T>(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  schema: ZodType<T>,
+  invalidResponseMessage: string,
+): ResultAsync<T, TqApiError> =>
+  ResultAsync.fromPromise(
+    Promise.resolve().then(() =>
+      fetchImpl(url, {
+        ...init,
+        signal: AbortSignal.timeout(TQ_REQUEST_TIMEOUT_MS),
+      }),
+    ),
+    (cause) => new TqApiError('TQ API request failed', cause),
+  ).andThen((response) => {
+    if (!response.ok) {
+      return errAsync(
+        new TqApiError(
+          `TQ API returned HTTP ${String(response.status)}`,
+          undefined,
+        ),
+      )
+    }
+
+    return ResultAsync.fromPromise(
+      response.json(),
+      (cause) => new TqApiError('TQ API returned malformed JSON', cause),
+    ).andThen((body) => {
+      const parsed = schema.safeParse(body)
+      if (!parsed.success) {
+        return errAsync(new TqApiError(invalidResponseMessage, parsed.error))
+      }
+      return okAsync(parsed.data)
+    })
+  })
+
 export const createTqClient = (
   apiUrl: string,
   fetchImpl: typeof fetch = fetch,
@@ -28,88 +66,33 @@ export const createTqClient = (
 
   return {
     createTask(request) {
-      return ResultAsync.fromPromise(
-        Promise.resolve().then(() =>
-          fetchImpl(tasksUrl, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'x-author': 'service:webhook-hub',
-            },
-            body: JSON.stringify(request),
-            signal: AbortSignal.timeout(TQ_REQUEST_TIMEOUT_MS),
-          }),
-        ),
-        (cause) => new TqApiError('TQ API request failed', cause),
-      ).andThen((response) => {
-        if (!response.ok) {
-          return errAsync(
-            new TqApiError(
-              `TQ API returned HTTP ${String(response.status)}`,
-              undefined,
-            ),
-          )
-        }
-
-        return ResultAsync.fromPromise(
-          response.json(),
-          (cause) => new TqApiError('TQ API returned malformed JSON', cause),
-        ).andThen((body) => {
-          const parsed = CreateTaskResponse.safeParse(body)
-          if (!parsed.success) {
-            return errAsync(
-              new TqApiError(
-                'TQ API returned an invalid task response',
-                parsed.error,
-              ),
-            )
-          }
-          return okAsync({ id: parsed.data.id, number: parsed.data.number })
-        })
-      })
+      return requestJson(
+        fetchImpl,
+        tasksUrl,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-author': 'service:webhook-hub',
+          },
+          body: JSON.stringify(request),
+        },
+        CreateTaskResponse,
+        'TQ API returned an invalid task response',
+      ).map(({ id, number }) => ({ id, number }))
     },
     findTaskByGithubUrl(url) {
       const lookupUrl = `${apiBaseUrl}/api/github/link?url=${encodeURIComponent(url)}`
 
-      return ResultAsync.fromPromise(
-        Promise.resolve().then(() =>
-          fetchImpl(lookupUrl, {
-            method: 'GET',
-            headers: { 'x-author': 'service:webhook-hub' },
-            signal: AbortSignal.timeout(TQ_REQUEST_TIMEOUT_MS),
-          }),
-        ),
-        (cause) => new TqApiError('TQ API request failed', cause),
-      ).andThen((response) => {
-        if (!response.ok) {
-          return errAsync(
-            new TqApiError(
-              `TQ API returned HTTP ${String(response.status)}`,
-              undefined,
-            ),
-          )
-        }
-
-        return ResultAsync.fromPromise(
-          response.json(),
-          (cause) => new TqApiError('TQ API returned malformed JSON', cause),
-        ).andThen((body) => {
-          const parsed = GithubLinkLookupResponse.safeParse(body)
-          if (!parsed.success) {
-            return errAsync(
-              new TqApiError(
-                'TQ API returned an invalid GitHub link response',
-                parsed.error,
-              ),
-            )
-          }
-
-          const task = parsed.data.task
-          return okAsync(
-            task === null ? null : { id: task.id, number: task.number },
-          )
-        })
-      })
+      return requestJson(
+        fetchImpl,
+        lookupUrl,
+        { method: 'GET', headers: { 'x-author': 'service:webhook-hub' } },
+        GithubLinkLookupResponse,
+        'TQ API returned an invalid GitHub link response',
+      ).map(({ task }) =>
+        task === null ? null : { id: task.id, number: task.number },
+      )
     },
   }
 }
