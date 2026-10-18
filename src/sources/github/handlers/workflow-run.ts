@@ -153,7 +153,11 @@ const formatTaskDescriptionCode = (text: string): string => {
   const delimiter = '`'.repeat(
     Math.max(1, ...backtickSequences.map((sequence) => sequence.length + 1)),
   )
-  return `${delimiter}${normalizedText}${delimiter}`
+  const content =
+    normalizedText.startsWith('`') || normalizedText.endsWith('`')
+      ? ` ${normalizedText} `
+      : normalizedText
+  return `${delimiter}${content}${delimiter}`
 }
 
 const buildTaskOrigin = (origin: WorkflowOrigin): string => {

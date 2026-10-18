@@ -543,6 +543,47 @@ example-owner/example-repo の main で CI が失敗している。
     )
   })
 
+  it('formats names with leading and trailing backticks as code spans', async () => {
+    const deps = createDeps({
+      failedStep: okAsync({
+        job: '`example-job',
+        step: 'Run example checks`',
+      }),
+    })
+
+    const result = await buildWorkflowRunNotification(baseInput(), deps)
+
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification(
+        'CI',
+        'example-owner/example-repo: CI が失敗',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'fix: something'],
+          ['失敗箇所', '``example-job` › `Run example checks``'],
+          ['トリガー', 'push'],
+        ],
+        `## なぜやるか
+
+example-owner/example-repo の main で CI が失敗している。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: \`\` \`example-job \`\` › \`\` Run example checks\` \`\`
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+      ),
+    )
+  })
+
   it('normalizes line breaks in workflow, commit, job, and step names', async () => {
     const deps = createDeps({
       failedStep: okAsync({
