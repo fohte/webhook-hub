@@ -55,6 +55,67 @@ const TASK_ATTACHMENT = {
 }
 
 describe('setSourceAlertResolved', () => {
+  const sourceContentWithTitle = (title: string): SlackMessageContent => ({
+    ...SOURCE_CONTENT,
+    blocks: (SOURCE_CONTENT.blocks ?? []).map((block) =>
+      block.type === 'header'
+        ? { ...block, text: { ...block.text, text: title } }
+        : block,
+    ),
+  })
+
+  it.each([
+    {
+      title: 'Build :example_emoji: completed',
+      expectedHeading: '*~Build :example_emoji: completed~*',
+    },
+    {
+      title: 'Build workflow_name *failed* ~today~ `syntax`',
+      expectedHeading: '*~Build workflow＿name ∗failed∗ ∼today∼ ˋsyntaxˋ~*',
+    },
+  ])(
+    'formats a resolved heading from "$title"',
+    ({ title, expectedHeading }) => {
+      const sourceContent: SlackMessageContent = {
+        ...sourceContentWithTitle(title),
+        metadata: TASK_METADATA,
+      }
+
+      expect(
+        normalizeTqOriginalContentSnapshot(
+          setSourceAlertResolved(sourceContent, true),
+        ),
+      ).toEqual({
+        text: `${expectedHeading}\n<https://alerts.example.test/1|View alert>`,
+        color: '#2eb67d',
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: expectedHeading },
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://alerts.example.test/1|View alert>',
+              },
+            ],
+          },
+        ],
+        metadata: {
+          event_type: 'alert_task',
+          event_payload: {
+            task_id: 'task-example-id',
+            tq_original_content_v1: expectedTqOriginalContentSnapshot(
+              sourceContentWithTitle(title),
+            ),
+          },
+        },
+      })
+    },
+  )
+
   it('folds only the source attachment and restores it from the snapshot', () => {
     const content: SlackMessageContent = {
       ...SOURCE_CONTENT,

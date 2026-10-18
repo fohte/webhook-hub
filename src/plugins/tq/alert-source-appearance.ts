@@ -43,11 +43,19 @@ const makeResolvedAppearance = (
 ): TqOriginalContent => {
   const rawTitle = readTitle(content)
   const title = escapeSlackMrkdwn(
+    // Underscores inside :emoji: shortcodes are part of the shortcode name.
     rawTitle
-      .replace(/~/g, '∼')
-      .replace(/\*/g, '∗')
-      .replace(/_/g, '＿')
-      .replace(/`/g, 'ˋ'),
+      .split(/(:[a-z0-9_+-]+:)/giu)
+      .map((part, index) =>
+        index % 2 === 0
+          ? part
+              .replace(/~/g, '∼')
+              .replace(/\*/g, '∗')
+              .replace(/_/g, '＿')
+              .replace(/`/g, 'ˋ')
+          : part,
+      )
+      .join(''),
   )
   const heading = `*~${title}~*`
   const linkBlocks = readLinkBlocks(content.blocks ?? [])
