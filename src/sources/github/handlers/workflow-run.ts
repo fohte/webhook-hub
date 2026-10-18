@@ -134,7 +134,8 @@ const buildOriginLine = (origin: WorkflowOrigin): string | null => {
   return `<${url}|#${String(number)} ${escapeSlackMrkdwn(title)}>`
 }
 
-const formatTaskText = (text: string): string =>
+// CommonMark can parse these characters as HTML markup or entities in TQ descriptions.
+const formatTaskDescriptionText = (text: string): string =>
   text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -143,50 +144,57 @@ const formatTaskText = (text: string): string =>
 
 const buildTaskOrigin = (origin: WorkflowOrigin): string => {
   if (origin === null) return 'なし'
-  if (origin.type === 'text') return formatTaskText(origin.value)
+  if (origin.type === 'text') return formatTaskDescriptionText(origin.value)
 
   const { title, url } = origin.pullRequest
-  return `${formatTaskText(title)} ${url}`
+  return `${formatTaskDescriptionText(title)} ${url}`
 }
 
-const buildTriggerLabel = (
-  input: WorkflowRunInput,
-  format: 'slack' | 'task' = 'slack',
-): string => {
+interface WorkflowTriggerLabels {
+  slack: string
+  task: string
+}
+
+const buildTriggerLabels = (input: WorkflowRunInput): WorkflowTriggerLabels => {
   switch (input.event) {
     case 'push':
-      return 'push'
+      return { slack: 'push', task: 'push' }
     case 'schedule':
-      return '定期実行'
+      return { slack: '定期実行', task: '定期実行' }
     case 'workflow_dispatch':
-      return format === 'slack'
-        ? `\`@${escapeSlackMrkdwn(input.triggeringActor)}\` が手動実行`
-        : `@${formatTaskText(input.triggeringActor)} が手動実行`
+      return {
+        slack: `\`@${escapeSlackMrkdwn(input.triggeringActor)}\` が手動実行`,
+        task: `@${formatTaskDescriptionText(input.triggeringActor)} が手動実行`,
+      }
     default:
-      return format === 'slack'
-        ? `\`${escapeSlackMrkdwn(input.event)}\` 起因`
-        : `${formatTaskText(input.event)} 起因`
+      return {
+        slack: `\`${escapeSlackMrkdwn(input.event)}\` 起因`,
+        task: `${formatTaskDescriptionText(input.event)} 起因`,
+      }
   }
 }
 
-const stripStepSha = (step: string): string =>
-  step
+const stripStepSha = (step: string): string => {
+  const strippedStep = step
     .replace(/@[0-9a-f]{7,40}\b/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
+  return strippedStep === '' ? step : strippedStep
+}
 
 const buildTaskDescription = (
   input: WorkflowRunInput,
   failedStep: FailedStep | null,
   origin: WorkflowOrigin,
+  trigger: string,
 ): string => {
-  const repo = formatTaskText(input.repo)
-  const branch = formatTaskText(input.defaultBranch)
-  const workflow = formatTaskText(input.workflow)
+  const repo = formatTaskDescriptionText(input.repo)
+  const branch = formatTaskDescriptionText(input.defaultBranch)
+  const workflow = formatTaskDescriptionText(input.workflow)
   const failedStepDescription =
     failedStep === null
       ? '不明'
-      : `${formatTaskText(failedStep.job)} / ${formatTaskText(stripStepSha(failedStep.step))}`
+      : `${formatTaskDescriptionText(failedStep.job)} / ${formatTaskDescriptionText(stripStepSha(failedStep.step))}`
 
   return [
     '## なぜやるか',
@@ -194,7 +202,7 @@ const buildTaskDescription = (
     `${repo} の ${branch} で ${workflow} が失敗している。`,
     '',
     `- 起点: ${buildTaskOrigin(origin)}`,
-    `- トリガー: ${buildTriggerLabel(input, 'task')}`,
+    `- トリガー: ${trigger}`,
     '',
     '## やること',
     '',
@@ -221,6 +229,7 @@ const formatWorkflowRunNotification = (
   const headerText = truncateHeaderText(`🚨 ${input.workflow} failed`)
   const origin = resolveWorkflowOrigin(input, pullRequest)
   const originLine = buildOriginLine(origin)
+  const triggerLabels = buildTriggerLabels(input)
   const failedStepValue =
     failedStep === null
       ? null
@@ -245,7 +254,7 @@ const formatWorkflowRunNotification = (
         },
         {
           type: 'mrkdwn',
-          text: `*トリガー*\n${buildTriggerLabel(input)}`,
+          text: `*トリガー*\n${triggerLabels.slack}`,
         },
       ],
     },
@@ -264,8 +273,13 @@ const formatWorkflowRunNotification = (
       iconUrl: GITHUB_CI_ICON_URL,
     },
     task: {
-      title: `${formatTaskText(input.repo)}: ${formatTaskText(input.workflow)} が失敗`,
-      description: buildTaskDescription(input, failedStep, origin),
+      title: `${input.repo}: ${input.workflow} が失敗`,
+      description: buildTaskDescription(
+        input,
+        failedStep,
+        origin,
+        triggerLabels.task,
+      ),
       context: 'personal',
       labels: ['alert/ci', `dev/${input.repoName}`],
     },

@@ -83,52 +83,65 @@ const expectedNotification = (
   workflow: string,
   fields: [string, string][],
   failedStep: { job: string; step: string } | null = null,
-  taskOrigin = 'fix: something',
-  taskTrigger = 'push',
-  taskFailedStep?: string,
-  defaultBranch = 'main',
-) => ({
-  content: {
-    text: `🚨 ${workflow} failed`,
-    color: '#d73a49',
-    blocks: [
-      headerBlock(`🚨 ${workflow} failed`),
-      fieldsBlock(fields),
-      contextBlock(
-        '<https://github.com/example-owner/example-repo/actions/runs/42|View run>',
-      ),
-    ],
-    username: 'GitHub CI',
-    iconUrl: 'https://avatars.githubusercontent.com/in/15368',
-  },
-  task: {
-    title: `example-owner/example-repo: ${workflow} が失敗`,
-    description: [
-      '## なぜやるか',
-      '',
-      `example-owner/example-repo の ${defaultBranch} で ${workflow} が失敗している。`,
-      '',
-      `- 起点: ${taskOrigin}`,
-      `- トリガー: ${taskTrigger}`,
-      '',
-      '## やること',
-      '',
-      '失敗箇所を直す。',
-      '',
-      `- 失敗箇所: ${taskFailedStep ?? (failedStep === null ? '不明' : `${failedStep.job} / ${failedStep.step}`)}`,
-      '- Run: https://github.com/example-owner/example-repo/actions/runs/42',
-      '',
-      '## 完了条件',
-      '',
-      `- [ ] ${defaultBranch} の ${workflow} が成功する`,
-    ].join('\n'),
-    context: 'personal',
-    labels: ['alert/ci', 'dev/example-repo'],
-  },
-  repo: 'example-owner/example-repo',
-  workflow,
-  url: 'https://github.com/example-owner/example-repo/actions/runs/42',
-})
+  options: {
+    taskOrigin?: string
+    taskTrigger?: string
+    taskFailedStep?: string
+    defaultBranch?: string
+    taskDescriptionWorkflow?: string
+  } = {},
+) => {
+  const {
+    taskOrigin = 'fix: something',
+    taskTrigger = 'push',
+    taskFailedStep,
+    defaultBranch = 'main',
+    taskDescriptionWorkflow = workflow,
+  } = options
+
+  return {
+    content: {
+      text: `🚨 ${workflow} failed`,
+      color: '#d73a49',
+      blocks: [
+        headerBlock(`🚨 ${workflow} failed`),
+        fieldsBlock(fields),
+        contextBlock(
+          '<https://github.com/example-owner/example-repo/actions/runs/42|View run>',
+        ),
+      ],
+      username: 'GitHub CI',
+      iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+    },
+    task: {
+      title: `example-owner/example-repo: ${workflow} が失敗`,
+      description: [
+        '## なぜやるか',
+        '',
+        `example-owner/example-repo の ${defaultBranch} で ${taskDescriptionWorkflow} が失敗している。`,
+        '',
+        `- 起点: ${taskOrigin}`,
+        `- トリガー: ${taskTrigger}`,
+        '',
+        '## やること',
+        '',
+        '失敗箇所を直す。',
+        '',
+        `- 失敗箇所: ${taskFailedStep ?? (failedStep === null ? '不明' : `${failedStep.job} / ${failedStep.step}`)}`,
+        '- Run: https://github.com/example-owner/example-repo/actions/runs/42',
+        '',
+        '## 完了条件',
+        '',
+        `- [ ] ${defaultBranch} の ${taskDescriptionWorkflow} が成功する`,
+      ].join('\n'),
+      context: 'personal',
+      labels: ['alert/ci', 'dev/example-repo'],
+    },
+    repo: 'example-owner/example-repo',
+    workflow,
+    url: 'https://github.com/example-owner/example-repo/actions/runs/42',
+  }
+}
 
 describe('buildWorkflowRunNotification', () => {
   it('links the merged PR title on a push run when one is found', async () => {
@@ -165,9 +178,12 @@ describe('buildWorkflowRunNotification', () => {
           job: 'plan (production)',
           step: 'terraform plan @0123456789abcdef0123456789abcdef01234567',
         },
-        'Update infrastructure configuration https://github.com/example-owner/example-repo/pull/128',
-        'push',
-        'plan (production) / terraform plan',
+        {
+          taskOrigin:
+            'Update infrastructure configuration https://github.com/example-owner/example-repo/pull/128',
+          taskTrigger: 'push',
+          taskFailedStep: 'plan (production) / terraform plan',
+        },
       ),
     )
   })
@@ -320,10 +336,11 @@ describe('buildWorkflowRunNotification', () => {
           ['トリガー', '定期実行'],
         ],
         { job: 'sync', step: 'Run template sync' },
-        'なし',
-        '定期実行',
-        undefined,
-        'stable',
+        {
+          taskOrigin: 'なし',
+          taskTrigger: '定期実行',
+          defaultBranch: 'stable',
+        },
       ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
@@ -347,8 +364,7 @@ describe('buildWorkflowRunNotification', () => {
           ['トリガー', '`@ci-user` が手動実行'],
         ],
         null,
-        'なし',
-        '@ci-user が手動実行',
+        { taskOrigin: 'なし', taskTrigger: '@ci-user が手動実行' },
       ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
@@ -375,8 +391,10 @@ describe('buildWorkflowRunNotification', () => {
           ['トリガー', '`issue_comment` 起因'],
         ],
         null,
-        'Update dependency group (`#42`)',
-        'issue_comment 起因',
+        {
+          taskOrigin: 'Update dependency group (`#42`)',
+          taskTrigger: 'issue_comment 起因',
+        },
       ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
@@ -391,11 +409,14 @@ describe('buildWorkflowRunNotification', () => {
       }),
     })
 
-    const result = await buildWorkflowRunNotification(baseInput(), deps)
+    const result = await buildWorkflowRunNotification(
+      baseInput({ workflow: 'Build <checks> & Test' }),
+      deps,
+    )
 
     expect(result._unsafeUnwrap()).toEqual(
       expectedNotification(
-        'CI',
+        'Build <checks> & Test',
         [
           ['Repository', 'example-owner/example-repo'],
           [
@@ -406,7 +427,33 @@ describe('buildWorkflowRunNotification', () => {
           ['トリガー', 'push'],
         ],
         null,
-        'Update &lt;workflow&gt; &amp; settings https://github.com/example-owner/example-repo/pull/1',
+        {
+          taskOrigin:
+            'Update &lt;workflow&gt; &amp; settings https://github.com/example-owner/example-repo/pull/1',
+          taskDescriptionWorkflow: 'Build &lt;checks&gt; &amp; Test',
+        },
+      ),
+    )
+  })
+
+  it('preserves a step name when removing its SHA would leave it empty', async () => {
+    const deps = createDeps({
+      failedStep: okAsync({ job: 'build', step: '@abcdef1' }),
+    })
+
+    const result = await buildWorkflowRunNotification(baseInput(), deps)
+
+    expect(result._unsafeUnwrap()).toEqual(
+      expectedNotification(
+        'CI',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'fix: something'],
+          ['失敗箇所', '`build` › `@abcdef1`'],
+          ['トリガー', 'push'],
+        ],
+        { job: 'build', step: '@abcdef1' },
+        { taskFailedStep: 'build / @abcdef1' },
       ),
     )
   })
