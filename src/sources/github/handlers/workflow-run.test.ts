@@ -134,8 +134,8 @@ describe('buildWorkflowRunNotification', () => {
         step: 'terraform plan @0123456789abcdef0123456789abcdef01234567',
       }),
       originTask: okAsync({
-        id: '00000000-0000-4000-8000-000000000073',
-        number: 73,
+        id: '00000000-0000-4000-8000-000000000042',
+        number: 42,
       }),
     })
 
@@ -161,7 +161,7 @@ describe('buildWorkflowRunNotification', () => {
 
 example-owner/example-repo の main で CI が失敗している。
 
-- 起点の PR: Update infrastructure configuration https://github.com/example-owner/example-repo/pull/73 (tq #73)
+- 起点の PR: Update infrastructure configuration https://github.com/example-owner/example-repo/pull/73 (tq #42)
 - トリガー: push
 
 ## やること
