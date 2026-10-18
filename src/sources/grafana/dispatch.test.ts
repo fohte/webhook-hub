@@ -44,42 +44,6 @@ const ALERT = {
   startsAt: INCIDENT_START,
 }
 
-const expectedGrafanaTask = ({
-  title,
-  startedAtJst,
-  panelURL,
-}: {
-  title: string
-  startedAtJst: string
-  panelURL?: string
-}) => {
-  const actionDetails = [
-    ...(panelURL === undefined ? [] : [`- Panel: ${panelURL}`]),
-  ]
-
-  return {
-    title,
-    description: [
-      '## なぜやるか',
-      '',
-      title,
-      '',
-      `- 開始: ${startedAtJst}`,
-      '',
-      '## やること',
-      '',
-      'グラフで状況を確かめ、原因を取り除く。',
-      ...(actionDetails.length === 0 ? [] : ['', ...actionDetails]),
-      '',
-      '## 完了条件',
-      '',
-      '- [ ] アラートが resolved になる',
-    ].join('\n'),
-    context: 'personal',
-    labels: ['alert/grafana'],
-  }
-}
-
 const createNotifier = () => {
   const postMessage = vi
     .fn<SlackNotifier['postMessage']>()
@@ -367,10 +331,26 @@ describe('dispatch', () => {
       ],
       taskCalls: [
         [
-          expectedGrafanaTask({
+          {
             title: 'Queue is growing',
-            startedAtJst: '2026-01-01 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Queue is growing',
+              '',
+              '- 開始: 2026-01-01 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
       ],
       postCalls: [[expectedAlertContent()]],
@@ -418,11 +398,28 @@ describe('dispatch', () => {
       outcome: 'notified',
       taskCalls: [
         [
-          expectedGrafanaTask({
+          {
             title: summary,
-            startedAtJst: '2026-07-08 23:15 JST',
-            panelURL,
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              summary,
+              '',
+              '- 開始: 2026-07-08 23:15 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              `- Panel: ${panelURL}`,
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
       ],
       renderCalls: [],
@@ -936,10 +933,26 @@ describe('dispatch', () => {
       ],
       taskCalls: [
         [
-          expectedGrafanaTask({
+          {
             title: 'Queue is growing',
-            startedAtJst: '2026-01-02 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Queue is growing',
+              '',
+              '- 開始: 2026-01-02 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
       ],
       postCalls: [
@@ -989,10 +1002,26 @@ describe('dispatch', () => {
       outcome: ['notified', 'notified'],
       taskCalls: [
         [
-          expectedGrafanaTask({
+          {
             title: 'Queue is growing',
-            startedAtJst: '2026-01-01 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Queue is growing',
+              '',
+              '- 開始: 2026-01-01 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
       ],
       postCalls: [[expectedContent]],
@@ -1031,16 +1060,48 @@ describe('dispatch', () => {
       outcome: 'notified',
       taskCalls: [
         [
-          expectedGrafanaTask({
+          {
             title: 'Queue depth',
-            startedAtJst: '2026-01-01 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Queue depth',
+              '',
+              '- 開始: 2026-01-01 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
         [
-          expectedGrafanaTask({
+          {
             title: 'Disk usage',
-            startedAtJst: '2026-01-01 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Disk usage',
+              '',
+              '- 開始: 2026-01-01 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
       ],
       postCalls: [
@@ -1082,10 +1143,26 @@ describe('dispatch', () => {
       outcome: 'notified',
       taskCalls: [
         [
-          expectedGrafanaTask({
+          {
             title: 'Queue is growing',
-            startedAtJst: '2026-01-01 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Queue is growing',
+              '',
+              '- 開始: 2026-01-01 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
       ],
       postCalls: [
@@ -1171,16 +1248,48 @@ describe('dispatch', () => {
       outcome: { error: 'SlackApiError', message: 'Slack unavailable' },
       taskCalls: [
         [
-          expectedGrafanaTask({
+          {
             title: 'Grafana alert',
-            startedAtJst: '2026-01-01 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Grafana alert',
+              '',
+              '- 開始: 2026-01-01 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
         [
-          expectedGrafanaTask({
+          {
             title: 'Grafana alert',
-            startedAtJst: '2026-01-01 09:00 JST',
-          }),
+            description: [
+              '## なぜやるか',
+              '',
+              'Grafana alert',
+              '',
+              '- 開始: 2026-01-01 09:00 JST',
+              '',
+              '## やること',
+              '',
+              'グラフで状況を確かめ、原因を取り除く。',
+              '',
+              '## 完了条件',
+              '',
+              '- [ ] アラートが resolved になる',
+            ].join('\n'),
+            context: 'personal',
+            labels: ['alert/grafana'],
+          },
         ],
       ],
       postCalls: [

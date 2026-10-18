@@ -178,6 +178,142 @@ describe('buildGrafanaAlertNotification', () => {
     })
   })
 
+  it('keeps required sections and URLs when alert metadata values are large', () => {
+    const largeValue = 'v'.repeat(20_000)
+    const truncatedValue = `${'v'.repeat(499)}…`
+
+    expect(
+      buildGrafanaAlertNotification({
+        status: 'firing',
+        labels: {
+          alertname: 'Queue depth',
+          service: largeValue,
+        },
+        annotations: {
+          summary: 'Queue is growing',
+          runbook: largeValue,
+        },
+        fingerprint: 'fp-queue-depth',
+        startsAt: '2026-01-01T00:00:00Z',
+        generatorURL: 'https://grafana.example.test/alerting/rule-4',
+        panelURL: 'https://grafana.example.test/d/queue?viewPanel=4',
+      }),
+    ).toEqual({
+      alertName: 'Queue depth',
+      content: {
+        text: 'Queue depth\nQueue is growing',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: 'Queue depth' },
+          },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'Queue is growing' },
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://grafana.example.test/d/queue?viewPanel=4|Panel>',
+              },
+            ],
+          },
+        ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
+      },
+      task: {
+        title: 'Queue is growing',
+        description: [
+          '## なぜやるか',
+          '',
+          'Queue is growing',
+          '',
+          '- 開始: 2026-01-01 09:00 JST',
+          `- service: ${truncatedValue}`,
+          `- runbook: ${truncatedValue}`,
+          '',
+          '## やること',
+          '',
+          'グラフで状況を確かめ、原因を取り除く。',
+          '',
+          '- Panel: https://grafana.example.test/d/queue?viewPanel=4',
+          '- Rule: https://grafana.example.test/alerting/rule-4',
+          '',
+          '## 完了条件',
+          '',
+          '- [ ] アラートが resolved になる',
+        ].join('\n'),
+        context: 'personal',
+        labels: ['alert/grafana'],
+      },
+      status: 'firing',
+    })
+  })
+
+  it('normalizes label and annotation values to one line', () => {
+    expect(
+      buildGrafanaAlertNotification({
+        status: 'firing',
+        labels: {
+          alertname: 'Queue depth',
+          service: 'worker\n## Unexpected heading',
+        },
+        annotations: {
+          summary: 'Queue is growing',
+          runbook:
+            'https://grafana.example.test/runbook\n- [ ] Unexpected task',
+        },
+        fingerprint: 'fp-queue-depth',
+        startsAt: '2026-01-01T00:00:00Z',
+      }),
+    ).toEqual({
+      alertName: 'Queue depth',
+      content: {
+        text: 'Queue depth\nQueue is growing',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: 'Queue depth' },
+          },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'Queue is growing' },
+          },
+        ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
+      },
+      task: {
+        title: 'Queue is growing',
+        description: [
+          '## なぜやるか',
+          '',
+          'Queue is growing',
+          '',
+          '- 開始: 2026-01-01 09:00 JST',
+          '- service: worker ## Unexpected heading',
+          '- runbook: https://grafana.example.test/runbook - [ ] Unexpected task',
+          '',
+          '## やること',
+          '',
+          'グラフで状況を確かめ、原因を取り除く。',
+          '',
+          '## 完了条件',
+          '',
+          '- [ ] アラートが resolved になる',
+        ].join('\n'),
+        context: 'personal',
+        labels: ['alert/grafana'],
+      },
+      status: 'firing',
+    })
+  })
+
   it('builds the same compact body for resolved alerts before dispatch folding', () => {
     expect(
       buildGrafanaAlertNotification({

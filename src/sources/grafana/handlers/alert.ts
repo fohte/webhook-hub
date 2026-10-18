@@ -6,6 +6,10 @@ import { TODO_ALERT_COLOR } from '#sources/alert-colors'
 const GRAFANA_USERNAME = 'Grafana'
 const GRAFANA_ICON_URL = 'https://grafana.com/static/assets/img/fav32.png'
 const PANEL_LINK_LABEL = 'Panel'
+const TASK_DESCRIPTION_MAX_LENGTH = 10_000
+const TASK_DETAILS_MAX_LENGTH = 4_000
+const TASK_DETAIL_KEY_MAX_LENGTH = 100
+const TASK_DETAIL_VALUE_MAX_LENGTH = 500
 const TASK_ERROR_MAX_LENGTH = 4_000
 
 export interface GrafanaAlert {
@@ -29,6 +33,38 @@ export interface GrafanaAlertNotification {
 
 const truncate = (value: string, maxLength: number): string =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
+
+const normalizeTaskDetail = (value: string, maxLength: number): string =>
+  truncate(value.replace(/\s+/gu, ' ').trim(), maxLength)
+
+const renderTaskDetails = (
+  details: Array<[string, string]>,
+  maxLength: number,
+): string[] => {
+  const lines = details.map(
+    ([key, value]) =>
+      `- ${normalizeTaskDetail(key, TASK_DETAIL_KEY_MAX_LENGTH)}: ${normalizeTaskDetail(value, TASK_DETAIL_VALUE_MAX_LENGTH)}`,
+  )
+  const result: string[] = []
+  let length = 0
+
+  for (const [index, line] of lines.entries()) {
+    const separatorLength = result.length === 0 ? 0 : 1
+    if (length + separatorLength + line.length > maxLength) {
+      const omittedCount = lines.length - index
+      const omission = `- 残り ${String(omittedCount)} 件の label / annotation を省略`
+      if (length + separatorLength + omission.length <= maxLength) {
+        result.push(omission)
+      }
+      break
+    }
+
+    result.push(line)
+    length += separatorLength + line.length
+  }
+
+  return result
+}
 
 const formatStartedAt = (startsAt: string): string => {
   const timestamp = Date.parse(startsAt)
@@ -107,7 +143,6 @@ const renderTaskDescription = (
   const labels = Object.entries(alert.labels)
     .filter(([key]) => key !== 'alertname' && !key.startsWith('grafana_'))
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `- ${key}: ${value}`)
   const annotations = Object.entries(alert.annotations)
     .filter(
       ([key]) =>
@@ -117,20 +152,15 @@ const renderTaskDescription = (
         !key.startsWith('grafana_'),
     )
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `- ${key}: ${value}`)
+  const taskDetails = [...labels, ...annotations]
   const error = alert.annotations['Error']
-  const details = [
-    `- 開始: ${formatStartedAt(alert.startsAt)}`,
-    ...labels,
-    ...annotations,
-  ]
   const errorBlock =
     error === undefined || error === ''
-      ? []
+      ? undefined
       : [
           '⚠ ルールのクエリが失敗している',
           renderCodeBlock(truncate(error, TASK_ERROR_MAX_LENGTH)),
-        ]
+        ].join('\n\n')
   const actionDetails = [
     ...(alert.panelURL === undefined ? [] : [`- Panel: ${alert.panelURL}`]),
     ...(alert.generatorURL === undefined
@@ -138,12 +168,12 @@ const renderTaskDescription = (
       : [`- Rule: ${alert.generatorURL}`]),
   ]
 
-  const whySection = [
+  const whySectionWithoutDetails = [
     '## なぜやるか',
     '',
     taskTitle,
     '',
-    details.join('\n'),
+    `- 開始: ${formatStartedAt(alert.startsAt)}`,
   ].join('\n')
   const actionSection = [
     '## やること',
@@ -157,9 +187,29 @@ const renderTaskDescription = (
     '- [ ] アラートが resolved になる',
   ].join('\n')
 
+  const fixedSections = [
+    whySectionWithoutDetails,
+    ...(errorBlock === undefined ? [] : [errorBlock]),
+    actionSection,
+    completionSection,
+  ]
+  const fixedDescription = fixedSections.join('\n\n')
+  const detailsBudget = Math.max(
+    0,
+    Math.min(
+      TASK_DETAILS_MAX_LENGTH,
+      TASK_DESCRIPTION_MAX_LENGTH - fixedDescription.length - 1,
+    ),
+  )
+  const details = renderTaskDetails(taskDetails, detailsBudget)
+  const whySection =
+    details.length === 0
+      ? whySectionWithoutDetails
+      : `${whySectionWithoutDetails}\n${details.join('\n')}`
+
   return [
     whySection,
-    ...(errorBlock.length === 0 ? [] : [errorBlock.join('\n\n')]),
+    ...(errorBlock === undefined ? [] : [errorBlock]),
     actionSection,
     completionSection,
   ].join('\n\n')
@@ -192,7 +242,7 @@ export const buildGrafanaAlertNotification = (
     content,
     task: {
       title: taskTitle,
-      description: truncate(renderTaskDescription(alert, taskTitle), 10_000),
+      description: renderTaskDescription(alert, taskTitle),
       context: 'personal',
       labels: ['alert/grafana'],
     },
