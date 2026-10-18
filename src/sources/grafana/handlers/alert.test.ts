@@ -254,6 +254,96 @@ describe('buildGrafanaAlertNotification', () => {
     })
   })
 
+  it('keeps required sections and URLs when the aggregate metadata exceeds its limit', () => {
+    const largeValue = 'v'.repeat(20_000)
+    const truncatedValue = `${'v'.repeat(499)}…`
+    const labels = Object.fromEntries(
+      ['label-a', 'label-b', 'label-c', 'label-d', 'label-e'].map((key) => [
+        key,
+        largeValue,
+      ]),
+    )
+    const annotations = Object.fromEntries([
+      ['annotation-a', largeValue],
+      ['annotation-b', largeValue],
+      ['annotation-c', largeValue],
+      ['annotation-d', largeValue],
+      ['annotation-e', largeValue],
+      ['summary', 'Queue is growing'],
+    ])
+
+    expect(
+      buildGrafanaAlertNotification({
+        status: 'firing',
+        labels: { ...labels, alertname: 'Queue depth' },
+        annotations,
+        fingerprint: 'fp-queue-depth',
+        startsAt: '2026-01-01T00:00:00Z',
+        generatorURL: 'https://grafana.example.test/alerting/rule-4',
+        panelURL: 'https://grafana.example.test/d/queue?viewPanel=4',
+      }),
+    ).toEqual({
+      alertName: 'Queue depth',
+      content: {
+        text: 'Queue depth\nQueue is growing',
+        color: '#d73a49',
+        blocks: [
+          {
+            type: 'header',
+            text: { type: 'plain_text', text: 'Queue depth' },
+          },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'Queue is growing' },
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '<https://grafana.example.test/d/queue?viewPanel=4|Panel>',
+              },
+            ],
+          },
+        ],
+        username: 'Grafana',
+        iconUrl: 'https://grafana.com/static/assets/img/fav32.png',
+      },
+      task: {
+        title: 'Queue is growing',
+        description: [
+          '## なぜやるか',
+          '',
+          'Queue is growing',
+          '',
+          '- 開始: 2026-01-01 09:00 JST',
+          `- label-a: ${truncatedValue}`,
+          `- label-b: ${truncatedValue}`,
+          `- label-c: ${truncatedValue}`,
+          `- label-d: ${truncatedValue}`,
+          `- label-e: ${truncatedValue}`,
+          `- annotation-a: ${truncatedValue}`,
+          `- annotation-b: ${truncatedValue}`,
+          '- 残り 3 件の label / annotation を省略',
+          '',
+          '## やること',
+          '',
+          'グラフで状況を確かめ、原因を取り除く。',
+          '',
+          '- Panel: https://grafana.example.test/d/queue?viewPanel=4',
+          '- Rule: https://grafana.example.test/alerting/rule-4',
+          '',
+          '## 完了条件',
+          '',
+          '- [ ] アラートが resolved になる',
+        ].join('\n'),
+        context: 'personal',
+        labels: ['alert/grafana'],
+      },
+      status: 'firing',
+    })
+  })
+
   it('normalizes label and annotation values to one line', () => {
     expect(
       buildGrafanaAlertNotification({
