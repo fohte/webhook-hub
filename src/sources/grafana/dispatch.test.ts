@@ -44,6 +44,45 @@ const ALERT = {
   startsAt: INCIDENT_START,
 }
 
+const expectedGrafanaTask = ({
+  alertName,
+  summary,
+  startedAtJst,
+  panelURL,
+}: {
+  alertName: string
+  summary?: string
+  startedAtJst: string
+  panelURL?: string
+}) => {
+  const title = summary === undefined || summary === '' ? alertName : summary
+  const actionDetails = [
+    ...(panelURL === undefined ? [] : [`- Panel: ${panelURL}`]),
+  ]
+
+  return {
+    title,
+    description: [
+      '## なぜやるか',
+      '',
+      title,
+      '',
+      `- 開始: ${startedAtJst}`,
+      '',
+      '## やること',
+      '',
+      'グラフで状況を確かめ、原因を取り除く。',
+      ...(actionDetails.length === 0 ? [] : ['', ...actionDetails]),
+      '',
+      '## 完了条件',
+      '',
+      '- [ ] アラートが resolved になる',
+    ].join('\n'),
+    context: 'personal',
+    labels: ['alert/grafana'],
+  }
+}
+
 const createNotifier = () => {
   const postMessage = vi
     .fn<SlackNotifier['postMessage']>()
@@ -331,17 +370,11 @@ describe('dispatch', () => {
       ],
       taskCalls: [
         [
-          {
-            title: 'Grafana alert: Queue depth',
-            description: [
-              'Alert: Queue depth',
-              'Status: firing',
-              `Started at: ${INCIDENT_START}`,
-              'Labels:\n- alertname: Queue depth',
-              'Annotations:\n- summary: Queue is growing',
-            ].join('\n\n'),
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Queue depth',
+            summary: 'Queue is growing',
+            startedAtJst: '2026-01-01 09:00 JST',
+          }),
         ],
       ],
       postCalls: [[expectedAlertContent()]],
@@ -389,18 +422,12 @@ describe('dispatch', () => {
       outcome: 'notified',
       taskCalls: [
         [
-          {
-            title: `Grafana alert: ${alertName}`,
-            description: [
-              `Alert: ${alertName}`,
-              'Status: resolved',
-              `Started at: ${startsAt}`,
-              `Labels:\n- alertname: ${alertName}`,
-              `Annotations:\n- summary: ${summary}`,
-              `Panel URL: ${panelURL}`,
-            ].join('\n\n'),
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName,
+            summary,
+            startedAtJst: '2026-07-08 23:15 JST',
+            panelURL,
+          }),
         ],
       ],
       renderCalls: [],
@@ -914,17 +941,11 @@ describe('dispatch', () => {
       ],
       taskCalls: [
         [
-          {
-            title: 'Grafana alert: Queue depth',
-            description: [
-              'Alert: Queue depth',
-              'Status: firing',
-              `Started at: ${nextIncidentStart}`,
-              'Labels:\n- alertname: Queue depth',
-              'Annotations:\n- summary: Queue is growing',
-            ].join('\n\n'),
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Queue depth',
+            summary: 'Queue is growing',
+            startedAtJst: '2026-01-02 09:00 JST',
+          }),
         ],
       ],
       postCalls: [
@@ -974,17 +995,11 @@ describe('dispatch', () => {
       outcome: ['notified', 'notified'],
       taskCalls: [
         [
-          {
-            title: 'Grafana alert: Queue depth',
-            description: [
-              'Alert: Queue depth',
-              'Status: firing',
-              `Started at: ${INCIDENT_START}`,
-              'Labels:\n- alertname: Queue depth',
-              'Annotations:\n- summary: Queue is growing',
-            ].join('\n\n'),
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Queue depth',
+            summary: 'Queue is growing',
+            startedAtJst: '2026-01-01 09:00 JST',
+          }),
         ],
       ],
       postCalls: [[expectedContent]],
@@ -1023,28 +1038,16 @@ describe('dispatch', () => {
       outcome: 'notified',
       taskCalls: [
         [
-          {
-            title: 'Grafana alert: Queue depth',
-            description: [
-              'Alert: Queue depth',
-              'Status: firing',
-              `Started at: ${INCIDENT_START}`,
-              'Labels:\n- alertname: Queue depth',
-            ].join('\n\n'),
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Queue depth',
+            startedAtJst: '2026-01-01 09:00 JST',
+          }),
         ],
         [
-          {
-            title: 'Grafana alert: Disk usage',
-            description: [
-              'Alert: Disk usage',
-              'Status: firing',
-              `Started at: ${INCIDENT_START}`,
-              'Labels:\n- alertname: Disk usage',
-            ].join('\n\n'),
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Disk usage',
+            startedAtJst: '2026-01-01 09:00 JST',
+          }),
         ],
       ],
       postCalls: [
@@ -1086,17 +1089,11 @@ describe('dispatch', () => {
       outcome: 'notified',
       taskCalls: [
         [
-          {
-            title: 'Grafana alert: Queue depth',
-            description: [
-              'Alert: Queue depth',
-              'Status: firing',
-              `Started at: ${INCIDENT_START}`,
-              'Labels:\n- alertname: Queue depth',
-              'Annotations:\n- summary: Queue is growing',
-            ].join('\n\n'),
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Queue depth',
+            summary: 'Queue is growing',
+            startedAtJst: '2026-01-01 09:00 JST',
+          }),
         ],
       ],
       postCalls: [
@@ -1182,18 +1179,16 @@ describe('dispatch', () => {
       outcome: { error: 'SlackApiError', message: 'Slack unavailable' },
       taskCalls: [
         [
-          {
-            title: 'Grafana alert: Grafana alert',
-            description: `Alert: Grafana alert\n\nStatus: firing\n\nStarted at: ${INCIDENT_START}`,
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Grafana alert',
+            startedAtJst: '2026-01-01 09:00 JST',
+          }),
         ],
         [
-          {
-            title: 'Grafana alert: Grafana alert',
-            description: `Alert: Grafana alert\n\nStatus: firing\n\nStarted at: ${INCIDENT_START}`,
-            context: 'personal',
-          },
+          expectedGrafanaTask({
+            alertName: 'Grafana alert',
+            startedAtJst: '2026-01-01 09:00 JST',
+          }),
         ],
       ],
       postCalls: [
