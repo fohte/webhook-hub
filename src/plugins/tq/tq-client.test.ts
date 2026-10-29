@@ -62,11 +62,15 @@ const observeResult = (
 
 describe('createTqClient', () => {
   it('creates a task using the tq API contract and returns its reference', async () => {
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(JSON.stringify(taskResponse), { status: 201 }),
-      )
+    const responseWithChangedLinkSync = {
+      ...taskResponse,
+      linkSync: { added: [], unresolvedRefs: [] },
+    }
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(responseWithChangedLinkSync), {
+        status: 201,
+      }),
+    )
     const client = createTqClient('http://tq.example.test:3001/', fetchImpl)
 
     const result = await client.createTask(taskRequest)
@@ -204,4 +208,48 @@ describe('createTqClient', () => {
       message: 'TQ API returned HTTP 503',
     })
   })
+
+  it.each([
+    {
+      description: 'id is missing',
+      response: { ...taskResponse, id: undefined },
+    },
+    {
+      description: 'id is invalid',
+      response: { ...taskResponse, id: 'invalid' },
+    },
+    {
+      description: 'number is missing',
+      response: { ...taskResponse, number: undefined },
+    },
+    {
+      description: 'number is invalid',
+      response: { ...taskResponse, number: '42' },
+    },
+  ])(
+    'returns an API error when the task response $description',
+    async ({ response }) => {
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify(response), { status: 201 }),
+        )
+      const client = createTqClient('http://tq.example.test:3001', fetchImpl)
+
+      const result = await client.createTask(taskRequest).match(
+        (value) => ({ ok: true as const, value }),
+        (error) => ({
+          ok: false as const,
+          name: error.name,
+          message: error.message,
+        }),
+      )
+
+      expect(result).toEqual({
+        ok: false,
+        name: 'TqApiError',
+        message: 'TQ API returned an invalid task response',
+      })
+    },
+  )
 })

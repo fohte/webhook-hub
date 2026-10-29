@@ -77,7 +77,7 @@ export const createTqClient = (
           },
           body: JSON.stringify(request),
         },
-        CreateTaskResponse,
+        CreateTaskResponse.pick({ id: true, number: true }),
         'TQ API returned an invalid task response',
       ).map(({ id, number }) => ({ id, number }))
     },
