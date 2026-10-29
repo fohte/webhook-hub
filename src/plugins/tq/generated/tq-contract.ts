@@ -152,7 +152,7 @@ export const CreateTaskResponse = z
       .datetime({ offset: true }),
     linkSync: z
       .object({
-        outgoing: z.array(
+        added: z.array(
           z
             .object({
               id: z
