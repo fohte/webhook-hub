@@ -95,11 +95,14 @@ describe('createTqClient', () => {
   })
 
   it('finds a task linked to a GitHub URL', async () => {
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ task: taskResponse }), { status: 200 }),
-      )
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          task: { id: taskResponse.id, number: taskResponse.number },
+        }),
+        { status: 200 },
+      ),
+    )
     const client = createTqClient('http://tq.example.test:3001/', fetchImpl)
 
     const result = await client.findTaskByGithubUrl(
