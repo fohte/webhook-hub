@@ -7,6 +7,7 @@ import {
   CreateTaskResponse,
   type CreateTaskResponse as CreateTaskResponseType,
   GithubLinkLookupResponse,
+  GithubLinkLookupTaskResponse,
 } from '#plugins/tq/generated/tq-contract'
 
 export class TqApiError extends BoundaryError {}
@@ -19,6 +20,13 @@ export interface TqClient {
 }
 
 const TQ_REQUEST_TIMEOUT_MS = 10_000
+
+const GithubLinkLookupTaskRefResponse = GithubLinkLookupResponse.extend({
+  task: GithubLinkLookupTaskResponse.pick({
+    id: true,
+    number: true,
+  }).nullable(),
+})
 
 const requestJson = <T>(
   fetchImpl: typeof fetch,
@@ -88,7 +96,7 @@ export const createTqClient = (
         fetchImpl,
         lookupUrl,
         { method: 'GET', headers: { 'x-author': 'service:webhook-hub' } },
-        GithubLinkLookupResponse,
+        GithubLinkLookupTaskRefResponse,
         'TQ API returned an invalid GitHub link response',
       ).map(({ task }) =>
         task === null ? null : { id: task.id, number: task.number },
