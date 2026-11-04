@@ -16,6 +16,7 @@ export const CreateTaskRequest = z
       .uuid()
       .optional(),
     context: z.enum(['work', 'personal']).optional(),
+    priority: z.number().int().gte(-1).lte(2).nullish(),
     commitment: z.enum(['inbox', 'active', 'someday']).optional(),
     labels: z.array(z.string().min(1)).optional(),
     recurrenceRule: z
@@ -49,6 +50,7 @@ export const CreateTaskResponse = z
     status: z.enum(['todo', 'completed']),
     statusReason: z.enum(['completed', 'not_planned', 'duplicate']).nullable(),
     context: z.enum(['work', 'personal']),
+    priority: z.number().int().gte(-1).lte(2).nullable(),
     commitment: z.enum(['inbox', 'active', 'someday']),
     labels: z.array(z.string()),
     startDate: z.string().nullable(),
@@ -266,6 +268,7 @@ export const GithubLinkLookupTaskResponse = z
     status: z.enum(['todo', 'completed']),
     statusReason: z.enum(['completed', 'not_planned', 'duplicate']).nullable(),
     context: z.enum(['work', 'personal']),
+    priority: z.number().int().gte(-1).lte(2).nullable(),
     commitment: z.enum(['inbox', 'active', 'someday']),
     labels: z.array(z.string()),
     startDate: z.string().nullable(),
@@ -376,6 +379,42 @@ export const GithubLinkLookupResponse = z
   .object({ task: GithubLinkLookupTaskResponse.nullable() })
   .passthrough()
 export type GithubLinkLookupResponse = z.infer<typeof GithubLinkLookupResponse>
+export const PrioritySettings = z.array(
+  z
+    .object({
+      priority: z.union([
+        z.literal(-1),
+        z.literal(0),
+        z.literal(1),
+        z.literal(2),
+        z.literal(null),
+      ]),
+      name: z.string().min(1),
+      description: z.string(),
+      sortOrder: z.number().int().gte(0).lte(4),
+    })
+    .passthrough(),
+)
+export type PrioritySettings = z.infer<typeof PrioritySettings>
+export const UpdatePrioritySettingsRequest = z.array(
+  z
+    .object({
+      priority: z.union([
+        z.literal(-1),
+        z.literal(0),
+        z.literal(1),
+        z.literal(2),
+        z.literal(null),
+      ]),
+      name: z.string().min(1),
+      description: z.string(),
+      sortOrder: z.number().int().gte(0).lte(4),
+    })
+    .passthrough(),
+)
+export type UpdatePrioritySettingsRequest = z.infer<
+  typeof UpdatePrioritySettingsRequest
+>
 export const TaskStatusChangedWebhookEvent = z
   .object({
     event: z.literal('task.status_changed'),
