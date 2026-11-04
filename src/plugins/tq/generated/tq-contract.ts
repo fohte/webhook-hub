@@ -17,7 +17,6 @@ export const CreateTaskRequest = z
       .optional(),
     context: z.enum(['work', 'personal']).optional(),
     priority: z.number().int().gte(-1).lte(2).nullish(),
-    commitment: z.enum(['inbox', 'active', 'someday']).optional(),
     labels: z.array(z.string().min(1)).optional(),
     recurrenceRule: z
       .object({
@@ -51,7 +50,6 @@ export const CreateTaskResponse = z
     statusReason: z.enum(['completed', 'not_planned', 'duplicate']).nullable(),
     context: z.enum(['work', 'personal']),
     priority: z.number().int().gte(-1).lte(2).nullable(),
-    commitment: z.enum(['inbox', 'active', 'someday']),
     labels: z.array(z.string()),
     startDate: z.string().nullable(),
     dueDate: z.string().nullable(),
@@ -269,7 +267,6 @@ export const GithubLinkLookupTaskResponse = z
     statusReason: z.enum(['completed', 'not_planned', 'duplicate']).nullable(),
     context: z.enum(['work', 'personal']),
     priority: z.number().int().gte(-1).lte(2).nullable(),
-    commitment: z.enum(['inbox', 'active', 'someday']),
     labels: z.array(z.string()),
     startDate: z.string().nullable(),
     dueDate: z.string().nullable(),
