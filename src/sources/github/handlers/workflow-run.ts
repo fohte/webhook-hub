@@ -15,6 +15,10 @@ import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
+import {
+  type CiAlertRule,
+  matchesCiAlertRule,
+} from '#sources/github/ci-alert-rules'
 
 export interface WorkflowRunInput {
   repo: string
@@ -32,6 +36,7 @@ export interface WorkflowRunInput {
   event: string
   displayTitle: string
   commitMessage: string
+  actor: string
   triggeringActor: string
 }
 
@@ -66,13 +71,22 @@ export const extractWorkflowRunInput = (
   event: payload.workflow_run.event,
   displayTitle: payload.workflow_run.display_title,
   commitMessage: payload.workflow_run.head_commit.message,
+  actor: payload.workflow_run.actor.login,
   triggeringActor: payload.workflow_run.triggering_actor.login,
 })
 
-export const isEligibleWorkflowRun = (input: WorkflowRunInput): boolean => {
+export const isEligibleWorkflowRun = (
+  input: WorkflowRunInput,
+  ciAlertRules: CiAlertRule[] = [],
+  ignoreActor = false,
+): boolean => {
   // Fork-originated runs can expose the fork's branch alongside the upstream
   // repository's default branch, so the head repository must also match.
-  return input.headRepo === input.repo && input.branch === input.defaultBranch
+  return (
+    input.headRepo === input.repo &&
+    (input.branch === input.defaultBranch ||
+      ciAlertRules.some((rule) => matchesCiAlertRule(rule, input, ignoreActor)))
+  )
 }
 
 // octo-sts token acquisition failing is a persistent auth outage, not a
@@ -216,7 +230,7 @@ const buildTaskDescription = (
   trigger: string,
 ): string => {
   const repo = formatTaskDescriptionText(input.repo)
-  const branch = formatTaskDescriptionText(input.defaultBranch)
+  const branch = formatTaskDescriptionText(input.branch)
   const workflow = formatTaskDescriptionText(input.workflow)
   const failedStepDescription =
     failedStep === null
@@ -338,9 +352,10 @@ const lookupOriginTask = (
 export const buildWorkflowRunNotification = (
   input: WorkflowRunInput,
   deps: WorkflowRunNotificationDeps,
+  ciAlertRules: CiAlertRule[] = [],
 ): ResultAsync<WorkflowRunNotification | null, never> => {
   if (input.conclusion !== 'failure') return okAsync(null)
-  if (!isEligibleWorkflowRun(input)) return okAsync(null)
+  if (!isEligibleWorkflowRun(input, ciAlertRules)) return okAsync(null)
 
   const failedStep = deps.githubClient
     .findFailedStep(input.repoOwner, input.repoName, input.runId)

@@ -58,6 +58,7 @@ const main = (): void => {
         githubClient,
         tqClient,
         config.tqWebUrl,
+        config.ciAlertRules,
       ),
       createSentrySource(config.sentryWebhookSecret, tqClient, config.tqWebUrl),
       createGrafanaSource(

@@ -21,6 +21,7 @@ import {
   type SlackMessageMetadata,
   type SlackNotifier,
 } from '#slack'
+import type { CiAlertRule } from '#sources/github/ci-alert-rules'
 import {
   buildIssueNotification,
   extractIssueInput,
@@ -52,6 +53,7 @@ export interface DispatchContext {
   githubClient: GitHubClient
   tqClient: TqClient
   tqWebUrl: string
+  ciAlertRules: CiAlertRule[]
 }
 
 interface ParsedEvent {
@@ -78,7 +80,9 @@ const resolveWorkflowRunAlerts = (
   ctx: DispatchContext,
   input: WorkflowRunInput,
 ): ResultAsync<DispatchOutcome, SlackApiError> => {
-  if (!isEligibleWorkflowRun(input)) return okAsync('filtered')
+  if (!isEligibleWorkflowRun(input, ctx.ciAlertRules, true)) {
+    return okAsync('filtered')
+  }
 
   let resolvedAny = false
   const updateFailures: SlackApiError[] = []
@@ -174,10 +178,14 @@ export const dispatch = (
       if (input.conclusion === 'success') {
         return resolveWorkflowRunAlerts(ctx, input)
       }
-      return buildWorkflowRunNotification(input, {
-        githubClient: ctx.githubClient,
-        tqClient: ctx.tqClient,
-      }).andThen((note) => {
+      return buildWorkflowRunNotification(
+        input,
+        {
+          githubClient: ctx.githubClient,
+          tqClient: ctx.tqClient,
+        },
+        ctx.ciAlertRules,
+      ).andThen((note) => {
         if (note === null) return okAsync<DispatchOutcome>('filtered')
         return createAlertTask(ctx.tqClient, note.task, {
           delivery_id: ctx.deliveryId,

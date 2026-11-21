@@ -17,6 +17,7 @@ const ENV = {
 const expectedConfig = (
   grafanaApiToken = '',
   grafanaUrl = 'https://fohte.grafana.net',
+  ciAlertRules: { repo: string; branch: string; actor?: string }[] = [],
 ) => ({
   githubWebhookSecret: 'github-secret',
   sentryWebhookSecret: 'sentry-secret',
@@ -30,6 +31,7 @@ const expectedConfig = (
   tqApiUrl: 'https://tasks.example.test',
   tqWebUrl: 'https://tq.fohte.net',
   port: 8080,
+  ciAlertRules,
   octoSts: {
     url: 'https://octo.example.test',
     scope: 'example-org',
@@ -52,6 +54,41 @@ describe('loadConfig', () => {
       })._unsafeUnwrap(),
     ).toEqual(
       expectedConfig('grafana-service-token', 'https://grafana.example.test'),
+    )
+  })
+
+  it('loads CI alert rules and defaults to an empty list when unset', () => {
+    expect(
+      loadConfig({
+        ...ENV,
+        GITHUB_CI_ALERT_RULES:
+          '[{"repo":"sample-org/*","branch":"generated-sync-*","actor":"automation-bot[bot]"}]',
+      })._unsafeUnwrap(),
+    ).toEqual(
+      expectedConfig('', 'https://fohte.grafana.net', [
+        {
+          repo: 'sample-org/*',
+          branch: 'generated-sync-*',
+          actor: 'automation-bot[bot]',
+        },
+      ]),
+    )
+    expect(
+      loadConfig({ ...ENV, GITHUB_CI_ALERT_RULES: '[]' })._unsafeUnwrap(),
+    ).toEqual(expectedConfig())
+    expect(loadConfig(ENV)._unsafeUnwrap()).toEqual(expectedConfig())
+  })
+
+  it.each([
+    { description: 'invalid JSON', value: '[' },
+    { description: 'a missing branch', value: '[{"repo":"sample-org/*"}]' },
+    {
+      description: 'a non-string actor',
+      value: '[{"repo":"sample-org/*","branch":"*","actor":2}]',
+    },
+  ])('rejects $description', ({ value }) => {
+    expect(loadConfig({ ...ENV, GITHUB_CI_ALERT_RULES: value }).isErr()).toBe(
+      true,
     )
   })
 

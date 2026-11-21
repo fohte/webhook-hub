@@ -206,6 +206,7 @@ const createContext = (
   tqClient = createTqClient(),
   tqWebUrl = TQ_WEB_URL,
   githubClient = createGithubClient(),
+  ciAlertRules: DispatchContext['ciAlertRules'] = [],
 ): DispatchContext => ({
   deliveryId: 'delivery-1',
   event,
@@ -214,6 +215,7 @@ const createContext = (
   githubClient,
   tqClient,
   tqWebUrl,
+  ciAlertRules,
 })
 
 const dispatchOutcome = async (
@@ -315,6 +317,7 @@ const workflowRunPayload = (overrides: {
   workflowName?: string
   runId?: number
   runUrl?: string
+  actor?: string
 }): unknown => ({
   action: overrides.action ?? 'completed',
   repository: {
@@ -334,6 +337,7 @@ const workflowRunPayload = (overrides: {
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
     head_commit: { message: 'fix: something' },
     display_title: 'fix: something',
+    actor: { login: overrides.actor ?? 'octocat' },
     triggering_actor: { login: 'octocat' },
     html_url:
       overrides.runUrl ?? 'https://github.com/fohte/example/actions/runs/1',
@@ -679,12 +683,14 @@ fohte/example の main で CI が失敗している。
       runId: 401,
       taskId: '00000000-0000-4000-8000-000000000041',
       taskNumber: 41,
+      branch: 'generated-sync-target',
     })
     const secondAlert = workflowAlertContent({
       alertId: 'alert-second',
       runId: 402,
       taskId: '00000000-0000-4000-8000-000000000042',
       taskNumber: 42,
+      branch: 'generated-sync-target',
     })
     const alreadyFoldedAlert = workflowAlertContent({
       alertId: 'alert-folded',
@@ -709,6 +715,7 @@ fohte/example の main で CI が失敗している。
     const metadataOnlyAlert = workflowAlertContent({
       alertId: 'alert-metadata-only',
       runId: 399,
+      branch: 'generated-sync-target',
     })
     const newerAlert = workflowAlertContent({
       alertId: 'alert-after-success',
@@ -776,11 +783,26 @@ fohte/example の main で CI が失敗している。
     )
 
     const outcome = await dispatchOutcome(
-      createContext('workflow_run', notifier, tqClient),
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        TQ_WEB_URL,
+        createGithubClient(),
+        [
+          {
+            repo: 'sample-org/*',
+            branch: 'generated-sync-*',
+            actor: 'ci-bot',
+          },
+        ],
+      ),
       {
         name: 'workflow_run',
         payload: workflowRunPayload({
           conclusion: 'success',
+          branch: 'generated-sync-target',
+          actor: 'human',
           repoOwner: 'sample-org',
           repoName: 'ci-app',
           workflowId: 73,

@@ -127,6 +127,7 @@ const githubWorkflowRunFailureBody = JSON.stringify({
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
     head_commit: { message: 'fix: something' },
     display_title: 'fix: something',
+    actor: { login: 'octocat' },
     triggering_actor: { login: 'octocat' },
     html_url: 'https://github.com/fohte/example/actions/runs/1',
     conclusion: 'failure',
