@@ -305,9 +305,13 @@ const observeFilteredWorkflowRun = (
   outcome: DispatchOutcome,
   notifier: ReturnType<typeof createNotifier>,
   tqClient: ReturnType<typeof createTqClient>,
+  githubClient: ReturnType<typeof createGithubClient>,
 ) => ({
   outcome,
   taskCalls: tqClient.createTask.mock.calls,
+  originTaskLookupCalls: tqClient.findTaskByGithubUrl.mock.calls,
+  failedStepCalls: githubClient.findFailedStep.mock.calls,
+  pullRequestCalls: githubClient.findPullRequestForCommit.mock.calls,
   updateCalls: notifier.updateMessage.mock.calls,
   findMessageCalls: notifier.findMessageByMetadata.mock.calls,
   findMessagesCalls: notifier.findMessagesByMetadata.mock.calls,
@@ -608,13 +612,16 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
   it.each(['failure', 'success'])(
     'filters a %s run with no branch when configured rules exist',
     async (conclusion) => {
+      const notifier = createNotifier()
+      const tqClient = createTqClient()
+      const githubClient = createGithubClient()
       const outcome = await dispatchOutcome(
         createContext(
           'workflow_run',
-          createNotifier(),
-          createTqClient(),
+          notifier,
+          tqClient,
           TQ_WEB_URL,
-          createGithubClient(),
+          githubClient,
           [{ repo: 'sample-org/*', branch: '*' }],
         ),
         {
@@ -629,7 +636,19 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
         },
       )
 
-      expect(outcome).toEqual('filtered')
+      expect(
+        observeFilteredWorkflowRun(outcome, notifier, tqClient, githubClient),
+      ).toEqual({
+        outcome: 'filtered',
+        taskCalls: [],
+        originTaskLookupCalls: [],
+        failedStepCalls: [],
+        pullRequestCalls: [],
+        updateCalls: [],
+        findMessageCalls: [],
+        findMessagesCalls: [],
+        postMessageCalls: [],
+      })
     },
   )
 
@@ -1014,9 +1033,16 @@ fohte/example の main で CI が失敗している。
   it('returns filtered without posting for a run outside the notification criteria', async () => {
     const notifier = createNotifier()
     const tqClient = createTqClient()
+    const githubClient = createGithubClient()
 
     const outcome = await dispatchOutcome(
-      createContext('workflow_run', notifier, tqClient),
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        TQ_WEB_URL,
+        githubClient,
+      ),
       {
         name: 'workflow_run',
         payload: workflowRunPayload({
@@ -1026,9 +1052,14 @@ fohte/example の main で CI が失敗している。
       },
     )
 
-    expect(observeFilteredWorkflowRun(outcome, notifier, tqClient)).toEqual({
+    expect(
+      observeFilteredWorkflowRun(outcome, notifier, tqClient, githubClient),
+    ).toEqual({
       outcome: 'filtered',
       taskCalls: [],
+      originTaskLookupCalls: [],
+      failedStepCalls: [],
+      pullRequestCalls: [],
       updateCalls: [],
       findMessageCalls: [],
       findMessagesCalls: [],
