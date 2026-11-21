@@ -51,9 +51,7 @@ export const loadConfig = (
     tqApiUrl: requireString(env, 'TQ_API_URL'),
     tqWebUrl: optionalString(env, 'TQ_WEB_URL', 'https://tq.fohte.net'),
     port: optionalInt(env, 'PORT', 8080, { min: 1, max: 65_535 }),
-    ciAlertRules: optionalString(env, 'GITHUB_CI_ALERT_RULES', '[]').andThen(
-      parseCiAlertRules,
-    ),
+    ciAlertRules: parseCiAlertRules(env['GITHUB_CI_ALERT_RULES'] ?? '[]'),
     octoStsUrl: requireString(env, 'OCTO_STS_URL'),
     octoStsScope: requireString(env, 'OCTO_STS_SCOPE'),
     octoStsIdentity: requireString(env, 'OCTO_STS_IDENTITY'),

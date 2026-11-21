@@ -94,6 +94,11 @@ describe('loadConfig', () => {
       error: 'GITHUB_CI_ALERT_RULES must be valid JSON',
     },
     {
+      description: 'an empty string',
+      value: '',
+      error: 'GITHUB_CI_ALERT_RULES must be valid JSON',
+    },
+    {
       description: 'a missing branch',
       value: '[{"repo":"sample-org/*"}]',
       error:
