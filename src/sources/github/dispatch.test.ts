@@ -206,6 +206,7 @@ const createContext = (
   tqClient = createTqClient(),
   tqWebUrl = TQ_WEB_URL,
   githubClient = createGithubClient(),
+  ciAlertRules: DispatchContext['ciAlertRules'] = [],
 ): DispatchContext => ({
   deliveryId: 'delivery-1',
   event,
@@ -214,6 +215,7 @@ const createContext = (
   githubClient,
   tqClient,
   tqWebUrl,
+  ciAlertRules,
 })
 
 const dispatchOutcome = async (
@@ -230,6 +232,37 @@ const observeDispatch = <TOutcome, TTaskCalls>(
   taskCalls,
   postMessageCalls: normalizePostMessageCalls(postMessageCalls),
   findMessageCalls,
+})
+
+const observeConfiguredFailureDispatch = (
+  outcome: DispatchOutcome,
+  tqClient: ReturnType<typeof createTqClient>,
+  notifier: ReturnType<typeof createNotifier>,
+) => ({
+  outcome,
+  taskCalls: tqClient.createTask.mock.calls,
+  slackTexts: notifier.postMessage.mock.calls.map(([content]) => content.text),
+})
+
+const observeWorkflowRunDispatch = (
+  outcome: DispatchOutcome,
+  tqClient: ReturnType<typeof createTqClient>,
+  notifier: ReturnType<typeof createNotifier>,
+) => ({
+  outcome,
+  taskCalls: tqClient.createTask.mock.calls.length,
+  slackPosts: notifier.postMessage.mock.calls.length,
+})
+
+const observeWorkflowRunResolution = (
+  outcome: DispatchOutcome,
+  notifier: ReturnType<typeof createNotifier>,
+  tqClient: ReturnType<typeof createTqClient>,
+) => ({
+  outcome,
+  updateRefs: notifier.updateMessage.mock.calls.map(([ref]) => ref),
+  postMessages: notifier.postMessage.mock.calls,
+  taskCalls: tqClient.createTask.mock.calls,
 })
 
 const observeWorkflowRunLookupFailure = (
@@ -293,9 +326,13 @@ const observeFilteredWorkflowRun = (
   outcome: DispatchOutcome,
   notifier: ReturnType<typeof createNotifier>,
   tqClient: ReturnType<typeof createTqClient>,
+  githubClient: ReturnType<typeof createGithubClient>,
 ) => ({
   outcome,
   taskCalls: tqClient.createTask.mock.calls,
+  originTaskLookupCalls: tqClient.findTaskByGithubUrl.mock.calls,
+  failedStepCalls: githubClient.findFailedStep.mock.calls,
+  pullRequestCalls: githubClient.findPullRequestForCommit.mock.calls,
   updateCalls: notifier.updateMessage.mock.calls,
   findMessageCalls: notifier.findMessageByMetadata.mock.calls,
   findMessagesCalls: notifier.findMessagesByMetadata.mock.calls,
@@ -306,7 +343,7 @@ const workflowRunPayload = (overrides: {
   action?: string
   conclusion?: string
   headRepo?: string
-  branch?: string
+  branch?: string | null
   defaultBranch?: string
   repoOwner?: string
   repoName?: string
@@ -315,6 +352,7 @@ const workflowRunPayload = (overrides: {
   workflowName?: string
   runId?: number
   runUrl?: string
+  actor?: string | null
 }): unknown => ({
   action: overrides.action ?? 'completed',
   repository: {
@@ -330,10 +368,12 @@ const workflowRunPayload = (overrides: {
     workflow_id: overrides.workflowId ?? 101,
     name: overrides.workflowName ?? 'CI',
     event: 'push',
-    head_branch: overrides.branch ?? 'main',
+    head_branch: overrides.branch === undefined ? 'main' : overrides.branch,
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
     head_commit: { message: 'fix: something' },
     display_title: 'fix: something',
+    actor:
+      overrides.actor === null ? null : { login: overrides.actor ?? 'octocat' },
     triggering_actor: { login: 'octocat' },
     html_url:
       overrides.runUrl ?? 'https://github.com/fohte/example/actions/runs/1',
@@ -533,6 +573,154 @@ fohte/example の main で CI が失敗している。
     })
   })
 
+  it('notifies a failed run matched by configured rules', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const outcome = await dispatchOutcome(
+      createContext('workflow_run', notifier, tqClient, TQ_WEB_URL, undefined, [
+        {
+          repo: 'sample-org/*',
+          branch: 'generated-sync*',
+          actor: 'automation-bot[bot]',
+        },
+      ]),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({
+          repo: 'sample-org/sample-app',
+          repoOwner: 'sample-org',
+          repoName: 'sample-app',
+          branch: 'generated-sync/path-target',
+          actor: 'automation-bot[bot]',
+          runUrl: 'https://github.com/sample-org/sample-app/actions/runs/1',
+        }),
+      },
+    )
+
+    expect(
+      observeConfiguredFailureDispatch(outcome, tqClient, notifier),
+    ).toEqual({
+      outcome: 'notified',
+      taskCalls: [
+        [
+          {
+            title: 'sample-org/sample-app: CI が失敗',
+            description: `## なぜやるか
+
+sample-org/sample-app の generated-sync/path-target で CI が失敗している。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: 不明
+- Run: https://github.com/sample-org/sample-app/actions/runs/1
+
+## 完了条件
+
+- [ ] generated-sync/path-target の CI が成功する`,
+            context: 'personal',
+            labels: ['alert/ci', 'dev/sample-app'],
+          },
+        ],
+      ],
+      slackTexts: ['🚨 CI failed'],
+    })
+  })
+
+  it.each([
+    {
+      name: 'a rule without an actor condition',
+      rule: { repo: 'sample-org/*', branch: 'generated-sync*' },
+      expected: { outcome: 'notified', taskCalls: 1, slackPosts: 1 },
+    },
+    {
+      name: 'a rule with an actor condition',
+      rule: {
+        repo: 'sample-org/*',
+        branch: 'generated-sync*',
+        actor: 'automation-bot[bot]',
+      },
+      expected: { outcome: 'filtered', taskCalls: 0, slackPosts: 0 },
+    },
+  ])(
+    'handles a workflow run without an actor for $name',
+    async ({ rule, expected }) => {
+      const notifier = createNotifier()
+      const tqClient = createTqClient()
+      const outcome = await dispatchOutcome(
+        createContext(
+          'workflow_run',
+          notifier,
+          tqClient,
+          TQ_WEB_URL,
+          undefined,
+          [rule],
+        ),
+        {
+          name: 'workflow_run',
+          payload: workflowRunPayload({
+            repo: 'sample-org/sample-app',
+            repoOwner: 'sample-org',
+            repoName: 'sample-app',
+            branch: 'generated-sync/topic',
+            actor: null,
+          }),
+        },
+      )
+
+      expect(observeWorkflowRunDispatch(outcome, tqClient, notifier)).toEqual(
+        expected,
+      )
+    },
+  )
+
+  it.each(['failure', 'success'])(
+    'filters a %s run with no branch when configured rules exist',
+    async (conclusion) => {
+      const notifier = createNotifier()
+      const tqClient = createTqClient()
+      const githubClient = createGithubClient()
+      const outcome = await dispatchOutcome(
+        createContext(
+          'workflow_run',
+          notifier,
+          tqClient,
+          TQ_WEB_URL,
+          githubClient,
+          [{ repo: 'sample-org/*', branch: '*' }],
+        ),
+        {
+          name: 'workflow_run',
+          payload: workflowRunPayload({
+            conclusion,
+            repo: 'sample-org/sample-app',
+            repoOwner: 'sample-org',
+            repoName: 'sample-app',
+            branch: null,
+          }),
+        },
+      )
+
+      expect(
+        observeFilteredWorkflowRun(outcome, notifier, tqClient, githubClient),
+      ).toEqual({
+        outcome: 'filtered',
+        taskCalls: [],
+        originTaskLookupCalls: [],
+        failedStepCalls: [],
+        pullRequestCalls: [],
+        updateCalls: [],
+        findMessageCalls: [],
+        findMessagesCalls: [],
+        postMessageCalls: [],
+      })
+    },
+  )
+
   it('posts the CI alert without a task link when tq task creation fails', async () => {
     const notifier = createNotifier()
     const tqClient = createTqClient(
@@ -679,12 +867,14 @@ fohte/example の main で CI が失敗している。
       runId: 401,
       taskId: '00000000-0000-4000-8000-000000000041',
       taskNumber: 41,
+      branch: 'generated-sync-target',
     })
     const secondAlert = workflowAlertContent({
       alertId: 'alert-second',
       runId: 402,
       taskId: '00000000-0000-4000-8000-000000000042',
       taskNumber: 42,
+      branch: 'generated-sync-target',
     })
     const alreadyFoldedAlert = workflowAlertContent({
       alertId: 'alert-folded',
@@ -709,6 +899,7 @@ fohte/example の main で CI が失敗している。
     const metadataOnlyAlert = workflowAlertContent({
       alertId: 'alert-metadata-only',
       runId: 399,
+      branch: 'generated-sync-target',
     })
     const newerAlert = workflowAlertContent({
       alertId: 'alert-after-success',
@@ -776,11 +967,26 @@ fohte/example の main で CI が失敗している。
     )
 
     const outcome = await dispatchOutcome(
-      createContext('workflow_run', notifier, tqClient),
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        TQ_WEB_URL,
+        createGithubClient(),
+        [
+          {
+            repo: 'sample-org/*',
+            branch: 'generated-sync-*',
+            actor: 'ci-bot',
+          },
+        ],
+      ),
       {
         name: 'workflow_run',
         payload: workflowRunPayload({
           conclusion: 'success',
+          branch: 'generated-sync-target',
+          actor: 'human',
           repoOwner: 'sample-org',
           repoName: 'ci-app',
           workflowId: 73,
@@ -823,6 +1029,57 @@ fohte/example の main で CI が失敗している。
         ],
       ],
       postMessageCalls: [],
+      taskCalls: [],
+    })
+  })
+
+  it('resolves alerts for a successful run without an actor', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const alert = workflowAlertContent({
+      alertId: 'existing-alert',
+      runId: 401,
+      repo: 'sample-org/ci-app',
+      workflowId: 73,
+      branch: 'generated-sync-target',
+    })
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: { channel: 'C1', ts: 'active-alert' },
+          eventPayload: alert.metadata?.event_payload ?? {},
+          content: alert,
+        },
+      ]),
+    )
+
+    const outcome = await dispatchOutcome(
+      createContext('workflow_run', notifier, tqClient, TQ_WEB_URL, undefined, [
+        {
+          repo: 'sample-org/*',
+          branch: 'generated-sync*',
+          actor: 'automation-bot[bot]',
+        },
+      ]),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({
+          conclusion: 'success',
+          repo: 'sample-org/ci-app',
+          repoOwner: 'sample-org',
+          repoName: 'ci-app',
+          workflowId: 73,
+          runId: 500,
+          branch: 'generated-sync-target',
+          actor: null,
+        }),
+      },
+    )
+
+    expect(observeWorkflowRunResolution(outcome, notifier, tqClient)).toEqual({
+      outcome: 'notified',
+      updateRefs: [{ channel: 'C1', ts: 'active-alert' }],
+      postMessages: [],
       taskCalls: [],
     })
   })
@@ -896,9 +1153,16 @@ fohte/example の main で CI が失敗している。
   it('returns filtered without posting for a run outside the notification criteria', async () => {
     const notifier = createNotifier()
     const tqClient = createTqClient()
+    const githubClient = createGithubClient()
 
     const outcome = await dispatchOutcome(
-      createContext('workflow_run', notifier, tqClient),
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        TQ_WEB_URL,
+        githubClient,
+      ),
       {
         name: 'workflow_run',
         payload: workflowRunPayload({
@@ -908,9 +1172,14 @@ fohte/example の main で CI が失敗している。
       },
     )
 
-    expect(observeFilteredWorkflowRun(outcome, notifier, tqClient)).toEqual({
+    expect(
+      observeFilteredWorkflowRun(outcome, notifier, tqClient, githubClient),
+    ).toEqual({
       outcome: 'filtered',
       taskCalls: [],
+      originTaskLookupCalls: [],
+      failedStepCalls: [],
+      pullRequestCalls: [],
       updateCalls: [],
       findMessageCalls: [],
       findMessagesCalls: [],

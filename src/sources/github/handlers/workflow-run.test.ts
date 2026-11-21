@@ -37,6 +37,7 @@ const baseInput = (
   event: 'push',
   displayTitle: 'fix: something',
   commitMessage: 'fix: something\n\nlonger body',
+  actor: 'ci-user',
   triggeringActor: 'ci-user',
   ...overrides,
 })
@@ -176,6 +177,20 @@ example-owner/example-repo の main で CI が失敗している。
 - [ ] main の CI が成功する`,
       ),
     )
+  })
+
+  it('passes a non-default run branch to the pull request lookup', async () => {
+    const deps = createDeps()
+
+    await buildWorkflowRunNotification(
+      baseInput({ branch: 'generated-sync/topic', defaultBranch: 'main' }),
+      deps,
+      [{ repo: 'example-owner/*', branch: 'generated-sync*' }],
+    )
+
+    expect(deps.githubClient.findPullRequestForCommit.mock.calls).toEqual([
+      ['example-owner', 'example-repo', 'b'.repeat(40), 'generated-sync/topic'],
+    ])
   })
 
   it('omits the tq task mention when the PR has no linked task', async () => {
@@ -484,6 +499,121 @@ example-owner/example-repo の stable で Boilerplate update が失敗してい�
       ),
     )
     expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      name: 'actor glob',
+      actor: 'automation-bot[bot]',
+      rule: {
+        repo: 'example*repo',
+        branch: 'generated-sync*target',
+        actor: 'automation-bot[bot]',
+      },
+    },
+    {
+      name: 'rule without actor',
+      actor: 'human',
+      rule: { repo: 'example*repo', branch: 'generated-sync*target' },
+    },
+  ])(
+    'notifies a run matching a configured $name rule',
+    async ({ actor, rule }) => {
+      const deps = createDeps()
+
+      const result = await buildWorkflowRunNotification(
+        baseInput({
+          branch: 'generated-sync/path-target',
+          actor,
+        }),
+        deps,
+        [rule],
+      )
+
+      expect(result._unsafeUnwrap()).toEqual(
+        expectedNotification(
+          'CI',
+          'example-owner/example-repo: CI が失敗',
+          [
+            ['Repository', 'example-owner/example-repo'],
+            ['起点の PR', 'fix: something'],
+            ['失敗箇所', '不明'],
+            ['トリガー', 'push'],
+          ],
+          `## なぜやるか
+
+example-owner/example-repo の generated-sync/path-target で CI が失敗している。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: 不明
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] generated-sync/path-target の CI が成功する`,
+        ),
+      )
+    },
+  )
+
+  it('filters a rule when its repo, branch, or actor does not match', async () => {
+    const result = await buildWorkflowRunNotification(
+      baseInput({ branch: 'generated-sync-target', actor: 'human' }),
+      createDeps(),
+      [
+        { repo: 'different/*', branch: 'generated-sync-*', actor: 'human' },
+        { repo: 'example-*', branch: 'other-*', actor: 'human' },
+        {
+          repo: 'example-*',
+          branch: 'generated-sync-*',
+          actor: 'automation-bot[bot]',
+        },
+        { repo: 'EXAMPLE-*', branch: 'generated-sync-*' },
+      ],
+    )
+
+    expect(result._unsafeUnwrap()).toBeNull()
+  })
+
+  it('filters long branches without pathological wildcard matching cost', async () => {
+    const result = await buildWorkflowRunNotification(
+      baseInput({ branch: 'a'.repeat(25) }),
+      createDeps(),
+      [
+        {
+          repo: 'example*repo',
+          branch: 'a*a*a*a*a*a*a*a*a*a*b',
+        },
+      ],
+    )
+
+    expect(result._unsafeUnwrap()).toBeNull()
+  })
+
+  it('keeps fork runs excluded even when a configured rule matches', async () => {
+    const result = await buildWorkflowRunNotification(
+      baseInput({
+        headRepo: 'fork-owner/example-repo',
+        branch: 'generated-sync-target',
+        actor: 'automation-bot[bot]',
+      }),
+      createDeps(),
+      [
+        {
+          repo: 'example-*',
+          branch: 'generated-sync-*',
+          actor: 'automation-bot[bot]',
+        },
+      ],
+    )
+
+    expect(result._unsafeUnwrap()).toBeNull()
   })
 
   it('omits the body line and names the actor for a workflow_dispatch run', async () => {

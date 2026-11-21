@@ -15,6 +15,10 @@ import type { TqClient, TqTaskRef } from '#plugins/tq/tq-client'
 import type { SlackBlock, SlackMessageContent } from '#slack'
 import { escapeSlackMrkdwn } from '#slack-mrkdwn'
 import { ALERT_FIELD_LABELS } from '#sources/alert-field-labels'
+import {
+  type CiAlertRule,
+  matchesCiAlertRule,
+} from '#sources/github/ci-alert-rules'
 
 export interface WorkflowRunInput {
   repo: string
@@ -22,7 +26,7 @@ export interface WorkflowRunInput {
   repoName: string
   headRepo: string
   workflow: string
-  branch: string
+  branch: string | null
   defaultBranch: string
   workflowId: number
   conclusion: WorkflowRunCompletedEvent['workflow_run']['conclusion']
@@ -32,6 +36,7 @@ export interface WorkflowRunInput {
   event: string
   displayTitle: string
   commitMessage: string
+  actor: string | null
   triggeringActor: string
 }
 
@@ -47,6 +52,9 @@ export interface WorkflowRunNotificationDeps {
   githubClient: GitHubClient
   tqClient: Pick<TqClient, 'findTaskByGithubUrl'>
 }
+
+const getActorLogin = (actor: { login: string } | null): string | null =>
+  actor?.login ?? null
 
 export const extractWorkflowRunInput = (
   payload: WorkflowRunCompletedEvent,
@@ -66,13 +74,31 @@ export const extractWorkflowRunInput = (
   event: payload.workflow_run.event,
   displayTitle: payload.workflow_run.display_title,
   commitMessage: payload.workflow_run.head_commit.message,
+  actor: getActorLogin(payload.workflow_run.actor),
   triggeringActor: payload.workflow_run.triggering_actor.login,
 })
 
-export const isEligibleWorkflowRun = (input: WorkflowRunInput): boolean => {
+export const isEligibleWorkflowRun = (
+  input: WorkflowRunInput,
+  ciAlertRules: CiAlertRule[] = [],
+  ignoreActor = false,
+): input is WorkflowRunInput & { branch: string } => {
+  const { branch } = input
+
   // Fork-originated runs can expose the fork's branch alongside the upstream
   // repository's default branch, so the head repository must also match.
-  return input.headRepo === input.repo && input.branch === input.defaultBranch
+  if (input.headRepo !== input.repo || branch === null) return false
+
+  return (
+    branch === input.defaultBranch ||
+    ciAlertRules.some((rule) =>
+      matchesCiAlertRule(
+        rule,
+        { repo: input.repo, branch, actor: input.actor },
+        ignoreActor,
+      ),
+    )
+  )
 }
 
 // octo-sts token acquisition failing is a persistent auth outage, not a
@@ -209,14 +235,14 @@ const stripStepSha = (step: string): string => {
 }
 
 const buildTaskDescription = (
-  input: WorkflowRunInput,
+  input: WorkflowRunInput & { branch: string },
   failedStep: FailedStep | null,
   origin: WorkflowOrigin,
   originTask: TqTaskRef | null,
   trigger: string,
 ): string => {
   const repo = formatTaskDescriptionText(input.repo)
-  const branch = formatTaskDescriptionText(input.defaultBranch)
+  const branch = formatTaskDescriptionText(input.branch)
   const workflow = formatTaskDescriptionText(input.workflow)
   const failedStepDescription =
     failedStep === null
@@ -249,7 +275,7 @@ const buildContextText = (input: WorkflowRunInput): string => {
 }
 
 const formatWorkflowRunNotification = (
-  input: WorkflowRunInput,
+  input: WorkflowRunInput & { branch: string },
   failedStep: FailedStep | null,
   pullRequest: PullRequestSummary | null,
   originTask: TqTaskRef | null,
@@ -338,9 +364,10 @@ const lookupOriginTask = (
 export const buildWorkflowRunNotification = (
   input: WorkflowRunInput,
   deps: WorkflowRunNotificationDeps,
+  ciAlertRules: CiAlertRule[] = [],
 ): ResultAsync<WorkflowRunNotification | null, never> => {
   if (input.conclusion !== 'failure') return okAsync(null)
-  if (!isEligibleWorkflowRun(input)) return okAsync(null)
+  if (!isEligibleWorkflowRun(input, ciAlertRules)) return okAsync(null)
 
   const failedStep = deps.githubClient
     .findFailedStep(input.repoOwner, input.repoName, input.runId)
@@ -360,21 +387,33 @@ export const buildWorkflowRunNotification = (
   // from the commit sha; every other event either has no PR (schedule,
   // workflow_dispatch) or already reports its own context via
   // displayTitle, so skip the lookup rather than call the API for nothing.
+  // Default-branch commits can point to merged PRs from other branches, while
+  // a non-default run must use a PR from that same head branch.
   const pullRequest =
     input.event === 'push'
-      ? deps.githubClient
-          .findPullRequestForCommit(input.repoOwner, input.repoName, input.sha)
-          .orElse((error) => {
-            reportGitHubApiFailure(error, {
-              repo: input.repo,
-              sha: input.sha,
-            })
-            logger.warn(
-              { err: error, repo: input.repo, sha: input.sha },
-              'github_api_pull_request_lookup_failed',
+      ? (input.branch === input.defaultBranch
+          ? deps.githubClient.findPullRequestForCommit(
+              input.repoOwner,
+              input.repoName,
+              input.sha,
             )
-            return okAsync(null)
+          : deps.githubClient.findPullRequestForCommit(
+              input.repoOwner,
+              input.repoName,
+              input.sha,
+              input.branch,
+            )
+        ).orElse((error) => {
+          reportGitHubApiFailure(error, {
+            repo: input.repo,
+            sha: input.sha,
           })
+          logger.warn(
+            { err: error, repo: input.repo, sha: input.sha },
+            'github_api_pull_request_lookup_failed',
+          )
+          return okAsync(null)
+        })
       : okAsync(null)
 
   return failedStep.andThen((step) =>

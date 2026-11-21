@@ -9,6 +9,11 @@ import {
 import type { OctoStsConfig } from '@fohte/service-kit/octo-sts'
 import type { Result } from 'neverthrow'
 
+import {
+  type CiAlertRule,
+  parseCiAlertRules,
+} from '#sources/github/ci-alert-rules'
+
 export interface Config {
   githubWebhookSecret: string
   sentryWebhookSecret: string
@@ -22,6 +27,7 @@ export interface Config {
   tqApiUrl: string
   tqWebUrl: string
   port: number
+  ciAlertRules: CiAlertRule[]
   octoSts: OctoStsConfig
 }
 
@@ -45,6 +51,7 @@ export const loadConfig = (
     tqApiUrl: requireString(env, 'TQ_API_URL'),
     tqWebUrl: optionalString(env, 'TQ_WEB_URL', 'https://tq.fohte.net'),
     port: optionalInt(env, 'PORT', 8080, { min: 1, max: 65_535 }),
+    ciAlertRules: parseCiAlertRules(env['GITHUB_CI_ALERT_RULES'] ?? '[]'),
     octoStsUrl: requireString(env, 'OCTO_STS_URL'),
     octoStsScope: requireString(env, 'OCTO_STS_SCOPE'),
     octoStsIdentity: requireString(env, 'OCTO_STS_IDENTITY'),
@@ -66,6 +73,7 @@ export const loadConfig = (
     tqApiUrl: f.tqApiUrl,
     tqWebUrl: f.tqWebUrl,
     port: f.port,
+    ciAlertRules: f.ciAlertRules,
     octoSts: {
       url: f.octoStsUrl,
       scope: f.octoStsScope,

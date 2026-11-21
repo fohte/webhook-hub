@@ -2,6 +2,7 @@ import { Webhooks } from '@octokit/webhooks'
 
 import type { GitHubClient } from '#github-client'
 import type { TqClient } from '#plugins/tq/tq-client'
+import type { CiAlertRule } from '#sources/github/ci-alert-rules'
 import { dispatch } from '#sources/github/dispatch'
 import type { WebhookSource } from '#webhook-source'
 
@@ -11,6 +12,7 @@ export const createGithubSource = (
   githubClient: GitHubClient,
   tqClient: TqClient,
   tqWebUrl: string,
+  ciAlertRules: CiAlertRule[] = [],
 ): WebhookSource => {
   const webhooks = new Webhooks({ secret: webhookSecret })
   return {
@@ -40,6 +42,7 @@ export const createGithubSource = (
           githubClient,
           tqClient,
           tqWebUrl,
+          ciAlertRules,
         },
         { name: context.eventName, payload },
       ),

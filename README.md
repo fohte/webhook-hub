@@ -9,7 +9,7 @@
 
 Only the following events are forwarded to Slack; everything else is acknowledged with `200` and dropped.
 
-- **CI failures on the default branch** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the head branch matches the repository's default branch. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change. A later successful run for the same repository, workflow, and branch folds earlier failure alerts.
+- **CI failures on the default branch or configured branches** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the run is on the repository's default branch or matches `GITHUB_CI_ALERT_RULES`. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change. A later successful run for the same repository, workflow, and branch folds earlier failure alerts.
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
 - **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`. `issue` webhooks with `action=resolved` or `action=unresolved` fold or restore every matching notification among up to the 1,000 most recent Slack messages.
 - **Grafana alerts** — each firing or resolved alert is posted separately. Redeliveries with the same fingerprint and `startsAt` update the existing Slack message without creating another tq task; a later incident with the same fingerprint gets its own message and task.
@@ -32,6 +32,7 @@ CI, Sentry, and Grafana alert notifications include a `todo` status and a [tq ta
 | Variable                 | Required | Default                                  | Description                                                                                                   |
 | ------------------------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                                                |
+| `GITHUB_CI_ALERT_RULES`  | No       | `[]`                                     | JSON rules for CI failure alerts on selected branches; see the example below.                                 |
 | `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
 | `GRAFANA_WEBHOOK_SECRET` | Yes      | —                                        | Shared secret for `X-Grafana-Alerting-Signature` verification.                                                |
 | `TQ_WEBHOOK_SECRET`      | Yes      | —                                        | Shared secret for `X-Tq-Signature-256` verification.                                                          |
@@ -47,6 +48,14 @@ CI, Sentry, and Grafana alert notifications include a `todo` status and a [tq ta
 | `OCTO_STS_SCOPE`         | Yes      | —                                        | GitHub org octo-sts issues the token for (owner-only, not `owner/repo`).                                      |
 | `OCTO_STS_IDENTITY`      | Yes      | —                                        | octo-sts trust policy identity to assume.                                                                     |
 | `OCTO_STS_SA_TOKEN_PATH` | No       | `/var/run/secrets/tokens/octo-sts-token` | Path to the projected Kubernetes ServiceAccount token used as the OIDC token.                                 |
+
+Each rule requires glob strings `repo` (the full `owner/repo` name) and `branch`; `actor` (`workflow_run.actor.login`) is optional. `*` matches any sequence of characters, including `/`, and literal characters are case-sensitive. Fields within a rule combine with AND; entries combine with OR. Successful runs apply repository and branch matching while ignoring `actor`. An unset variable or `[]` keeps notifications limited to the default branch. Invalid JSON or rule shapes fail configuration validation at startup.
+
+For example:
+
+```sh
+GITHUB_CI_ALERT_RULES='[{"repo":"sample-org/*","branch":"generated-sync-*","actor":"automation-bot[bot]"}]'
+```
 
 ## Setup
 

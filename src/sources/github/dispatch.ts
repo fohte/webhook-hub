@@ -21,6 +21,7 @@ import {
   type SlackMessageMetadata,
   type SlackNotifier,
 } from '#slack'
+import type { CiAlertRule } from '#sources/github/ci-alert-rules'
 import {
   buildIssueNotification,
   extractIssueInput,
@@ -52,6 +53,7 @@ export interface DispatchContext {
   githubClient: GitHubClient
   tqClient: TqClient
   tqWebUrl: string
+  ciAlertRules: CiAlertRule[]
 }
 
 interface ParsedEvent {
@@ -60,7 +62,9 @@ interface ParsedEvent {
 }
 
 const createWorkflowRunAlertMetadata = (
-  input: WorkflowRunInput,
+  input: Pick<WorkflowRunInput, 'repo' | 'workflowId' | 'runId'> & {
+    branch: string
+  },
   taskId: string | null,
 ): SlackMessageMetadata => ({
   event_type: 'alert_task',
@@ -78,7 +82,9 @@ const resolveWorkflowRunAlerts = (
   ctx: DispatchContext,
   input: WorkflowRunInput,
 ): ResultAsync<DispatchOutcome, SlackApiError> => {
-  if (!isEligibleWorkflowRun(input)) return okAsync('filtered')
+  if (!isEligibleWorkflowRun(input, ctx.ciAlertRules, true)) {
+    return okAsync('filtered')
+  }
 
   let resolvedAny = false
   const updateFailures: SlackApiError[] = []
@@ -174,11 +180,18 @@ export const dispatch = (
       if (input.conclusion === 'success') {
         return resolveWorkflowRunAlerts(ctx, input)
       }
-      return buildWorkflowRunNotification(input, {
-        githubClient: ctx.githubClient,
-        tqClient: ctx.tqClient,
-      }).andThen((note) => {
+      return buildWorkflowRunNotification(
+        input,
+        {
+          githubClient: ctx.githubClient,
+          tqClient: ctx.tqClient,
+        },
+        ctx.ciAlertRules,
+      ).andThen((note) => {
         if (note === null) return okAsync<DispatchOutcome>('filtered')
+        const { branch } = input
+        if (branch === null) return okAsync<DispatchOutcome>('filtered')
+
         return createAlertTask(ctx.tqClient, note.task, {
           delivery_id: ctx.deliveryId,
           event: 'workflow_run',
@@ -189,7 +202,15 @@ export const dispatch = (
               note.content,
               task,
               ctx.tqWebUrl,
-              createWorkflowRunAlertMetadata(input, task?.id ?? null),
+              createWorkflowRunAlertMetadata(
+                {
+                  repo: input.repo,
+                  workflowId: input.workflowId,
+                  branch,
+                  runId: input.runId,
+                },
+                task?.id ?? null,
+              ),
             )
             return ctx.notifier.postMessage(content)
           })

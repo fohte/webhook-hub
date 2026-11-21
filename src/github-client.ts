@@ -26,6 +26,7 @@ export interface GitHubClient {
     owner: string,
     repo: string,
     sha: string,
+    headBranch?: string,
   ): ResultAsync<PullRequestSummary | null, GitHubApiError>
   findFailedStep(
     owner: string,
@@ -40,6 +41,7 @@ interface PullRequestResponseItem {
   number: number
   title: string
   html_url: string
+  head: { ref: string }
 }
 
 interface JobsResponse {
@@ -93,11 +95,14 @@ export const createGitHubClient = (
       })
 
   return {
-    findPullRequestForCommit: (owner, repo, sha) =>
+    findPullRequestForCommit: (owner, repo, sha, headBranch) =>
       request<PullRequestResponseItem[]>(
         `/repos/${owner}/${repo}/commits/${sha}/pulls`,
       ).map((prs) => {
-        const pr = prs[0]
+        const pr =
+          headBranch === undefined
+            ? prs[0]
+            : prs.find(({ head }) => head.ref === headBranch)
         return pr === undefined
           ? null
           : { number: pr.number, title: pr.title, url: pr.html_url }
