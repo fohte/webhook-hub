@@ -179,6 +179,20 @@ example-owner/example-repo の main で CI が失敗している。
     )
   })
 
+  it('passes a non-default run branch to the pull request lookup', async () => {
+    const deps = createDeps()
+
+    await buildWorkflowRunNotification(
+      baseInput({ branch: 'generated-sync/topic', defaultBranch: 'main' }),
+      deps,
+      [{ repo: 'example-owner/*', branch: 'generated-sync*' }],
+    )
+
+    expect(deps.githubClient.findPullRequestForCommit.mock.calls).toEqual([
+      ['example-owner', 'example-repo', 'b'.repeat(40), 'generated-sync/topic'],
+    ])
+  })
+
   it('omits the tq task mention when the PR has no linked task', async () => {
     const pullRequestUrl =
       'https://github.com/example-owner/example-repo/pull/75'

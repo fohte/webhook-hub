@@ -29,6 +29,68 @@ describe('createGitHubClient', () => {
   })
 
   describe('findPullRequestForCommit', () => {
+    it('returns the PR whose head branch matches the workflow run', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          jsonResponse([
+            {
+              number: 12,
+              title: 'Update unrelated settings',
+              html_url: 'https://github.com/fohte/example/pull/12',
+              head: { ref: 'unrelated-branch' },
+            },
+            {
+              number: 13,
+              title: 'Refresh generated files',
+              html_url: 'https://github.com/fohte/example/pull/13',
+              head: { ref: 'generated-sync/topic' },
+            },
+          ]),
+        ),
+      )
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findPullRequestForCommit(
+        'fohte',
+        'example',
+        'sha1',
+        'generated-sync/topic',
+      )
+
+      expect(result._unsafeUnwrap()).toEqual({
+        number: 13,
+        title: 'Refresh generated files',
+        url: 'https://github.com/fohte/example/pull/13',
+      })
+    })
+
+    it('returns null when no associated PR has the workflow run branch', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          jsonResponse([
+            {
+              number: 12,
+              title: 'Update unrelated settings',
+              html_url: 'https://github.com/fohte/example/pull/12',
+              head: { ref: 'unrelated-branch' },
+            },
+          ]),
+        ),
+      )
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findPullRequestForCommit(
+        'fohte',
+        'example',
+        'sha1',
+        'generated-sync/topic',
+      )
+
+      expect(result._unsafeUnwrap()).toBeNull()
+    })
+
     it('returns the first PR summary for the commit', async () => {
       const fetchMock = vi.fn().mockResolvedValue(
         jsonResponse([

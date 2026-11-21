@@ -387,21 +387,33 @@ export const buildWorkflowRunNotification = (
   // from the commit sha; every other event either has no PR (schedule,
   // workflow_dispatch) or already reports its own context via
   // displayTitle, so skip the lookup rather than call the API for nothing.
+  // Default-branch commits can point to merged PRs from other branches, while
+  // a non-default run must use a PR from that same head branch.
   const pullRequest =
     input.event === 'push'
-      ? deps.githubClient
-          .findPullRequestForCommit(input.repoOwner, input.repoName, input.sha)
-          .orElse((error) => {
-            reportGitHubApiFailure(error, {
-              repo: input.repo,
-              sha: input.sha,
-            })
-            logger.warn(
-              { err: error, repo: input.repo, sha: input.sha },
-              'github_api_pull_request_lookup_failed',
+      ? (input.branch === input.defaultBranch
+          ? deps.githubClient.findPullRequestForCommit(
+              input.repoOwner,
+              input.repoName,
+              input.sha,
             )
-            return okAsync(null)
+          : deps.githubClient.findPullRequestForCommit(
+              input.repoOwner,
+              input.repoName,
+              input.sha,
+              input.branch,
+            )
+        ).orElse((error) => {
+          reportGitHubApiFailure(error, {
+            repo: input.repo,
+            sha: input.sha,
           })
+          logger.warn(
+            { err: error, repo: input.repo, sha: input.sha },
+            'github_api_pull_request_lookup_failed',
+          )
+          return okAsync(null)
+        })
       : okAsync(null)
 
   return failedStep.andThen((step) =>
