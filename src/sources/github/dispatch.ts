@@ -62,7 +62,9 @@ interface ParsedEvent {
 }
 
 const createWorkflowRunAlertMetadata = (
-  input: WorkflowRunInput,
+  input: Pick<WorkflowRunInput, 'repo' | 'workflowId' | 'runId'> & {
+    branch: string
+  },
   taskId: string | null,
 ): SlackMessageMetadata => ({
   event_type: 'alert_task',
@@ -187,6 +189,9 @@ export const dispatch = (
         ctx.ciAlertRules,
       ).andThen((note) => {
         if (note === null) return okAsync<DispatchOutcome>('filtered')
+        const { branch } = input
+        if (branch === null) return okAsync<DispatchOutcome>('filtered')
+
         return createAlertTask(ctx.tqClient, note.task, {
           delivery_id: ctx.deliveryId,
           event: 'workflow_run',
@@ -197,7 +202,15 @@ export const dispatch = (
               note.content,
               task,
               ctx.tqWebUrl,
-              createWorkflowRunAlertMetadata(input, task?.id ?? null),
+              createWorkflowRunAlertMetadata(
+                {
+                  repo: input.repo,
+                  workflowId: input.workflowId,
+                  branch,
+                  runId: input.runId,
+                },
+                task?.id ?? null,
+              ),
             )
             return ctx.notifier.postMessage(content)
           })

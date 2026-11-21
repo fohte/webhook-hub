@@ -318,7 +318,7 @@ const workflowRunPayload = (overrides: {
   action?: string
   conclusion?: string
   headRepo?: string
-  branch?: string
+  branch?: string | null
   defaultBranch?: string
   repoOwner?: string
   repoName?: string
@@ -343,7 +343,7 @@ const workflowRunPayload = (overrides: {
     workflow_id: overrides.workflowId ?? 101,
     name: overrides.workflowName ?? 'CI',
     event: 'push',
-    head_branch: overrides.branch ?? 'main',
+    head_branch: overrides.branch === undefined ? 'main' : overrides.branch,
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
     head_commit: { message: 'fix: something' },
     display_title: 'fix: something',
@@ -604,6 +604,34 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
       slackTexts: ['🚨 CI failed'],
     })
   })
+
+  it.each(['failure', 'success'])(
+    'filters a %s run with no branch when configured rules exist',
+    async (conclusion) => {
+      const outcome = await dispatchOutcome(
+        createContext(
+          'workflow_run',
+          createNotifier(),
+          createTqClient(),
+          TQ_WEB_URL,
+          createGithubClient(),
+          [{ repo: 'sample-org/*', branch: '*' }],
+        ),
+        {
+          name: 'workflow_run',
+          payload: workflowRunPayload({
+            conclusion,
+            repo: 'sample-org/sample-app',
+            repoOwner: 'sample-org',
+            repoName: 'sample-app',
+            branch: null,
+          }),
+        },
+      )
+
+      expect(outcome).toEqual('filtered')
+    },
+  )
 
   it('posts the CI alert without a task link when tq task creation fails', async () => {
     const notifier = createNotifier()

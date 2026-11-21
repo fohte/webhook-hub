@@ -26,7 +26,7 @@ export interface WorkflowRunInput {
   repoName: string
   headRepo: string
   workflow: string
-  branch: string
+  branch: string | null
   defaultBranch: string
   workflowId: number
   conclusion: WorkflowRunCompletedEvent['workflow_run']['conclusion']
@@ -79,13 +79,22 @@ export const isEligibleWorkflowRun = (
   input: WorkflowRunInput,
   ciAlertRules: CiAlertRule[] = [],
   ignoreActor = false,
-): boolean => {
+): input is WorkflowRunInput & { branch: string } => {
+  const { branch } = input
+
   // Fork-originated runs can expose the fork's branch alongside the upstream
   // repository's default branch, so the head repository must also match.
+  if (input.headRepo !== input.repo || branch === null) return false
+
   return (
-    input.headRepo === input.repo &&
-    (input.branch === input.defaultBranch ||
-      ciAlertRules.some((rule) => matchesCiAlertRule(rule, input, ignoreActor)))
+    branch === input.defaultBranch ||
+    ciAlertRules.some((rule) =>
+      matchesCiAlertRule(
+        rule,
+        { repo: input.repo, branch, actor: input.actor },
+        ignoreActor,
+      ),
+    )
   )
 }
 
@@ -223,7 +232,7 @@ const stripStepSha = (step: string): string => {
 }
 
 const buildTaskDescription = (
-  input: WorkflowRunInput,
+  input: WorkflowRunInput & { branch: string },
   failedStep: FailedStep | null,
   origin: WorkflowOrigin,
   originTask: TqTaskRef | null,
@@ -263,7 +272,7 @@ const buildContextText = (input: WorkflowRunInput): string => {
 }
 
 const formatWorkflowRunNotification = (
-  input: WorkflowRunInput,
+  input: WorkflowRunInput & { branch: string },
   failedStep: FailedStep | null,
   pullRequest: PullRequestSummary | null,
   originTask: TqTaskRef | null,
