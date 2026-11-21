@@ -244,6 +244,27 @@ const observeConfiguredFailureDispatch = (
   slackTexts: notifier.postMessage.mock.calls.map(([content]) => content.text),
 })
 
+const observeWorkflowRunDispatch = (
+  outcome: DispatchOutcome,
+  tqClient: ReturnType<typeof createTqClient>,
+  notifier: ReturnType<typeof createNotifier>,
+) => ({
+  outcome,
+  taskCalls: tqClient.createTask.mock.calls.length,
+  slackPosts: notifier.postMessage.mock.calls.length,
+})
+
+const observeWorkflowRunResolution = (
+  outcome: DispatchOutcome,
+  notifier: ReturnType<typeof createNotifier>,
+  tqClient: ReturnType<typeof createTqClient>,
+) => ({
+  outcome,
+  updateRefs: notifier.updateMessage.mock.calls.map(([ref]) => ref),
+  postMessages: notifier.postMessage.mock.calls,
+  taskCalls: tqClient.createTask.mock.calls,
+})
+
 const observeWorkflowRunLookupFailure = (
   outcome: DispatchOutcome,
   tqClient: ReturnType<typeof createTqClient>,
@@ -331,7 +352,7 @@ const workflowRunPayload = (overrides: {
   workflowName?: string
   runId?: number
   runUrl?: string
-  actor?: string
+  actor?: string | null
 }): unknown => ({
   action: overrides.action ?? 'completed',
   repository: {
@@ -351,7 +372,8 @@ const workflowRunPayload = (overrides: {
     head_sha: 'abcdef1234567890abcdef1234567890abcdef12',
     head_commit: { message: 'fix: something' },
     display_title: 'fix: something',
-    actor: { login: overrides.actor ?? 'octocat' },
+    actor:
+      overrides.actor === null ? null : { login: overrides.actor ?? 'octocat' },
     triggering_actor: { login: 'octocat' },
     html_url:
       overrides.runUrl ?? 'https://github.com/fohte/example/actions/runs/1',
@@ -608,6 +630,53 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
       slackTexts: ['🚨 CI failed'],
     })
   })
+
+  it.each([
+    {
+      name: 'a rule without an actor condition',
+      rule: { repo: 'sample-org/*', branch: 'generated-sync*' },
+      expected: { outcome: 'notified', taskCalls: 1, slackPosts: 1 },
+    },
+    {
+      name: 'a rule with an actor condition',
+      rule: {
+        repo: 'sample-org/*',
+        branch: 'generated-sync*',
+        actor: 'automation-bot[bot]',
+      },
+      expected: { outcome: 'filtered', taskCalls: 0, slackPosts: 0 },
+    },
+  ])(
+    'handles a workflow run without an actor for $name',
+    async ({ rule, expected }) => {
+      const notifier = createNotifier()
+      const tqClient = createTqClient()
+      const outcome = await dispatchOutcome(
+        createContext(
+          'workflow_run',
+          notifier,
+          tqClient,
+          TQ_WEB_URL,
+          undefined,
+          [rule],
+        ),
+        {
+          name: 'workflow_run',
+          payload: workflowRunPayload({
+            repo: 'sample-org/sample-app',
+            repoOwner: 'sample-org',
+            repoName: 'sample-app',
+            branch: 'generated-sync/topic',
+            actor: null,
+          }),
+        },
+      )
+
+      expect(observeWorkflowRunDispatch(outcome, tqClient, notifier)).toEqual(
+        expected,
+      )
+    },
+  )
 
   it.each(['failure', 'success'])(
     'filters a %s run with no branch when configured rules exist',
@@ -960,6 +1029,57 @@ fohte/example の main で CI が失敗している。
         ],
       ],
       postMessageCalls: [],
+      taskCalls: [],
+    })
+  })
+
+  it('resolves alerts for a successful run without an actor', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const alert = workflowAlertContent({
+      alertId: 'existing-alert',
+      runId: 401,
+      repo: 'sample-org/ci-app',
+      workflowId: 73,
+      branch: 'generated-sync-target',
+    })
+    notifier.findMessagesByMetadata.mockReturnValue(
+      okAsync([
+        {
+          ref: { channel: 'C1', ts: 'active-alert' },
+          eventPayload: alert.metadata?.event_payload ?? {},
+          content: alert,
+        },
+      ]),
+    )
+
+    const outcome = await dispatchOutcome(
+      createContext('workflow_run', notifier, tqClient, TQ_WEB_URL, undefined, [
+        {
+          repo: 'sample-org/*',
+          branch: 'generated-sync*',
+          actor: 'automation-bot[bot]',
+        },
+      ]),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({
+          conclusion: 'success',
+          repo: 'sample-org/ci-app',
+          repoOwner: 'sample-org',
+          repoName: 'ci-app',
+          workflowId: 73,
+          runId: 500,
+          branch: 'generated-sync-target',
+          actor: null,
+        }),
+      },
+    )
+
+    expect(observeWorkflowRunResolution(outcome, notifier, tqClient)).toEqual({
+      outcome: 'notified',
+      updateRefs: [{ channel: 'C1', ts: 'active-alert' }],
+      postMessages: [],
       taskCalls: [],
     })
   })

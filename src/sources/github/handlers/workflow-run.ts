@@ -36,7 +36,7 @@ export interface WorkflowRunInput {
   event: string
   displayTitle: string
   commitMessage: string
-  actor: string
+  actor: string | null
   triggeringActor: string
 }
 
@@ -52,6 +52,9 @@ export interface WorkflowRunNotificationDeps {
   githubClient: GitHubClient
   tqClient: Pick<TqClient, 'findTaskByGithubUrl'>
 }
+
+const getActorLogin = (actor: { login: string } | null): string | null =>
+  actor?.login ?? null
 
 export const extractWorkflowRunInput = (
   payload: WorkflowRunCompletedEvent,
@@ -71,7 +74,7 @@ export const extractWorkflowRunInput = (
   event: payload.workflow_run.event,
   displayTitle: payload.workflow_run.display_title,
   commitMessage: payload.workflow_run.head_commit.message,
-  actor: payload.workflow_run.actor.login,
+  actor: getActorLogin(payload.workflow_run.actor),
   triggeringActor: payload.workflow_run.triggering_actor.login,
 })
 

@@ -56,11 +56,11 @@ const matchesGlob = (glob: string, value: string): boolean => {
 
 export const matchesCiAlertRule = (
   rule: CiAlertRule,
-  input: { repo: string; branch: string; actor: string },
+  input: { repo: string; branch: string; actor: string | null },
   ignoreActor: boolean,
 ): boolean =>
   matchesGlob(rule.repo, input.repo) &&
   matchesGlob(rule.branch, input.branch) &&
   (ignoreActor ||
     rule.actor === undefined ||
-    matchesGlob(rule.actor, input.actor))
+    (input.actor !== null && matchesGlob(rule.actor, input.actor)))
