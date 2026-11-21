@@ -567,6 +567,21 @@ example-owner/example-repo の generated-sync/path-target で CI が失敗して
     expect(result._unsafeUnwrap()).toBeNull()
   })
 
+  it('filters long branches without pathological wildcard matching cost', async () => {
+    const result = await buildWorkflowRunNotification(
+      baseInput({ branch: 'a'.repeat(25) }),
+      createDeps(),
+      [
+        {
+          repo: 'example*repo',
+          branch: 'a*a*a*a*a*a*a*a*a*a*b',
+        },
+      ],
+    )
+
+    expect(result._unsafeUnwrap()).toBeNull()
+  })
+
   it('keeps fork runs excluded even when a configured rule matches', async () => {
     const result = await buildWorkflowRunNotification(
       baseInput({

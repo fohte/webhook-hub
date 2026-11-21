@@ -1,3 +1,5 @@
+import { EnvValidationError } from '@fohte/service-kit/env'
+import { err } from 'neverthrow'
 import { describe, expect, it } from 'vitest'
 
 import { loadConfig } from '#config'
@@ -57,7 +59,7 @@ describe('loadConfig', () => {
     )
   })
 
-  it('loads CI alert rules and defaults to an empty list when unset', () => {
+  it('loads configured CI alert rules', () => {
     expect(
       loadConfig({
         ...ENV,
@@ -73,22 +75,39 @@ describe('loadConfig', () => {
         },
       ]),
     )
+  })
+
+  it('uses an empty CI alert rule list when configured as an empty array', () => {
     expect(
       loadConfig({ ...ENV, GITHUB_CI_ALERT_RULES: '[]' })._unsafeUnwrap(),
     ).toEqual(expectedConfig())
+  })
+
+  it('uses an empty CI alert rule list when unset', () => {
     expect(loadConfig(ENV)._unsafeUnwrap()).toEqual(expectedConfig())
   })
 
   it.each([
-    { description: 'invalid JSON', value: '[' },
-    { description: 'a missing branch', value: '[{"repo":"sample-org/*"}]' },
+    {
+      description: 'invalid JSON',
+      value: '[',
+      error: 'GITHUB_CI_ALERT_RULES must be valid JSON',
+    },
+    {
+      description: 'a missing branch',
+      value: '[{"repo":"sample-org/*"}]',
+      error:
+        'GITHUB_CI_ALERT_RULES must be an array of rules with string repo and branch and optional string actor',
+    },
     {
       description: 'a non-string actor',
       value: '[{"repo":"sample-org/*","branch":"*","actor":2}]',
+      error:
+        'GITHUB_CI_ALERT_RULES must be an array of rules with string repo and branch and optional string actor',
     },
-  ])('rejects $description', ({ value }) => {
-    expect(loadConfig({ ...ENV, GITHUB_CI_ALERT_RULES: value }).isErr()).toBe(
-      true,
+  ])('rejects $description', ({ value, error }) => {
+    expect(loadConfig({ ...ENV, GITHUB_CI_ALERT_RULES: value })).toEqual(
+      err(new EnvValidationError([error])),
     )
   })
 

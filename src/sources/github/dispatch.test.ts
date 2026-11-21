@@ -234,6 +234,16 @@ const observeDispatch = <TOutcome, TTaskCalls>(
   findMessageCalls,
 })
 
+const observeConfiguredFailureDispatch = (
+  outcome: DispatchOutcome,
+  tqClient: ReturnType<typeof createTqClient>,
+  notifier: ReturnType<typeof createNotifier>,
+) => ({
+  outcome,
+  taskCalls: tqClient.createTask.mock.calls,
+  slackTexts: notifier.postMessage.mock.calls.map(([content]) => content.text),
+})
+
 const observeWorkflowRunLookupFailure = (
   outcome: DispatchOutcome,
   tqClient: ReturnType<typeof createTqClient>,
@@ -534,6 +544,64 @@ fohte/example の main で CI が失敗している。
         ],
       ],
       findMessageCalls: 0,
+    })
+  })
+
+  it('notifies a failed run matched by configured rules', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const outcome = await dispatchOutcome(
+      createContext('workflow_run', notifier, tqClient, TQ_WEB_URL, undefined, [
+        {
+          repo: 'sample-org/*',
+          branch: 'generated-sync*',
+          actor: 'automation-bot[bot]',
+        },
+      ]),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({
+          repo: 'sample-org/sample-app',
+          repoOwner: 'sample-org',
+          repoName: 'sample-app',
+          branch: 'generated-sync/path-target',
+          actor: 'automation-bot[bot]',
+          runUrl: 'https://github.com/sample-org/sample-app/actions/runs/1',
+        }),
+      },
+    )
+
+    expect(
+      observeConfiguredFailureDispatch(outcome, tqClient, notifier),
+    ).toEqual({
+      outcome: 'notified',
+      taskCalls: [
+        [
+          {
+            title: 'sample-org/sample-app: CI が失敗',
+            description: `## なぜやるか
+
+sample-org/sample-app の generated-sync/path-target で CI が失敗している。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+失敗箇所を直す。
+
+- 失敗箇所: 不明
+- Run: https://github.com/sample-org/sample-app/actions/runs/1
+
+## 完了条件
+
+- [ ] generated-sync/path-target の CI が成功する`,
+            context: 'personal',
+            labels: ['alert/ci', 'dev/sample-app'],
+          },
+        ],
+      ],
+      slackTexts: ['🚨 CI failed'],
     })
   })
 

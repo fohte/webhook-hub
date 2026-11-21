@@ -16,21 +16,43 @@ export const parseCiAlertRules = (
 ): Result<CiAlertRule[], string> =>
   Result.fromThrowable(
     (raw: string): unknown => JSON.parse(raw) as unknown,
-    (cause) => `GITHUB_CI_ALERT_RULES must be valid JSON: ${String(cause)}`,
+    () => 'GITHUB_CI_ALERT_RULES must be valid JSON',
   )(value).andThen((candidate) => {
     const parsed = z.array(CiAlertRuleSchema).safeParse(candidate)
     return parsed.success
       ? ok(parsed.data)
       : err(
-          `GITHUB_CI_ALERT_RULES has an invalid shape: ${parsed.error.message}`,
+          'GITHUB_CI_ALERT_RULES must be an array of rules with string repo and branch and optional string actor',
         )
   })
 
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+const matchesGlob = (glob: string, value: string): boolean => {
+  let globIndex = 0
+  let valueIndex = 0
+  let lastStarIndex = -1
+  let valueIndexAfterStar = 0
 
-const matchesGlob = (glob: string, value: string): boolean =>
-  new RegExp(`^${glob.split('*').map(escapeRegExp).join('.*')}$`).test(value)
+  while (valueIndex < value.length) {
+    const current = glob[globIndex]
+    if (current === value[valueIndex]) {
+      globIndex += 1
+      valueIndex += 1
+    } else if (current === '*') {
+      lastStarIndex = globIndex
+      globIndex += 1
+      valueIndexAfterStar = valueIndex
+    } else if (lastStarIndex >= 0) {
+      globIndex = lastStarIndex + 1
+      valueIndex = valueIndexAfterStar + 1
+      valueIndexAfterStar = valueIndex
+    } else {
+      return false
+    }
+  }
+
+  while (glob[globIndex] === '*') globIndex += 1
+  return globIndex === glob.length
+}
 
 export const matchesCiAlertRule = (
   rule: CiAlertRule,
