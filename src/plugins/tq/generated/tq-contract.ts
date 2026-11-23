@@ -138,6 +138,16 @@ export const CreateTaskResponse = z
         })
         .passthrough(),
     ),
+    blockedByGithubRefs: z.array(
+      z
+        .object({
+          owner: z.string(),
+          repo: z.string(),
+          number: z.number().int().gte(-9007199254740991).lte(9007199254740991),
+          url: z.string().url(),
+        })
+        .passthrough(),
+    ),
     createdAt: z
       .string()
       .regex(
