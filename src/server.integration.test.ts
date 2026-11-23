@@ -47,7 +47,9 @@ const createGithubClient = () => ({
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
   findCancelledWorkflowRun: vi
     .fn()
-    .mockReturnValue(okAsync({ type: 'cancelled', step: null })),
+    .mockReturnValue(
+      okAsync({ type: 'cancelled', step: null, annotationLookupError: null }),
+    ),
 })
 
 const createTqClient = (): TqClient => ({

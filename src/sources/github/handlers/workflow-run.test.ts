@@ -68,11 +68,14 @@ const createDeps = (
     findFailedStep: vi
       .fn()
       .mockReturnValue(overrides.failedStep ?? okAsync(null)),
-    findCancelledWorkflowRun: vi
-      .fn()
-      .mockReturnValue(
-        overrides.cancelledRun ?? okAsync({ type: 'cancelled', step: null }),
-      ),
+    findCancelledWorkflowRun: vi.fn().mockReturnValue(
+      overrides.cancelledRun ??
+        okAsync({
+          type: 'cancelled',
+          step: null,
+          annotationLookupError: null,
+        }),
+    ),
   },
   tqClient: {
     findTaskByGithubUrl: vi
@@ -344,6 +347,7 @@ example-owner/example-repo の main で CI が失敗している。
       cancelledRun: okAsync({
         type: 'cancelled',
         step: { job: 'deploy', step: 'Apply changes' },
+        annotationLookupError: null,
       }),
     })
 
@@ -375,7 +379,7 @@ example-owner/example-repo の main で CI が失敗している。
         title: 'example-owner/example-repo: CI がキャンセル',
         description: `## なぜやるか
 
-example-owner/example-repo の main で CI がキャンセルしている。
+example-owner/example-repo の main で CI がキャンセルされている。
 
 - 起点の PR: fix: something
 - トリガー: push
@@ -425,7 +429,7 @@ example-owner/example-repo の main で CI がキャンセルしている。
         ],
         `## なぜやるか
 
-example-owner/example-repo の main で CI がキャンセルしている。
+example-owner/example-repo の main で CI がキャンセルされている。
 
 - 起点の PR: fix: something
 - トリガー: push
@@ -459,7 +463,10 @@ example-owner/example-repo の main で CI がキャンセルしている。
 
   it('filters cancelled runs superseded by a higher priority run', async () => {
     const deps = createDeps({
-      cancelledRun: okAsync({ type: 'superseded' }),
+      cancelledRun: okAsync({
+        type: 'superseded',
+        annotationLookupError: null,
+      }),
     })
 
     const result = await buildWorkflowRunNotification(

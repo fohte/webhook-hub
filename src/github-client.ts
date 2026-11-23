@@ -22,7 +22,15 @@ export interface FailedStep {
 }
 
 export type CancelledWorkflowRun =
-  { type: 'superseded' } | { type: 'cancelled'; step: FailedStep | null }
+  | {
+      type: 'superseded'
+      annotationLookupError: GitHubApiError | null
+    }
+  | {
+      type: 'cancelled'
+      step: FailedStep | null
+      annotationLookupError: GitHubApiError | null
+    }
 
 export interface GitHubClient {
   findPullRequestForCommit(
@@ -62,6 +70,15 @@ interface JobsResponse {
 
 interface CheckRunAnnotation {
   message: string
+}
+
+type AnnotationLookupResult =
+  | { annotations: CheckRunAnnotation[]; error: null }
+  | { annotations: null; error: GitHubApiError }
+
+interface ConcurrencyCancellationLookup {
+  superseded: boolean
+  annotationLookupError: GitHubApiError | null
 }
 
 const CONCURRENCY_CANCELLATION_MESSAGE_PREFIX =
@@ -117,30 +134,50 @@ export const createGitHubClient = (
     repo: string,
     jobs: JobsResponse['jobs'],
     index = 0,
-  ): ResultAsync<boolean, GitHubApiError> => {
+    previousError: GitHubApiError | null = null,
+  ): ResultAsync<ConcurrencyCancellationLookup, never> => {
     const batch = jobs.slice(index, index + ANNOTATION_LOOKUP_BATCH_SIZE)
-    if (batch.length === 0) return okAsync(false)
+    if (batch.length === 0)
+      return okAsync({
+        superseded: false,
+        annotationLookupError: previousError,
+      })
 
     return ResultAsync.combine(
       batch.map(({ id }) =>
         request<CheckRunAnnotation[]>(
           `/repos/${owner}/${repo}/check-runs/${String(id)}/annotations?per_page=100`,
-        ),
+        )
+          .map((annotations): AnnotationLookupResult => ({
+            annotations,
+            error: null,
+          }))
+          .orElse((error) =>
+            okAsync<AnnotationLookupResult>({ annotations: null, error }),
+          ),
       ),
-    ).andThen((annotationsByJob) =>
-      annotationsByJob.some((annotations) =>
-        annotations.some(({ message }) =>
-          message.startsWith(CONCURRENCY_CANCELLATION_MESSAGE_PREFIX),
-        ),
+    ).andThen((results) => {
+      const annotationLookupError =
+        previousError ??
+        results.find(({ error }) => error !== null)?.error ??
+        null
+      const superseded = results.some(
+        ({ annotations }) =>
+          annotations !== null &&
+          annotations.some(({ message }) =>
+            message.startsWith(CONCURRENCY_CANCELLATION_MESSAGE_PREFIX),
+          ),
       )
-        ? okAsync(true)
+      return superseded
+        ? okAsync({ superseded, annotationLookupError })
         : findConcurrencyCancellation(
             owner,
             repo,
             jobs,
             index + ANNOTATION_LOOKUP_BATCH_SIZE,
-          ),
-    )
+            annotationLookupError,
+          )
+    })
   }
 
   const findWorkflowRunJobs = (
@@ -185,11 +222,14 @@ export const createGitHubClient = (
     findCancelledWorkflowRun: (owner, repo, runId) =>
       findWorkflowRunJobs(owner, repo, runId).andThen((jobs) => {
         if (jobs.length === 0)
-          return okAsync<CancelledWorkflowRun>({ type: 'superseded' })
+          return okAsync<CancelledWorkflowRun>({
+            type: 'superseded',
+            annotationLookupError: null,
+          })
 
         return findConcurrencyCancellation(owner, repo, jobs).map(
-          (superseded): CancelledWorkflowRun => {
-            if (superseded) return { type: 'superseded' }
+          ({ superseded, annotationLookupError }): CancelledWorkflowRun => {
+            if (superseded) return { type: 'superseded', annotationLookupError }
 
             const cancelledStep =
               jobs.flatMap((job) =>
@@ -201,6 +241,7 @@ export const createGitHubClient = (
             return {
               type: 'cancelled',
               step: cancelledStep,
+              annotationLookupError,
             }
           },
         )

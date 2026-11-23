@@ -248,7 +248,8 @@ const buildTaskDescription = (
     failedStep === null
       ? '不明'
       : `${formatTaskDescriptionCode(failedStep.job)} › ${formatTaskDescriptionCode(stripStepSha(failedStep.step))}`
-  const runStatus = input.conclusion === 'cancelled' ? 'キャンセル' : '失敗'
+  const runStatus =
+    input.conclusion === 'cancelled' ? 'キャンセルされている' : '失敗している'
   const nextAction =
     input.conclusion === 'cancelled'
       ? '停止箇所を確認する。'
@@ -257,7 +258,7 @@ const buildTaskDescription = (
   return [
     '## なぜやるか',
     '',
-    `${repo} の ${branch} で ${workflow} が${runStatus}している。`,
+    `${repo} の ${branch} で ${workflow} が${runStatus}。`,
     '',
     `- 起点の PR: ${buildTaskOrigin(origin, originTask)}`,
     `- トリガー: ${trigger}`,
@@ -388,11 +389,26 @@ export const buildWorkflowRunNotification = (
             input.repoName,
             input.runId,
           )
-          .map((run) =>
-            run.type === 'superseded'
+          .map((run) => {
+            if (run.annotationLookupError !== null) {
+              reportGitHubApiFailure(run.annotationLookupError, {
+                repo: input.repo,
+                run_id: input.runId,
+              })
+              logger.warn(
+                {
+                  err: run.annotationLookupError,
+                  repo: input.repo,
+                  run_id: input.runId,
+                },
+                'github_api_cancelled_run_annotation_lookup_failed',
+              )
+            }
+
+            return run.type === 'superseded'
               ? { type: 'superseded' as const }
-              : { type: 'notification' as const, step: run.step },
-          )
+              : { type: 'notification' as const, step: run.step }
+          })
   const stepLookupWithFallback = stepLookup.orElse((error) => {
     reportGitHubApiFailure(error, {
       repo: input.repo,

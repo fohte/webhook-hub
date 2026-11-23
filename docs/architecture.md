@@ -104,7 +104,7 @@ The message is posted with a custom bot identity (username `GitHub CI`, GitHub A
 
 The PR and step lookups use the GitHub REST API via octo-sts. A failed PR lookup on `push` falls back to the commit message's first line, and an unavailable failed or cancelled step displays `不明`; the notification still posts in either case. Cancelled runs are excluded when the jobs list is empty or a job annotation starts with `Canceling since a higher priority waiting request`, which identifies runs replaced by a concurrency request.
 
-A successful run on the default branch or a configured branch folds unresolved failure alerts for the same repository, workflow, and branch. Configured branch matching ignores `actor`, so a human push can resolve an alert created by a bot push. It only folds alerts from runs whose run ID is less than or equal to the successful run, so a delayed success cannot fold a newer failure. A later failure posts a new alert and leaves earlier folded alerts folded. Slack history lookup is limited to the latest 400 channel messages.
+A successful run on the default branch or a configured branch folds unresolved workflow run alerts for the same repository, workflow, and branch. Configured branch matching ignores `actor`, so a human push can resolve an alert created by a bot push. It only folds alerts from runs whose run ID is less than or equal to the successful run, so a delayed success cannot fold a newer alert. A later failure or cancellation posts a new alert and leaves earlier folded alerts folded. Slack history lookup is limited to the latest 400 channel messages.
 
 ### `pull_request`
 

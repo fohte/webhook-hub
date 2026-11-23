@@ -49,7 +49,8 @@ const createGithubClient = (
   findCancelledWorkflowRun: vi
     .fn()
     .mockReturnValue(
-      overrides.cancelledRun ?? okAsync({ type: 'cancelled', step: null }),
+      overrides.cancelledRun ??
+        okAsync({ type: 'cancelled', step: null, annotationLookupError: null }),
     ),
 })
 
@@ -654,6 +655,7 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
       cancelledRun: okAsync({
         type: 'cancelled',
         step: { job: 'deploy', step: 'Apply changes' },
+        annotationLookupError: null,
       }),
     })
     const outcome = await dispatchOutcome(
@@ -696,7 +698,10 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
     const notifier = createNotifier()
     const tqClient = createTqClient()
     const githubClient = createGithubClient({
-      cancelledRun: okAsync({ type: 'superseded' }),
+      cancelledRun: okAsync({
+        type: 'superseded',
+        annotationLookupError: null,
+      }),
     })
     const outcome = await dispatchOutcome(
       createContext(

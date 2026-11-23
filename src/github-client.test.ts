@@ -254,10 +254,63 @@ describe('createGitHubClient', () => {
         result: {
           type: 'cancelled',
           step: { job: 'deploy', step: 'Apply changes' },
+          annotationLookupError: null,
         },
         urls: [
           'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
           'https://api.github.com/repos/example-owner/example-repo/check-runs/123/annotations?per_page=100',
+        ],
+      })
+    })
+
+    it('keeps the cancelled step when an annotation lookup fails', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            jobs: [
+              {
+                id: 123,
+                name: 'deploy',
+                steps: [{ name: 'Apply changes', conclusion: 'cancelled' }],
+              },
+              {
+                id: 124,
+                name: 'verify',
+                steps: [{ name: 'Check output', conclusion: 'cancelled' }],
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse([]))
+        .mockResolvedValueOnce(jsonResponse(undefined, 403))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findCancelledWorkflowRun(
+        'example-owner',
+        'example-repo',
+        42,
+      )
+
+      expect(
+        observeCancelledRun(
+          result._unsafeUnwrap(),
+          fetchMock.mock.calls.map(([url]) => String(url)),
+        ),
+      ).toEqual({
+        result: {
+          type: 'cancelled',
+          step: { job: 'deploy', step: 'Apply changes' },
+          annotationLookupError: new GitHubApiError(
+            'GitHub API returned HTTP 403: /repos/example-owner/example-repo/check-runs/124/annotations?per_page=100',
+            undefined,
+          ),
+        },
+        urls: [
+          'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
+          'https://api.github.com/repos/example-owner/example-repo/check-runs/123/annotations?per_page=100',
+          'https://api.github.com/repos/example-owner/example-repo/check-runs/124/annotations?per_page=100',
         ],
       })
     })
@@ -279,7 +332,7 @@ describe('createGitHubClient', () => {
           fetchMock.mock.calls.map(([url]) => String(url)),
         ),
       ).toEqual({
-        result: { type: 'superseded' },
+        result: { type: 'superseded', annotationLookupError: null },
         urls: [
           'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
         ],
@@ -337,7 +390,7 @@ describe('createGitHubClient', () => {
       expect(
         observeCancellationPagination(result._unsafeUnwrap(), urls),
       ).toEqual({
-        result: { type: 'superseded' },
+        result: { type: 'superseded', annotationLookupError: null },
         jobPages: [
           'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
           'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=2',
@@ -394,7 +447,7 @@ describe('createGitHubClient', () => {
           fetchMock.mock.calls.map(([url]) => String(url)),
         ),
       ).toEqual({
-        result: { type: 'superseded' },
+        result: { type: 'superseded', annotationLookupError: null },
         urls: [
           'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
           'https://api.github.com/repos/example-owner/example-repo/check-runs/123/annotations?per_page=100',
