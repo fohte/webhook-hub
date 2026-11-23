@@ -23,6 +23,11 @@ const jsonResponse = (body: unknown, status = 200) => ({
   json: () => Promise.resolve(body),
 })
 
+const observeCancelledRun = (result: unknown, urls: string[]) => ({
+  result,
+  urls,
+})
+
 describe('createGitHubClient', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -192,6 +197,137 @@ describe('createGitHubClient', () => {
       const result = await client.findFailedStep('fohte', 'example', 42)
 
       expect(result._unsafeUnwrap()).toBeNull()
+    })
+  })
+
+  describe('findCancelledWorkflowRun', () => {
+    it('returns the cancelled step when annotations do not indicate replacement', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            jobs: [
+              {
+                id: 123,
+                name: 'deploy',
+                steps: [
+                  { name: 'Checkout', conclusion: 'success' },
+                  { name: 'Apply changes', conclusion: 'cancelled' },
+                ],
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              message:
+                'The job has exceeded the maximum execution time of 15m0s',
+            },
+          ]),
+        )
+      vi.stubGlobal('fetch', fetchMock)
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findCancelledWorkflowRun(
+        'fohte',
+        'example',
+        42,
+      )
+
+      expect(
+        observeCancelledRun(
+          result._unsafeUnwrap(),
+          fetchMock.mock.calls.map(([url]) => String(url)),
+        ),
+      ).toEqual({
+        result: {
+          type: 'cancelled',
+          step: { job: 'deploy', step: 'Apply changes' },
+        },
+        urls: [
+          'https://api.github.com/repos/fohte/example/actions/runs/42/jobs?per_page=100',
+          'https://api.github.com/repos/fohte/example/check-runs/123/annotations?per_page=100',
+        ],
+      })
+    })
+
+    it('marks runs with no jobs as superseded without requesting annotations', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ jobs: [] }))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findCancelledWorkflowRun(
+        'fohte',
+        'example',
+        42,
+      )
+
+      expect(
+        observeCancelledRun(
+          result._unsafeUnwrap(),
+          fetchMock.mock.calls.map(([url]) => String(url)),
+        ),
+      ).toEqual({
+        result: { type: 'superseded' },
+        urls: [
+          'https://api.github.com/repos/fohte/example/actions/runs/42/jobs?per_page=100',
+        ],
+      })
+    })
+
+    it('marks runs with a higher priority cancellation annotation as superseded', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            jobs: [
+              {
+                id: 123,
+                name: 'build',
+                steps: [{ name: 'Build', conclusion: 'cancelled' }],
+              },
+              {
+                id: 124,
+                name: 'deploy',
+                steps: [{ name: 'Deploy', conclusion: 'cancelled' }],
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse([{ message: 'Other cancellation' }]),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              message:
+                'Canceling since a higher priority waiting request was received',
+            },
+          ]),
+        )
+      vi.stubGlobal('fetch', fetchMock)
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findCancelledWorkflowRun(
+        'fohte',
+        'example',
+        42,
+      )
+
+      expect(
+        observeCancelledRun(
+          result._unsafeUnwrap(),
+          fetchMock.mock.calls.map(([url]) => String(url)),
+        ),
+      ).toEqual({
+        result: { type: 'superseded' },
+        urls: [
+          'https://api.github.com/repos/fohte/example/actions/runs/42/jobs?per_page=100',
+          'https://api.github.com/repos/fohte/example/check-runs/123/annotations?per_page=100',
+          'https://api.github.com/repos/fohte/example/check-runs/124/annotations?per_page=100',
+        ],
+      })
     })
   })
 

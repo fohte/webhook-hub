@@ -248,18 +248,23 @@ const buildTaskDescription = (
     failedStep === null
       ? '不明'
       : `${formatTaskDescriptionCode(failedStep.job)} › ${formatTaskDescriptionCode(stripStepSha(failedStep.step))}`
+  const runStatus = input.conclusion === 'cancelled' ? 'キャンセル' : '失敗'
+  const nextAction =
+    input.conclusion === 'cancelled'
+      ? '停止箇所を確認する。'
+      : '失敗箇所を直す。'
 
   return [
     '## なぜやるか',
     '',
-    `${repo} の ${branch} で ${workflow} が失敗している。`,
+    `${repo} の ${branch} で ${workflow} が${runStatus}している。`,
     '',
     `- 起点の PR: ${buildTaskOrigin(origin, originTask)}`,
     `- トリガー: ${trigger}`,
     '',
     '## やること',
     '',
-    '失敗箇所を直す。',
+    nextAction,
     '',
     `- 失敗箇所: ${failedStepDescription}`,
     `- Run: ${input.url}`,
@@ -281,7 +286,9 @@ const formatWorkflowRunNotification = (
   originTask: TqTaskRef | null,
 ): WorkflowRunNotification => {
   const workflowName = normalizeTextLine(input.workflow)
-  const headerText = truncateHeaderText(`🚨 ${input.workflow} failed`)
+  const runStatus = input.conclusion === 'cancelled' ? 'cancelled' : 'failed'
+  const taskStatus = input.conclusion === 'cancelled' ? 'キャンセル' : '失敗'
+  const headerText = truncateHeaderText(`🚨 ${input.workflow} ${runStatus}`)
   const origin = resolveWorkflowOrigin(input, pullRequest)
   const originLine = buildOriginLine(origin)
   const triggerLabels = buildTriggerLabels(input)
@@ -328,7 +335,7 @@ const formatWorkflowRunNotification = (
       iconUrl: GITHUB_CI_ICON_URL,
     },
     task: {
-      title: `${input.repo}: ${workflowName} が失敗`,
+      title: `${input.repo}: ${workflowName} が${taskStatus}`,
       description: buildTaskDescription(
         input,
         failedStep,
@@ -366,22 +373,39 @@ export const buildWorkflowRunNotification = (
   deps: WorkflowRunNotificationDeps,
   ciAlertRules: CiAlertRule[] = [],
 ): ResultAsync<WorkflowRunNotification | null, never> => {
-  if (input.conclusion !== 'failure') return okAsync(null)
+  if (input.conclusion !== 'failure' && input.conclusion !== 'cancelled')
+    return okAsync(null)
   if (!isEligibleWorkflowRun(input, ciAlertRules)) return okAsync(null)
 
-  const failedStep = deps.githubClient
-    .findFailedStep(input.repoOwner, input.repoName, input.runId)
-    .orElse((error) => {
-      reportGitHubApiFailure(error, {
-        repo: input.repo,
-        run_id: input.runId,
-      })
-      logger.warn(
-        { err: error, repo: input.repo, run_id: input.runId },
-        'github_api_failed_step_lookup_failed',
-      )
-      return okAsync(null)
+  const stepLookup =
+    input.conclusion === 'failure'
+      ? deps.githubClient
+          .findFailedStep(input.repoOwner, input.repoName, input.runId)
+          .map((step) => ({ type: 'notification' as const, step }))
+      : deps.githubClient
+          .findCancelledWorkflowRun(
+            input.repoOwner,
+            input.repoName,
+            input.runId,
+          )
+          .map((run) =>
+            run.type === 'superseded'
+              ? { type: 'superseded' as const }
+              : { type: 'notification' as const, step: run.step },
+          )
+  const stepLookupWithFallback = stepLookup.orElse((error) => {
+    reportGitHubApiFailure(error, {
+      repo: input.repo,
+      run_id: input.runId,
     })
+    logger.warn(
+      { err: error, repo: input.repo, run_id: input.runId },
+      input.conclusion === 'cancelled'
+        ? 'github_api_cancelled_run_lookup_failed'
+        : 'github_api_failed_step_lookup_failed',
+    )
+    return okAsync({ type: 'notification' as const, step: null })
+  })
 
   // PR lookup only applies to `push` runs, where the PR must be inferred
   // from the commit sha; every other event either has no PR (schedule,
@@ -389,38 +413,44 @@ export const buildWorkflowRunNotification = (
   // displayTitle, so skip the lookup rather than call the API for nothing.
   // Default-branch commits can point to merged PRs from other branches, while
   // a non-default run must use a PR from that same head branch.
-  const pullRequest =
-    input.event === 'push'
-      ? (input.branch === input.defaultBranch
-          ? deps.githubClient.findPullRequestForCommit(
-              input.repoOwner,
-              input.repoName,
-              input.sha,
-            )
-          : deps.githubClient.findPullRequestForCommit(
-              input.repoOwner,
-              input.repoName,
-              input.sha,
-              input.branch,
-            )
-        ).orElse((error) => {
-          reportGitHubApiFailure(error, {
-            repo: input.repo,
-            sha: input.sha,
-          })
-          logger.warn(
-            { err: error, repo: input.repo, sha: input.sha },
-            'github_api_pull_request_lookup_failed',
-          )
-          return okAsync(null)
-        })
-      : okAsync(null)
+  const lookupPullRequest = () => {
+    if (input.event !== 'push') return okAsync<PullRequestSummary | null>(null)
 
-  return failedStep.andThen((step) =>
-    pullRequest.andThen((pr) =>
+    const pullRequest =
+      input.branch === input.defaultBranch
+        ? deps.githubClient.findPullRequestForCommit(
+            input.repoOwner,
+            input.repoName,
+            input.sha,
+          )
+        : deps.githubClient.findPullRequestForCommit(
+            input.repoOwner,
+            input.repoName,
+            input.sha,
+            input.branch,
+          )
+
+    return pullRequest.orElse((error) => {
+      reportGitHubApiFailure(error, {
+        repo: input.repo,
+        sha: input.sha,
+      })
+      logger.warn(
+        { err: error, repo: input.repo, sha: input.sha },
+        'github_api_pull_request_lookup_failed',
+      )
+      return okAsync(null)
+    })
+  }
+
+  return stepLookupWithFallback.andThen((result) => {
+    if (result.type === 'superseded') return okAsync(null)
+
+    const step = result.step
+    return lookupPullRequest().andThen((pr) =>
       lookupOriginTask(input, pr, deps.tqClient).map((originTask) =>
         formatWorkflowRunNotification(input, step, pr, originTask),
       ),
-    ),
-  )
+    )
+  })
 }

@@ -1,5 +1,5 @@
 import type { OctoStsTokenCache } from '@fohte/service-kit/octo-sts'
-import { errAsync, ResultAsync } from 'neverthrow'
+import { errAsync, okAsync, ResultAsync } from 'neverthrow'
 
 import { BoundaryError } from '#errors'
 
@@ -21,6 +21,9 @@ export interface FailedStep {
   step: string
 }
 
+export type CancelledWorkflowRun =
+  { type: 'superseded' } | { type: 'cancelled'; step: FailedStep | null }
+
 export interface GitHubClient {
   findPullRequestForCommit(
     owner: string,
@@ -33,6 +36,11 @@ export interface GitHubClient {
     repo: string,
     runId: number,
   ): ResultAsync<FailedStep | null, GitHubApiError>
+  findCancelledWorkflowRun(
+    owner: string,
+    repo: string,
+    runId: number,
+  ): ResultAsync<CancelledWorkflowRun, GitHubApiError>
 }
 
 const GITHUB_API_BASE = 'https://api.github.com'
@@ -46,10 +54,18 @@ interface PullRequestResponseItem {
 
 interface JobsResponse {
   jobs: Array<{
+    id: number
     name: string
     steps: Array<{ name: string; conclusion: string | null }>
   }>
 }
+
+interface CheckRunAnnotation {
+  message: string
+}
+
+const CONCURRENCY_CANCELLATION_MESSAGE_PREFIX =
+  'Canceling since a higher priority waiting request'
 
 export const createGitHubClient = (
   tokenCache: OctoStsTokenCache,
@@ -94,6 +110,26 @@ export const createGitHubClient = (
         )
       })
 
+  const findConcurrencyCancellation = (
+    owner: string,
+    repo: string,
+    jobs: JobsResponse['jobs'],
+    index = 0,
+  ): ResultAsync<boolean, GitHubApiError> => {
+    const job = jobs[index]
+    if (job === undefined) return okAsync(false)
+
+    return request<CheckRunAnnotation[]>(
+      `/repos/${owner}/${repo}/check-runs/${String(job.id)}/annotations?per_page=100`,
+    ).andThen((annotations) =>
+      annotations.some(({ message }) =>
+        message.startsWith(CONCURRENCY_CANCELLATION_MESSAGE_PREFIX),
+      )
+        ? okAsync(true)
+        : findConcurrencyCancellation(owner, repo, jobs, index + 1),
+    )
+  }
+
   return {
     findPullRequestForCommit: (owner, repo, sha, headBranch) =>
       request<PullRequestResponseItem[]>(
@@ -116,6 +152,31 @@ export const createGitHubClient = (
           if (step !== undefined) return { job: job.name, step: step.name }
         }
         return null
+      }),
+    findCancelledWorkflowRun: (owner, repo, runId) =>
+      request<JobsResponse>(
+        `/repos/${owner}/${repo}/actions/runs/${String(runId)}/jobs?per_page=100`,
+      ).andThen(({ jobs }) => {
+        if (jobs.length === 0)
+          return okAsync<CancelledWorkflowRun>({ type: 'superseded' })
+
+        return findConcurrencyCancellation(owner, repo, jobs).map(
+          (superseded): CancelledWorkflowRun => {
+            if (superseded) return { type: 'superseded' }
+
+            const cancelledStep =
+              jobs.flatMap((job) =>
+                job.steps
+                  .filter((step) => step.conclusion === 'cancelled')
+                  .map((step) => ({ job: job.name, step: step.name })),
+              )[0] ?? null
+
+            return {
+              type: 'cancelled',
+              step: cancelledStep,
+            }
+          },
+        )
       }),
   }
 }

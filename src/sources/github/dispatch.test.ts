@@ -39,12 +39,18 @@ const createNotifier = () => ({
 const createGithubClient = (
   overrides: {
     pullRequest?: ReturnType<GitHubClient['findPullRequestForCommit']>
+    cancelledRun?: ReturnType<GitHubClient['findCancelledWorkflowRun']>
   } = {},
 ) => ({
   findPullRequestForCommit: vi
     .fn()
     .mockReturnValue(overrides.pullRequest ?? okAsync(null)),
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
+  findCancelledWorkflowRun: vi
+    .fn()
+    .mockReturnValue(
+      overrides.cancelledRun ?? okAsync({ type: 'cancelled', step: null }),
+    ),
 })
 
 const TQ_TASK_REF = {
@@ -252,6 +258,16 @@ const observeWorkflowRunDispatch = (
   outcome,
   taskCalls: tqClient.createTask.mock.calls.length,
   slackPosts: notifier.postMessage.mock.calls.length,
+})
+
+const observeCancelledWorkflowRunDispatch = (
+  outcome: DispatchOutcome,
+  tqClient: ReturnType<typeof createTqClient>,
+  notifier: ReturnType<typeof createNotifier>,
+  cancelledRunCalls: unknown,
+) => ({
+  ...observeWorkflowRunDispatch(outcome, tqClient, notifier),
+  cancelledRunCalls,
 })
 
 const observeWorkflowRunResolution = (
@@ -628,6 +644,79 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
         ],
       ],
       slackTexts: ['🚨 CI failed'],
+    })
+  })
+
+  it('posts a task and Slack alert for a cancelled run', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const githubClient = createGithubClient({
+      cancelledRun: okAsync({
+        type: 'cancelled',
+        step: { job: 'deploy', step: 'Apply changes' },
+      }),
+    })
+    const outcome = await dispatchOutcome(
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        TQ_WEB_URL,
+        githubClient,
+      ),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({ conclusion: 'cancelled' }),
+      },
+    )
+
+    expect(
+      observeCancelledWorkflowRunDispatch(
+        outcome,
+        tqClient,
+        notifier,
+        githubClient.findCancelledWorkflowRun.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'notified',
+      taskCalls: 1,
+      slackPosts: 1,
+      cancelledRunCalls: [['fohte', 'example', 1]],
+    })
+  })
+
+  it('filters cancelled runs superseded by a higher priority run', async () => {
+    const notifier = createNotifier()
+    const tqClient = createTqClient()
+    const githubClient = createGithubClient({
+      cancelledRun: okAsync({ type: 'superseded' }),
+    })
+    const outcome = await dispatchOutcome(
+      createContext(
+        'workflow_run',
+        notifier,
+        tqClient,
+        TQ_WEB_URL,
+        githubClient,
+      ),
+      {
+        name: 'workflow_run',
+        payload: workflowRunPayload({ conclusion: 'cancelled' }),
+      },
+    )
+
+    expect(
+      observeCancelledWorkflowRunDispatch(
+        outcome,
+        tqClient,
+        notifier,
+        githubClient.findCancelledWorkflowRun.mock.calls,
+      ),
+    ).toEqual({
+      outcome: 'filtered',
+      taskCalls: 0,
+      slackPosts: 0,
+      cancelledRunCalls: [['fohte', 'example', 1]],
     })
   })
 
