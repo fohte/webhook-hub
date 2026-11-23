@@ -188,6 +188,31 @@ describe('createGitHubClient', () => {
       })
     })
 
+    it('skips jobs without a steps list when finding a failed step', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          jsonResponse({
+            jobs: [
+              { name: 'queued deployment' },
+              {
+                name: 'test',
+                steps: [{ name: 'Run tests', conclusion: 'failure' }],
+              },
+            ],
+          }),
+        ),
+      )
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findFailedStep('fohte', 'example', 42)
+
+      expect(result._unsafeUnwrap()).toEqual({
+        job: 'test',
+        step: 'Run tests',
+      })
+    })
+
     it('returns null when no step failed', async () => {
       vi.stubGlobal(
         'fetch',
