@@ -46,12 +46,14 @@ const createDeps = (
   overrides: {
     pullRequest?: ReturnType<GitHubClient['findPullRequestForCommit']>
     failedStep?: ReturnType<GitHubClient['findFailedStep']>
+    cancelledRun?: ReturnType<GitHubClient['findCancelledWorkflowRun']>
     originTask?: ReturnType<TqClient['findTaskByGithubUrl']>
   } = {},
 ): WorkflowRunNotificationDeps & {
   githubClient: {
     findPullRequestForCommit: ReturnType<typeof vi.fn>
     findFailedStep: ReturnType<typeof vi.fn>
+    findCancelledWorkflowRun: ReturnType<typeof vi.fn>
   }
   tqClient: {
     findTaskByGithubUrl: ReturnType<
@@ -66,6 +68,14 @@ const createDeps = (
     findFailedStep: vi
       .fn()
       .mockReturnValue(overrides.failedStep ?? okAsync(null)),
+    findCancelledWorkflowRun: vi.fn().mockReturnValue(
+      overrides.cancelledRun ??
+        okAsync({
+          type: 'cancelled',
+          step: null,
+          annotationLookupError: null,
+        }),
+    ),
   },
   tqClient: {
     findTaskByGithubUrl: vi
@@ -97,12 +107,13 @@ const expectedNotification = (
   taskTitle: string,
   fields: [string, string][],
   taskDescription: string,
+  runStatus = 'failed',
 ) => ({
   content: {
-    text: `🚨 ${workflow} failed`,
+    text: `🚨 ${workflow} ${runStatus}`,
     color: '#d73a49',
     blocks: [
-      headerBlock(`🚨 ${workflow} failed`),
+      headerBlock(`🚨 ${workflow} ${runStatus}`),
       fieldsBlock(fields),
       contextBlock(
         '<https://github.com/example-owner/example-repo/actions/runs/42|View run>',
@@ -121,6 +132,29 @@ const expectedNotification = (
   workflow,
   url: 'https://github.com/example-owner/example-repo/actions/runs/42',
 })
+
+const observeCancellationFilter = <TResult, TCancelledCalls, TPullRequestCalls>(
+  result: TResult,
+  cancelledRunCalls: TCancelledCalls,
+  pullRequestCalls: TPullRequestCalls,
+) => ({ result, cancelledRunCalls, pullRequestCalls })
+
+const observeIneligibleRun = <
+  TResult,
+  TPullRequestCalls,
+  TFailedStepCalls,
+  TCancelledRunCalls,
+>(
+  result: TResult,
+  pullRequestCalls: TPullRequestCalls,
+  failedStepCalls: TFailedStepCalls,
+  cancelledRunCalls: TCancelledRunCalls,
+) => ({ result, pullRequestCalls, failedStepCalls, cancelledRunCalls })
+
+const observeNotificationAndCaptures = <TNotification, TCalls>(
+  notification: TNotification,
+  captureCalls: TCalls,
+) => ({ notification, captureCalls })
 
 describe('buildWorkflowRunNotification', () => {
   it('links the merged PR title on a push run when one is found', async () => {
@@ -306,6 +340,218 @@ example-owner/example-repo の main で CI が失敗している。
       'example-repo',
       42,
     )
+  })
+
+  it('notifies for cancelled runs and includes the cancelled step', async () => {
+    const deps = createDeps({
+      cancelledRun: okAsync({
+        type: 'cancelled',
+        step: { job: 'deploy', step: 'Apply changes' },
+        annotationLookupError: null,
+      }),
+    })
+
+    const result = await buildWorkflowRunNotification(
+      baseInput({ conclusion: 'cancelled' }),
+      deps,
+    )
+
+    expect(result._unsafeUnwrap()).toEqual({
+      content: {
+        text: '🚨 CI cancelled',
+        color: '#d73a49',
+        blocks: [
+          headerBlock('🚨 CI cancelled'),
+          fieldsBlock([
+            ['Repository', 'example-owner/example-repo'],
+            ['起点の PR', 'fix: something'],
+            ['失敗箇所', '`deploy` › `Apply changes`'],
+            ['トリガー', 'push'],
+          ]),
+          contextBlock(
+            '<https://github.com/example-owner/example-repo/actions/runs/42|View run>',
+          ),
+        ],
+        username: 'GitHub CI',
+        iconUrl: 'https://avatars.githubusercontent.com/in/15368',
+      },
+      task: {
+        title: 'example-owner/example-repo: CI がキャンセル',
+        description: `## なぜやるか
+
+example-owner/example-repo の main で CI がキャンセルされている。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+停止箇所を確認する。
+
+- 失敗箇所: \`deploy\` › \`Apply changes\`
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+        context: 'personal',
+        labels: ['alert/ci', 'dev/example-repo'],
+      },
+      repo: 'example-owner/example-repo',
+      workflow: 'CI',
+      url: 'https://github.com/example-owner/example-repo/actions/runs/42',
+    })
+  })
+
+  it('still notifies for cancelled runs when the GitHub lookup fails', async () => {
+    const lookupError = new GitHubApiError('boom', undefined)
+    const deps = createDeps({ cancelledRun: errAsync(lookupError) })
+
+    const result = await buildWorkflowRunNotification(
+      baseInput({ conclusion: 'cancelled' }),
+      deps,
+    )
+
+    expect(
+      observeNotificationAndCaptures(
+        result._unsafeUnwrap(),
+        vi.mocked(captureWithFingerprint).mock.calls,
+      ),
+    ).toEqual({
+      notification: expectedNotification(
+        'CI',
+        'example-owner/example-repo: CI がキャンセル',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'fix: something'],
+          ['失敗箇所', '不明'],
+          ['トリガー', 'push'],
+        ],
+        `## なぜやるか
+
+example-owner/example-repo の main で CI がキャンセルされている。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+停止箇所を確認する。
+
+- 失敗箇所: 不明
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+        'cancelled',
+      ),
+      captureCalls: [
+        [
+          lookupError,
+          'webhook-hub.github-api-lookup-failed',
+          {
+            extras: {
+              repo: 'example-owner/example-repo',
+              run_id: 42,
+            },
+          },
+        ],
+      ],
+    })
+  })
+
+  it('keeps the cancelled step and reports partial annotation lookup errors', async () => {
+    const lookupError = new GitHubApiError(
+      'annotation lookup failed',
+      undefined,
+    )
+    const deps = createDeps({
+      cancelledRun: okAsync({
+        type: 'cancelled',
+        step: { job: 'deploy', step: 'Apply changes' },
+        annotationLookupError: lookupError,
+      }),
+    })
+
+    const result = await buildWorkflowRunNotification(
+      baseInput({ conclusion: 'cancelled' }),
+      deps,
+    )
+
+    expect(
+      observeNotificationAndCaptures(
+        result._unsafeUnwrap(),
+        vi.mocked(captureWithFingerprint).mock.calls,
+      ),
+    ).toEqual({
+      notification: expectedNotification(
+        'CI',
+        'example-owner/example-repo: CI がキャンセル',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'fix: something'],
+          ['失敗箇所', '`deploy` › `Apply changes`'],
+          ['トリガー', 'push'],
+        ],
+        `## なぜやるか
+
+example-owner/example-repo の main で CI がキャンセルされている。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+停止箇所を確認する。
+
+- 失敗箇所: \`deploy\` › \`Apply changes\`
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+        'cancelled',
+      ),
+      captureCalls: [
+        [
+          lookupError,
+          'webhook-hub.github-api-lookup-failed',
+          {
+            extras: {
+              repo: 'example-owner/example-repo',
+              run_id: 42,
+            },
+          },
+        ],
+      ],
+    })
+  })
+
+  it('filters cancelled runs superseded by a higher priority run', async () => {
+    const deps = createDeps({
+      cancelledRun: okAsync({
+        type: 'superseded',
+        annotationLookupError: null,
+      }),
+    })
+
+    const result = await buildWorkflowRunNotification(
+      baseInput({ conclusion: 'cancelled' }),
+      deps,
+    )
+
+    expect(
+      observeCancellationFilter(
+        result._unsafeUnwrap(),
+        deps.githubClient.findCancelledWorkflowRun.mock.calls,
+        deps.githubClient.findPullRequestForCommit.mock.calls,
+      ),
+    ).toEqual({
+      result: null,
+      cancelledRunCalls: [['example-owner', 'example-repo', 42]],
+      pullRequestCalls: [],
+    })
   })
 
   it('falls back to the commit message first line on a push run when no PR is found', async () => {
@@ -922,10 +1168,6 @@ example-owner/example-repo の main で CI が失敗している。
       overrides: { conclusion: 'success' as const },
     },
     {
-      name: 'conclusion is cancelled',
-      overrides: { conclusion: 'cancelled' as const },
-    },
-    {
       name: 'head branch is not the default',
       overrides: { branch: 'feature/x' },
     },
@@ -943,9 +1185,19 @@ example-owner/example-repo の main で CI が失敗している。
         deps,
       )
 
-      expect(result._unsafeUnwrap()).toBeNull()
-      expect(deps.githubClient.findPullRequestForCommit).not.toHaveBeenCalled()
-      expect(deps.githubClient.findFailedStep).not.toHaveBeenCalled()
+      expect(
+        observeIneligibleRun(
+          result._unsafeUnwrap(),
+          deps.githubClient.findPullRequestForCommit.mock.calls,
+          deps.githubClient.findFailedStep.mock.calls,
+          deps.githubClient.findCancelledWorkflowRun.mock.calls,
+        ),
+      ).toEqual({
+        result: null,
+        pullRequestCalls: [],
+        failedStepCalls: [],
+        cancelledRunCalls: [],
+      })
     },
   )
 })

@@ -9,7 +9,7 @@
 
 Only the following events are forwarded to Slack; everything else is acknowledged with `200` and dropped.
 
-- **CI failures on the default branch or configured branches** — `workflow_run` events where `action=completed`, `conclusion=failure`, and the run is on the repository's default branch or matches `GITHUB_CI_ALERT_RULES`. Fork-originated runs are excluded. The notification is a Block Kit message with the failing job/step and, when available, a link to the PR that introduced the change. A later successful run for the same repository, workflow, and branch folds earlier failure alerts.
+- **CI failures and cancellations on the default branch or configured branches** — `workflow_run` events where `action=completed`, `conclusion=failure` or `cancelled`, and the run is on the repository's default branch or matches `GITHUB_CI_ALERT_RULES`. Fork-originated runs and cancellations caused by a concurrency replacement are excluded. The notification is a Block Kit message with the failed or cancelled job/step and, when available, a link to the PR that introduced the change. A later successful run for the same repository, workflow, and branch folds earlier alerts.
 - **Renovate security PRs** — `pull_request` events where either the title ends with `[security]` or the head branch matches `renovate/*-vulnerability`. The original `opened` notification is edited in place on `closed`: green border while open, purple when merged, red when closed without merging.
 - **Sentry issue alerts** — Sentry `event_alert` webhooks where `action=triggered`. `issue` webhooks with `action=resolved` or `action=unresolved` fold or restore every matching notification among up to the 1,000 most recent Slack messages.
 - **Grafana alerts** — each firing or resolved alert is posted separately. Redeliveries with the same fingerprint and `startsAt` update the existing Slack message without creating another tq task; a later incident with the same fingerprint gets its own message and task.
@@ -32,7 +32,7 @@ CI, Sentry, and Grafana alert notifications include a `todo` status and a [tq ta
 | Variable                 | Required | Default                                  | Description                                                                                                   |
 | ------------------------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `GITHUB_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for HMAC signature verification.                                                                |
-| `GITHUB_CI_ALERT_RULES`  | No       | `[]`                                     | JSON rules for CI failure alerts on selected branches; see the example below.                                 |
+| `GITHUB_CI_ALERT_RULES`  | No       | `[]`                                     | JSON rules for CI run alerts on selected branches; see the example below.                                     |
 | `SENTRY_WEBHOOK_SECRET`  | Yes      | —                                        | Shared secret for `Sentry-Hook-Signature` verification.                                                       |
 | `GRAFANA_WEBHOOK_SECRET` | Yes      | —                                        | Shared secret for `X-Grafana-Alerting-Signature` verification.                                                |
 | `TQ_WEBHOOK_SECRET`      | Yes      | —                                        | Shared secret for `X-Tq-Signature-256` verification.                                                          |
@@ -105,11 +105,11 @@ To run the service against real deliveries, these things need to be wired up.
    - Secret: same value as `TQ_WEBHOOK_SECRET`
    - Subscribe to `task.status_changed`
 
-6. **Provision octo-sts.** The CI-failure notification calls the GitHub REST API (PR lookup, failed job/step) via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. This requires an octo-sts trust policy that grants the deploying identity read-only `pull_requests` and `actions` permissions, and a Kubernetes ServiceAccount token projected into the container at the path configured by `OCTO_STS_SA_TOKEN_PATH`. The `OCTO_STS_*` variables above point the service at the octo-sts endpoint and the trust policy identity/scope to assume.
+6. **Provision octo-sts.** The GitHub Actions notification calls the GitHub REST API for PR lookup, job/step details, and annotations used to detect concurrency-replaced runs via [octo-sts](https://github.com/octo-sts/app) rather than a PAT, using a projected Kubernetes ServiceAccount token as the OIDC credential. This requires an octo-sts trust policy that grants the deploying identity read-only `pull_requests`, `actions`, and `checks` permissions, and a Kubernetes ServiceAccount token projected into the container at the path configured by `OCTO_STS_SA_TOKEN_PATH`. The `OCTO_STS_*` variables above point the service at the octo-sts endpoint and the trust policy identity/scope to assume.
 
 7. **Create the Slack bot.** Grant the following scopes, install it to the workspace, and invite it into the target channel. Use the bot token (`xoxb-...`) for `SLACK_BOT_TOKEN`.
    - `chat:write` — post and edit messages
-   - `chat:write.customize` — post CI-failure and Grafana-alert notifications under a custom username/icon
+   - `chat:write.customize` — post CI run and Grafana alert notifications under a custom username/icon
    - `channels:history` and `channels:read` (public channel) or `groups:history` and `groups:read` (private channel) — look up messages and resolve the channel name
    - `metadata.message:read` — read embedded alert fingerprints, task references, and PR identifiers on history items
    - `files:write` — upload Grafana panel images

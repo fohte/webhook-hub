@@ -45,6 +45,11 @@ const createNotifier = () => {
 const createGithubClient = () => ({
   findPullRequestForCommit: vi.fn().mockReturnValue(okAsync(null)),
   findFailedStep: vi.fn().mockReturnValue(okAsync(null)),
+  findCancelledWorkflowRun: vi
+    .fn()
+    .mockReturnValue(
+      okAsync({ type: 'cancelled', step: null, annotationLookupError: null }),
+    ),
 })
 
 const createTqClient = (): TqClient => ({
