@@ -21,7 +21,7 @@ export interface FailedStep {
   step: string
 }
 
-export type CancelledWorkflowRun =
+type CancelledWorkflowRun =
   | {
       type: 'superseded'
       annotationLookupError: GitHubApiError | null
