@@ -65,17 +65,18 @@ interface JobsResponse {
     id: number
     name: string
     conclusion: string | null
-    steps: Array<{ name: string; conclusion: string | null }>
+    steps?: Array<{ name: string; conclusion: string | null }> | null
   }>
 }
 
 interface CheckRunAnnotation {
-  message: string
+  message?: string | null
 }
 
-type AnnotationLookupResult =
-  | { annotations: CheckRunAnnotation[]; error: null }
-  | { annotations: null; error: GitHubApiError }
+interface AnnotationLookupResult {
+  superseded: boolean
+  error: GitHubApiError | null
+}
 
 interface ConcurrencyCancellationLookup {
   superseded: boolean
@@ -85,6 +86,7 @@ interface ConcurrencyCancellationLookup {
 const CONCURRENCY_CANCELLATION_MESSAGE_PREFIX =
   'Canceling since a higher priority waiting request'
 const JOBS_PAGE_SIZE = 100
+const ANNOTATION_PAGE_SIZE = 100
 const ANNOTATION_LOOKUP_BATCH_SIZE = 10
 
 export const createGitHubClient = (
@@ -146,15 +148,13 @@ export const createGitHubClient = (
 
     return ResultAsync.combine(
       batch.map(({ id }) =>
-        request<CheckRunAnnotation[]>(
-          `/repos/${owner}/${repo}/check-runs/${String(id)}/annotations?per_page=100`,
-        )
-          .map((annotations): AnnotationLookupResult => ({
-            annotations,
+        findCheckRunConcurrencyCancellation(owner, repo, id)
+          .map((superseded): AnnotationLookupResult => ({
+            superseded,
             error: null,
           }))
           .orElse((error) =>
-            okAsync<AnnotationLookupResult>({ annotations: null, error }),
+            okAsync<AnnotationLookupResult>({ superseded: false, error }),
           ),
       ),
     ).andThen((results) => {
@@ -162,13 +162,7 @@ export const createGitHubClient = (
         previousError ??
         results.find(({ error }) => error !== null)?.error ??
         null
-      const superseded = results.some(
-        ({ annotations }) =>
-          annotations !== null &&
-          annotations.some(({ message }) =>
-            message.startsWith(CONCURRENCY_CANCELLATION_MESSAGE_PREFIX),
-          ),
-      )
+      const superseded = results.some(({ superseded }) => superseded)
       return superseded
         ? okAsync({ superseded, annotationLookupError })
         : findConcurrencyCancellation(
@@ -180,6 +174,24 @@ export const createGitHubClient = (
           )
     })
   }
+
+  const findCheckRunConcurrencyCancellation = (
+    owner: string,
+    repo: string,
+    checkRunId: number,
+    page = 1,
+  ): ResultAsync<boolean, GitHubApiError> =>
+    request<CheckRunAnnotation[]>(
+      `/repos/${owner}/${repo}/check-runs/${String(checkRunId)}/annotations?per_page=${String(ANNOTATION_PAGE_SIZE)}&page=${String(page)}`,
+    ).andThen((annotations) => {
+      const superseded = annotations.some(
+        ({ message }) =>
+          message?.startsWith(CONCURRENCY_CANCELLATION_MESSAGE_PREFIX) ?? false,
+      )
+      return superseded || annotations.length < ANNOTATION_PAGE_SIZE
+        ? okAsync(superseded)
+        : findCheckRunConcurrencyCancellation(owner, repo, checkRunId, page + 1)
+    })
 
   const findWorkflowRunJobs = (
     owner: string,
@@ -215,7 +227,7 @@ export const createGitHubClient = (
         `/repos/${owner}/${repo}/actions/runs/${String(runId)}/jobs?per_page=100`,
       ).map(({ jobs }) => {
         for (const job of jobs) {
-          const step = job.steps.find((s) => s.conclusion === 'failure')
+          const step = job.steps?.find((s) => s.conclusion === 'failure')
           if (step !== undefined) return { job: job.name, step: step.name }
         }
         return null
@@ -231,7 +243,7 @@ export const createGitHubClient = (
         const cancellationCandidateJobs = jobs.filter(
           ({ conclusion, steps }) =>
             conclusion === 'cancelled' ||
-            steps.some((step) => step.conclusion === 'cancelled'),
+            (steps ?? []).some((step) => step.conclusion === 'cancelled'),
         )
 
         return findConcurrencyCancellation(
@@ -243,7 +255,7 @@ export const createGitHubClient = (
 
           const cancelledStep =
             jobs.flatMap((job) =>
-              job.steps
+              (job.steps ?? [])
                 .filter((step) => step.conclusion === 'cancelled')
                 .map((step) => ({ job: job.name, step: step.name })),
             )[0] ?? null
