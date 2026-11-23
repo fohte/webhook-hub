@@ -343,6 +343,7 @@ describe('createGitHubClient', () => {
       const firstPageJobs = Array.from({ length: 100 }, (_, index) => ({
         id: index + 1,
         name: `job-${String(index + 1)}`,
+        conclusion: 'success',
         steps: [],
       }))
       const fetchMock = vi.fn().mockImplementation((url: string) => {
@@ -356,7 +357,8 @@ describe('createGitHubClient', () => {
                       {
                         id: 101,
                         name: 'job-101',
-                        steps: [{ name: 'Build', conclusion: 'cancelled' }],
+                        conclusion: 'cancelled',
+                        steps: [],
                       },
                     ],
                   },
@@ -398,7 +400,7 @@ describe('createGitHubClient', () => {
         lateJobAnnotationCalls: [
           'https://api.github.com/repos/example-owner/example-repo/check-runs/101/annotations?per_page=100',
         ],
-        annotationRequestCount: 101,
+        annotationRequestCount: 1,
       })
     })
 

@@ -461,6 +461,73 @@ example-owner/example-repo の main で CI がキャンセルされている。
     })
   })
 
+  it('keeps the cancelled step and reports partial annotation lookup errors', async () => {
+    const lookupError = new GitHubApiError(
+      'annotation lookup failed',
+      undefined,
+    )
+    const deps = createDeps({
+      cancelledRun: okAsync({
+        type: 'cancelled',
+        step: { job: 'deploy', step: 'Apply changes' },
+        annotationLookupError: lookupError,
+      }),
+    })
+
+    const result = await buildWorkflowRunNotification(
+      baseInput({ conclusion: 'cancelled' }),
+      deps,
+    )
+
+    expect(
+      observeNotificationAndCaptures(
+        result._unsafeUnwrap(),
+        vi.mocked(captureWithFingerprint).mock.calls,
+      ),
+    ).toEqual({
+      notification: expectedNotification(
+        'CI',
+        'example-owner/example-repo: CI がキャンセル',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'fix: something'],
+          ['失敗箇所', '`deploy` › `Apply changes`'],
+          ['トリガー', 'push'],
+        ],
+        `## なぜやるか
+
+example-owner/example-repo の main で CI がキャンセルされている。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+停止箇所を確認する。
+
+- 失敗箇所: \`deploy\` › \`Apply changes\`
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+        'cancelled',
+      ),
+      captureCalls: [
+        [
+          lookupError,
+          'webhook-hub.github-api-lookup-failed',
+          {
+            extras: {
+              repo: 'example-owner/example-repo',
+              run_id: 42,
+            },
+          },
+        ],
+      ],
+    })
+  })
+
   it('filters cancelled runs superseded by a higher priority run', async () => {
     const deps = createDeps({
       cancelledRun: okAsync({

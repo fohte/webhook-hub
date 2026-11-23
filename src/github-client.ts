@@ -64,6 +64,7 @@ interface JobsResponse {
   jobs: Array<{
     id: number
     name: string
+    conclusion: string | null
     steps: Array<{ name: string; conclusion: string | null }>
   }>
 }
@@ -227,24 +228,32 @@ export const createGitHubClient = (
             annotationLookupError: null,
           })
 
-        return findConcurrencyCancellation(owner, repo, jobs).map(
-          ({ superseded, annotationLookupError }): CancelledWorkflowRun => {
-            if (superseded) return { type: 'superseded', annotationLookupError }
-
-            const cancelledStep =
-              jobs.flatMap((job) =>
-                job.steps
-                  .filter((step) => step.conclusion === 'cancelled')
-                  .map((step) => ({ job: job.name, step: step.name })),
-              )[0] ?? null
-
-            return {
-              type: 'cancelled',
-              step: cancelledStep,
-              annotationLookupError,
-            }
-          },
+        const cancellationCandidateJobs = jobs.filter(
+          ({ conclusion, steps }) =>
+            conclusion === 'cancelled' ||
+            steps.some((step) => step.conclusion === 'cancelled'),
         )
+
+        return findConcurrencyCancellation(
+          owner,
+          repo,
+          cancellationCandidateJobs,
+        ).map(({ superseded, annotationLookupError }): CancelledWorkflowRun => {
+          if (superseded) return { type: 'superseded', annotationLookupError }
+
+          const cancelledStep =
+            jobs.flatMap((job) =>
+              job.steps
+                .filter((step) => step.conclusion === 'cancelled')
+                .map((step) => ({ job: job.name, step: step.name })),
+            )[0] ?? null
+
+          return {
+            type: 'cancelled',
+            step: cancelledStep,
+            annotationLookupError,
+          }
+        })
       }),
   }
 }
