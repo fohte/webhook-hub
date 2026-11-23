@@ -66,6 +66,8 @@ interface CheckRunAnnotation {
 
 const CONCURRENCY_CANCELLATION_MESSAGE_PREFIX =
   'Canceling since a higher priority waiting request'
+const JOBS_PAGE_SIZE = 100
+const ANNOTATION_LOOKUP_BATCH_SIZE = 10
 
 export const createGitHubClient = (
   tokenCache: OctoStsTokenCache,
@@ -116,19 +118,46 @@ export const createGitHubClient = (
     jobs: JobsResponse['jobs'],
     index = 0,
   ): ResultAsync<boolean, GitHubApiError> => {
-    const job = jobs[index]
-    if (job === undefined) return okAsync(false)
+    const batch = jobs.slice(index, index + ANNOTATION_LOOKUP_BATCH_SIZE)
+    if (batch.length === 0) return okAsync(false)
 
-    return request<CheckRunAnnotation[]>(
-      `/repos/${owner}/${repo}/check-runs/${String(job.id)}/annotations?per_page=100`,
-    ).andThen((annotations) =>
-      annotations.some(({ message }) =>
-        message.startsWith(CONCURRENCY_CANCELLATION_MESSAGE_PREFIX),
+    return ResultAsync.combine(
+      batch.map(({ id }) =>
+        request<CheckRunAnnotation[]>(
+          `/repos/${owner}/${repo}/check-runs/${String(id)}/annotations?per_page=100`,
+        ),
+      ),
+    ).andThen((annotationsByJob) =>
+      annotationsByJob.some((annotations) =>
+        annotations.some(({ message }) =>
+          message.startsWith(CONCURRENCY_CANCELLATION_MESSAGE_PREFIX),
+        ),
       )
         ? okAsync(true)
-        : findConcurrencyCancellation(owner, repo, jobs, index + 1),
+        : findConcurrencyCancellation(
+            owner,
+            repo,
+            jobs,
+            index + ANNOTATION_LOOKUP_BATCH_SIZE,
+          ),
     )
   }
+
+  const findWorkflowRunJobs = (
+    owner: string,
+    repo: string,
+    runId: number,
+    page = 1,
+    previousJobs: JobsResponse['jobs'] = [],
+  ): ResultAsync<JobsResponse['jobs'], GitHubApiError> =>
+    request<JobsResponse>(
+      `/repos/${owner}/${repo}/actions/runs/${String(runId)}/jobs?per_page=${String(JOBS_PAGE_SIZE)}&page=${String(page)}`,
+    ).andThen(({ jobs }) => {
+      const allJobs = [...previousJobs, ...jobs]
+      return jobs.length < JOBS_PAGE_SIZE
+        ? okAsync(allJobs)
+        : findWorkflowRunJobs(owner, repo, runId, page + 1, allJobs)
+    })
 
   return {
     findPullRequestForCommit: (owner, repo, sha, headBranch) =>
@@ -154,9 +183,7 @@ export const createGitHubClient = (
         return null
       }),
     findCancelledWorkflowRun: (owner, repo, runId) =>
-      request<JobsResponse>(
-        `/repos/${owner}/${repo}/actions/runs/${String(runId)}/jobs?per_page=100`,
-      ).andThen(({ jobs }) => {
+      findWorkflowRunJobs(owner, repo, runId).andThen((jobs) => {
         if (jobs.length === 0)
           return okAsync<CancelledWorkflowRun>({ type: 'superseded' })
 

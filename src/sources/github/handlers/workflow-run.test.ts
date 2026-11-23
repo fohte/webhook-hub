@@ -104,12 +104,13 @@ const expectedNotification = (
   taskTitle: string,
   fields: [string, string][],
   taskDescription: string,
+  runStatus = 'failed',
 ) => ({
   content: {
-    text: `🚨 ${workflow} failed`,
+    text: `🚨 ${workflow} ${runStatus}`,
     color: '#d73a49',
     blocks: [
-      headerBlock(`🚨 ${workflow} failed`),
+      headerBlock(`🚨 ${workflow} ${runStatus}`),
       fieldsBlock(fields),
       contextBlock(
         '<https://github.com/example-owner/example-repo/actions/runs/42|View run>',
@@ -146,6 +147,11 @@ const observeIneligibleRun = <
   failedStepCalls: TFailedStepCalls,
   cancelledRunCalls: TCancelledRunCalls,
 ) => ({ result, pullRequestCalls, failedStepCalls, cancelledRunCalls })
+
+const observeNotificationAndCaptures = <TNotification, TCalls>(
+  notification: TNotification,
+  captureCalls: TCalls,
+) => ({ notification, captureCalls })
 
 describe('buildWorkflowRunNotification', () => {
   it('links the merged PR title on a push run when one is found', async () => {
@@ -390,6 +396,64 @@ example-owner/example-repo の main で CI がキャンセルしている。
       repo: 'example-owner/example-repo',
       workflow: 'CI',
       url: 'https://github.com/example-owner/example-repo/actions/runs/42',
+    })
+  })
+
+  it('still notifies for cancelled runs when the GitHub lookup fails', async () => {
+    const lookupError = new GitHubApiError('boom', undefined)
+    const deps = createDeps({ cancelledRun: errAsync(lookupError) })
+
+    const result = await buildWorkflowRunNotification(
+      baseInput({ conclusion: 'cancelled' }),
+      deps,
+    )
+
+    expect(
+      observeNotificationAndCaptures(
+        result._unsafeUnwrap(),
+        vi.mocked(captureWithFingerprint).mock.calls,
+      ),
+    ).toEqual({
+      notification: expectedNotification(
+        'CI',
+        'example-owner/example-repo: CI がキャンセル',
+        [
+          ['Repository', 'example-owner/example-repo'],
+          ['起点の PR', 'fix: something'],
+          ['失敗箇所', '不明'],
+          ['トリガー', 'push'],
+        ],
+        `## なぜやるか
+
+example-owner/example-repo の main で CI がキャンセルしている。
+
+- 起点の PR: fix: something
+- トリガー: push
+
+## やること
+
+停止箇所を確認する。
+
+- 失敗箇所: 不明
+- Run: https://github.com/example-owner/example-repo/actions/runs/42
+
+## 完了条件
+
+- [ ] main の CI が成功する`,
+        'cancelled',
+      ),
+      captureCalls: [
+        [
+          lookupError,
+          'webhook-hub.github-api-lookup-failed',
+          {
+            extras: {
+              repo: 'example-owner/example-repo',
+              run_id: 42,
+            },
+          },
+        ],
+      ],
     })
   })
 

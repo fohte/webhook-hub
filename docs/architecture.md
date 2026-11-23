@@ -80,7 +80,7 @@ Header: `X-Tq-Signature-256` in `sha256=<hex>` form. The signature is an HMAC-SH
 A new Slack message is posted only when **all** of the following are true:
 
 - `action === "completed"`
-- `workflow_run.conclusion === "failure"`
+- `workflow_run.conclusion === "failure"` or `"cancelled"`
 - `workflow_run.head_repository.full_name === repository.full_name` — excludes runs originating from forks, whose `head_branch` can collide with the upstream default branch name.
 - Either `workflow_run.head_branch === repository.default_branch` or a `GITHUB_CI_ALERT_RULES` entry matches the run.
 
@@ -88,21 +88,21 @@ Each CI alert rule requires `repo` and `branch` glob strings and may include an 
 
 The message is posted as a Slack attachment with a red border, containing Block Kit blocks:
 
-1. **header** — `🚨 {workflow name} failed`
+1. **header** — `🚨 {workflow name} failed` or `cancelled`
 2. **section** — four fields:
 
    | Field      | Content                                                                                                                                |
    | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
    | Repository | `{repo}`                                                                                                                               |
    | 起点の PR  | `#{PR number} {PR title}` linked to the merged PR, or the commit message's first line when no PR is found for `push`; `なし` otherwise |
-   | 失敗箇所   | `` `{job name}` › `{step name}` `` for the first failed job/step, or `不明` when unavailable                                           |
+   | 失敗箇所   | `` `{job name}` › `{step name}` `` for the first failed or cancelled job/step, or `不明` when unavailable                              |
    | トリガー   | `push`, `定期実行` for `schedule`, `` `@{actor}` が手動実行 `` for `workflow_dispatch`, or `` `{event}` 起因 `` for other triggers     |
 
 3. **context** — `<run url|View run>`
 
 The message is posted with a custom bot identity (username `GitHub CI`, GitHub Actions' avatar), requiring the `chat:write.customize` Slack scope.
 
-The PR and failed-step lookups use the GitHub REST API via octo-sts. A failed PR lookup on `push` falls back to the commit message's first line, and an unavailable failed step displays `不明`; the notification still posts in either case.
+The PR and step lookups use the GitHub REST API via octo-sts. A failed PR lookup on `push` falls back to the commit message's first line, and an unavailable failed or cancelled step displays `不明`; the notification still posts in either case. Cancelled runs are excluded when the jobs list is empty or a job annotation starts with `Canceling since a higher priority waiting request`, which identifies runs replaced by a concurrency request.
 
 A successful run on the default branch or a configured branch folds unresolved failure alerts for the same repository, workflow, and branch. Configured branch matching ignores `actor`, so a human push can resolve an alert created by a bot push. It only folds alerts from runs whose run ID is less than or equal to the successful run, so a delayed success cannot fold a newer failure. A later failure posts a new alert and leaves earlier folded alerts folded. Slack history lookup is limited to the latest 400 channel messages.
 

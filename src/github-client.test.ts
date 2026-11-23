@@ -28,6 +28,16 @@ const observeCancelledRun = (result: unknown, urls: string[]) => ({
   urls,
 })
 
+const observeCancellationPagination = (result: unknown, urls: string[]) => ({
+  result,
+  jobPages: urls.filter((url) => url.includes('/jobs?')),
+  lateJobAnnotationCalls: urls.filter((url) =>
+    url.includes('/check-runs/101/annotations'),
+  ),
+  annotationRequestCount: urls.filter((url) => url.includes('/check-runs/'))
+    .length,
+})
+
 describe('createGitHubClient', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -230,8 +240,8 @@ describe('createGitHubClient', () => {
       const client = createGitHubClient(createTokenCache())
 
       const result = await client.findCancelledWorkflowRun(
-        'fohte',
-        'example',
+        'example-owner',
+        'example-repo',
         42,
       )
 
@@ -246,8 +256,8 @@ describe('createGitHubClient', () => {
           step: { job: 'deploy', step: 'Apply changes' },
         },
         urls: [
-          'https://api.github.com/repos/fohte/example/actions/runs/42/jobs?per_page=100',
-          'https://api.github.com/repos/fohte/example/check-runs/123/annotations?per_page=100',
+          'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
+          'https://api.github.com/repos/example-owner/example-repo/check-runs/123/annotations?per_page=100',
         ],
       })
     })
@@ -258,8 +268,8 @@ describe('createGitHubClient', () => {
       const client = createGitHubClient(createTokenCache())
 
       const result = await client.findCancelledWorkflowRun(
-        'fohte',
-        'example',
+        'example-owner',
+        'example-repo',
         42,
       )
 
@@ -271,8 +281,71 @@ describe('createGitHubClient', () => {
       ).toEqual({
         result: { type: 'superseded' },
         urls: [
-          'https://api.github.com/repos/fohte/example/actions/runs/42/jobs?per_page=100',
+          'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
         ],
+      })
+    })
+
+    it('finds concurrency cancellations after the first jobs page', async () => {
+      const firstPageJobs = Array.from({ length: 100 }, (_, index) => ({
+        id: index + 1,
+        name: `job-${String(index + 1)}`,
+        steps: [],
+      }))
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/jobs?')) {
+          return Promise.resolve(
+            jsonResponse(
+              url.endsWith('page=1')
+                ? { jobs: firstPageJobs }
+                : {
+                    jobs: [
+                      {
+                        id: 101,
+                        name: 'job-101',
+                        steps: [{ name: 'Build', conclusion: 'cancelled' }],
+                      },
+                    ],
+                  },
+            ),
+          )
+        }
+
+        return Promise.resolve(
+          jsonResponse(
+            url.includes('/check-runs/101/annotations')
+              ? [
+                  {
+                    message:
+                      'Canceling since a higher priority waiting request was received',
+                  },
+                ]
+              : [],
+          ),
+        )
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const client = createGitHubClient(createTokenCache())
+
+      const result = await client.findCancelledWorkflowRun(
+        'example-owner',
+        'example-repo',
+        42,
+      )
+      const urls = fetchMock.mock.calls.map(([url]) => String(url))
+
+      expect(
+        observeCancellationPagination(result._unsafeUnwrap(), urls),
+      ).toEqual({
+        result: { type: 'superseded' },
+        jobPages: [
+          'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
+          'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=2',
+        ],
+        lateJobAnnotationCalls: [
+          'https://api.github.com/repos/example-owner/example-repo/check-runs/101/annotations?per_page=100',
+        ],
+        annotationRequestCount: 101,
       })
     })
 
@@ -310,8 +383,8 @@ describe('createGitHubClient', () => {
       const client = createGitHubClient(createTokenCache())
 
       const result = await client.findCancelledWorkflowRun(
-        'fohte',
-        'example',
+        'example-owner',
+        'example-repo',
         42,
       )
 
@@ -323,9 +396,9 @@ describe('createGitHubClient', () => {
       ).toEqual({
         result: { type: 'superseded' },
         urls: [
-          'https://api.github.com/repos/fohte/example/actions/runs/42/jobs?per_page=100',
-          'https://api.github.com/repos/fohte/example/check-runs/123/annotations?per_page=100',
-          'https://api.github.com/repos/fohte/example/check-runs/124/annotations?per_page=100',
+          'https://api.github.com/repos/example-owner/example-repo/actions/runs/42/jobs?per_page=100&page=1',
+          'https://api.github.com/repos/example-owner/example-repo/check-runs/123/annotations?per_page=100',
+          'https://api.github.com/repos/example-owner/example-repo/check-runs/124/annotations?per_page=100',
         ],
       })
     })

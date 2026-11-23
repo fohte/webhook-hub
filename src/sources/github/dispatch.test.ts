@@ -666,7 +666,14 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
       ),
       {
         name: 'workflow_run',
-        payload: workflowRunPayload({ conclusion: 'cancelled' }),
+        payload: workflowRunPayload({
+          conclusion: 'cancelled',
+          repo: 'example-owner/example-repo',
+          repoOwner: 'example-owner',
+          repoName: 'example-repo',
+          runUrl:
+            'https://github.com/example-owner/example-repo/actions/runs/1',
+        }),
       },
     )
 
@@ -681,7 +688,7 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
       outcome: 'notified',
       taskCalls: 1,
       slackPosts: 1,
-      cancelledRunCalls: [['fohte', 'example', 1]],
+      cancelledRunCalls: [['example-owner', 'example-repo', 1]],
     })
   })
 
@@ -701,7 +708,14 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
       ),
       {
         name: 'workflow_run',
-        payload: workflowRunPayload({ conclusion: 'cancelled' }),
+        payload: workflowRunPayload({
+          conclusion: 'cancelled',
+          repo: 'example-owner/example-repo',
+          repoOwner: 'example-owner',
+          repoName: 'example-repo',
+          runUrl:
+            'https://github.com/example-owner/example-repo/actions/runs/1',
+        }),
       },
     )
 
@@ -716,7 +730,7 @@ sample-org/sample-app の generated-sync/path-target で CI が失敗してい�
       outcome: 'filtered',
       taskCalls: 0,
       slackPosts: 0,
-      cancelledRunCalls: [['fohte', 'example', 1]],
+      cancelledRunCalls: [['example-owner', 'example-repo', 1]],
     })
   })
 
