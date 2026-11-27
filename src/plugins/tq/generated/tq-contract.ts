@@ -18,6 +18,7 @@ export const CreateTaskRequest = z
     context: z.enum(['work', 'personal']).optional(),
     priority: z.number().int().gte(-1).lte(2).nullish(),
     labels: z.array(z.string().min(1)).optional(),
+    fieldValues: z.record(z.string().nullable()).optional(),
     recurrenceRule: z
       .object({
         type: z.enum(['daily', 'weekly', 'monthly', 'custom']),
@@ -51,6 +52,26 @@ export const CreateTaskResponse = z
     context: z.enum(['work', 'personal']),
     priority: z.number().int().gte(-1).lte(2).nullable(),
     labels: z.array(z.string()),
+    fieldValues: z.array(
+      z
+        .object({
+          fieldId: z
+            .string()
+            .regex(
+              /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+            )
+            .uuid(),
+          fieldName: z.string(),
+          optionId: z
+            .string()
+            .regex(
+              /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+            )
+            .uuid(),
+          optionName: z.string(),
+        })
+        .passthrough(),
+    ),
     startDate: z.string().nullable(),
     dueDate: z.string().nullable(),
     remindAt: z
@@ -278,6 +299,26 @@ export const GithubLinkLookupTaskResponse = z
     context: z.enum(['work', 'personal']),
     priority: z.number().int().gte(-1).lte(2).nullable(),
     labels: z.array(z.string()),
+    fieldValues: z.array(
+      z
+        .object({
+          fieldId: z
+            .string()
+            .regex(
+              /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+            )
+            .uuid(),
+          fieldName: z.string(),
+          optionId: z
+            .string()
+            .regex(
+              /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+            )
+            .uuid(),
+          optionName: z.string(),
+        })
+        .passthrough(),
+    ),
     startDate: z.string().nullable(),
     dueDate: z.string().nullable(),
     remindAt: z
